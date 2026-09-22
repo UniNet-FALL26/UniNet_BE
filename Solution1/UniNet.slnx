@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="UniNet.API/UniNet.API.csproj" />
+  <Project Path="UniNet.BLL/UniNet.BLL.csproj" />
+  <Project Path="UniNet.DAL/UniNet.DAL.csproj" />
+  <Project Path="UniNet.Domain/UniNet.Domain.csproj" />
+</Solution>
