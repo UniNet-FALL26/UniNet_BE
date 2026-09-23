@@ -1,4 +1,4 @@
-﻿namespace UniNet.BLL
+﻿namespace UniNet.Application
 {
     public class Class1
     {

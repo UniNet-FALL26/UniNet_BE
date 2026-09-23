@@ -1,4 +1,4 @@
-﻿namespace UniNet.DAL
+﻿namespace UniNet.Infrastructure
 {
     public class Class1
     {
