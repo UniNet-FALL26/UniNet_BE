@@ -51,6 +51,8 @@ app.UseHttpsRedirection();
 app.UseCors("MobileWeb");
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapGet("/", () => Results.Ok(new { service = "UniNet API", status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 app.Run();
 
