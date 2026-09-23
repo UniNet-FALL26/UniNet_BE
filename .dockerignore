@@ -1,0 +1,10 @@
+.git/
+.vs/
+.vscode/
+**/bin/
+**/obj/
+UniNet.Tests/
+docs/
+*.md
+*.log
+.env*
