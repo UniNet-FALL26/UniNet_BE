@@ -14,6 +14,7 @@ if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("J
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
+builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
