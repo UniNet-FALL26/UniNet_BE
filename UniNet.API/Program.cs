@@ -15,6 +15,7 @@ builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PortfolioService>();
+builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
@@ -35,6 +36,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 var app = builder.Build();
+var seedFlag = Array.FindIndex(args, a => a == "--seed-profile-email" || a == "--inspect-profile-email");
+if (seedFlag >= 0)
+{
+    if (seedFlag + 1 >= args.Length) throw new InvalidOperationException("A target email is required.");
+    using var scope = app.Services.CreateScope();
+    var seed = scope.ServiceProvider.GetRequiredService<ProfileDevelopmentSeed>();
+    var result = args[seedFlag] == "--seed-profile-email" ? await seed.Run(args[seedFlag + 1], default) : await seed.Inspect(args[seedFlag + 1], default);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result));
+    return;
+}
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
