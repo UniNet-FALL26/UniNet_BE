@@ -1,3 +1,5 @@
+using UniNet.Domain.Entities;
+
 namespace UniNet.Domain;
 
 public sealed class UserProfile
@@ -24,5 +26,9 @@ public sealed class UserProfile
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<UserVerification> Verifications { get; set; } = [];
+    public List<ProjectMember> Members { get; set; }= [];
+    public List<ProjectInvitation> SentInvitations { get; set; } = [];
+    public List<ProjectInvitation> ReceivedInvitations { get; set; } = [];
+    public List<ProjectJoinRequest> JoinRequests { get; set; } = [];
     public CareerProfile? CareerProfile { get; set; }
 }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UniNet.Domain;
+using UniNet.Domain.Entities;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -12,7 +13,13 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<CareerProfile> CareerProfiles => Set<CareerProfile>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectRoleRequirement> ProjectRoleRequirements => Set<ProjectRoleRequirement>();
+    public DbSet<ProjectSkill> ProjectSkills => Set<ProjectSkill>();
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
+    public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
+    public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Account>(e =>
@@ -81,6 +88,361 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => x.AccountId); e.HasIndex(x => x.ExpiresAt);
             e.Property(x => x.DeviceId).HasMaxLength(255); e.Property(x => x.DeviceName).HasMaxLength(255);
             e.HasOne(x => x.Account).WithMany(x => x.RefreshTokens).HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<Project>(e =>
+        {
+            e.ToTable("Projects", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_Projects_MemberTarget",
+                    "\"MemberTarget\" > 0");
+
+                t.HasCheckConstraint(
+                    "CK_Projects_Status",
+                    "\"Status\" BETWEEN 0 AND 5");
+
+                t.HasCheckConstraint(
+                    "CK_Projects_RecruitmentStatus",
+                    "\"RecruitmentStatus\" BETWEEN 0 AND 3");
+            });
+
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Title)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            e.Property(x => x.ProjectField)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            e.Property(x => x.Description)
+                .HasColumnType("text")
+                .IsRequired();
+
+            e.Property(x => x.MemberTarget)
+                .IsRequired();
+
+            e.Property(x => x.RecruitmentDeadline)
+                .IsRequired();
+
+            e.Property(x => x.ExpectedOutput);
+
+           
+
+            e.Property(x => x.Status)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.RecruitmentStatus)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            // Creator / Leader
+            e.HasOne(x => x.Creator)
+                .WithMany()
+                .HasForeignKey(x => x.CreatorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Indexes
+            e.HasIndex(x => x.CreatorId);
+
+            e.HasIndex(x => new
+            {
+                x.Status,
+                x.RecruitmentStatus
+            });
+
+            e.HasIndex(x => x.ProjectField);
+
+            e.HasIndex(x => x.RecruitmentDeadline);
+        });
+        model.Entity<ProjectRoleRequirement>(e =>
+        {
+            e.ToTable("ProjectRoleRequirements", t=>
+            {
+                t.HasCheckConstraint(
+                    "CK_ProjectRoleRequirements_Quantity",
+                    "\"Quantity\" > 0");
+            });
+
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Role)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            e.Property(x => x.Quantity)
+                .IsRequired();
+
+            e.Property(x => x.Requirements)
+                .HasColumnType("text")
+                .IsRequired();
+
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.RoleRequirements)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.ProjectId);
+        });
+        model.Entity<ProjectSkill>(e =>
+        {
+            e.ToTable("ProjectSkills");
+
+            e.HasKey(x => new { x.ProjectId, x.SkillId });
+
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.ProjectSkills)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.Skill)
+                .WithMany(x => x.ProjectSkills)
+                .HasForeignKey(x => x.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<ProjectMember>(e =>
+        {
+            e.ToTable("ProjectMembers", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_ProjectMembers_Status",
+                    "\"Status\" BETWEEN 0 AND 2");
+            });
+
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Role)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            e.Property(x => x.Status)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.JoinedAt)
+                .IsRequired();
+
+            e.Property(x => x.LeftAt);
+
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            // Project
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.Members)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // User
+            e.HasOne(x => x.User)
+                .WithMany(x => x.Members)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Unique(ProjectId, UserId)
+            e.HasIndex(x => new
+            {
+                x.ProjectId,
+                x.UserId
+            }).IsUnique();
+
+            e.HasIndex(x => new
+            {
+                x.ProjectId,
+                x.Status
+            });
+
+            e.HasIndex(x => new
+            {
+                x.UserId,
+                x.Status
+            });
+        });
+        model.Entity<ProjectJoinRequest>(e =>
+        {
+            e.ToTable("ProjectJoinRequests", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_ProjectJoinRequests_Status",
+                    "\"Status\" BETWEEN 0 AND 3");
+            });
+
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Role)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            e.Property(x => x.Message)
+                .HasColumnType("text");
+
+            e.Property(x => x.Status)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            // Project
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.JoinRequests)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // User
+            e.HasOne(x => x.User)
+                .WithMany(x => x.JoinRequests)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new
+            {
+                x.ProjectId,
+                x.Status
+            });
+
+            e.HasIndex(x => new
+            {
+                x.UserId,
+                x.Status
+            });
+        });
+        model.Entity<ProjectInvitation>(e =>
+        {
+            e.ToTable("ProjectInvitations", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_ProjectInvitations_Status",
+                    "\"Status\" BETWEEN 0 AND 4");
+            });
+
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Role)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            e.Property(x => x.Message)
+                .HasColumnType("text");
+
+            e.Property(x => x.Status)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            // Project
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.Invitations)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Person who sends the invitation
+            e.HasOne(x => x.Inviter)
+                .WithMany(x => x.SentInvitations)
+                .HasForeignKey(x => x.InviterId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Person who receives the invitation
+            e.HasOne(x => x.Invitee)
+                .WithMany(x => x.ReceivedInvitations)
+                .HasForeignKey(x => x.InviteeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new
+            {
+                x.ProjectId,
+                x.Status
+            });
+
+            e.HasIndex(x => new
+            {
+                x.InviteeId,
+                x.Status
+            });
+        });
+        model.Entity<ProjectModeration>(e =>
+        {
+            e.ToTable("ProjectModerations", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_Status",
+                    "\"Status\" BETWEEN 0 AND 2");
+
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_ContentResult",
+                    "\"ContentResult\" BETWEEN 0 AND 2");
+
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_LinkResult",
+                    "\"LinkResult\" BETWEEN 0 AND 2");
+            });
+
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Status)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.ContentResult)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.LinkResult)
+                .HasConversion<short>()
+                .IsRequired();
+
+            e.Property(x => x.ViolationReason)
+                .HasColumnType("text");
+
+            e.Property(x => x.ResultJson)
+                .HasColumnType("jsonb");
+
+            e.Property(x => x.EngineVersion)
+                .HasMaxLength(100);
+
+            e.Property(x => x.CheckedAt);
+
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.Moderations)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => new
+            {
+                x.ProjectId,
+                x.CreatedAt
+            });
         });
     }
 }
