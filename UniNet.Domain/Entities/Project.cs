@@ -18,6 +18,7 @@ namespace UniNet.Domain.Entities
         public int MemberTarget { get; set; }
         public DateTimeOffset RecruitmentDeadline { get; set; } =DateTimeOffset.UtcNow;
         public DateTimeOffset? ExpectedOutput { get; set; } = DateTimeOffset.UtcNow;
+        public ProjectVisibility Visibility { get; set; }
         public ProjectStatus Status { get; set; } 
         public RecruitmentStatus RecruitmentStatus { get; set; }
         public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -35,5 +36,6 @@ namespace UniNet.Domain.Entities
         public List<ProjectInvitation> Invitations { get; set; } = [];
 
         public List<ProjectModeration> Moderations { get; set; } = [];
+        public List<ProjectLink> Links { get; set; } = [];
     }
 }

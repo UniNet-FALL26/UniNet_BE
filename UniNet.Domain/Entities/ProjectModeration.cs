@@ -30,9 +30,14 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset CreatedAt { get; set; }
 
         public DateTimeOffset UpdatedAt { get; set; }
+        public string ContentHash { get; set; } = null!;   
+        public decimal? Confidence { get; set; }
+        public Guid? ReviewedByUserId { get; set; }        
+        public int RetryCount { get; set; }
 
         // Navigation property
 
         public Project Project { get; set; } = null!;
+        public UserProfile? ReviewedBy { get; set; }
     }
 }

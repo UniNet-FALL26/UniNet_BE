@@ -20,6 +20,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
+    public DbSet<ProjectLink> ProjectLinks => Set<ProjectLink>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Account>(e =>
@@ -99,7 +100,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
                 t.HasCheckConstraint(
                     "CK_Projects_Status",
-                    "\"Status\" BETWEEN 0 AND 5");
+                    "\"Status\" BETWEEN 0 AND 3");
+                t.HasCheckConstraint(
+                    "CK_Projects_Visibility",
+                    "\"Visibility\" BETWEEN 0 AND 1");
 
                 t.HasCheckConstraint(
                     "CK_Projects_RecruitmentStatus",
@@ -128,7 +132,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             e.Property(x => x.ExpectedOutput);
 
-           
+            e.Property(x => x.Visibility)
+                .HasConversion<short>()
+                .IsRequired();
 
             e.Property(x => x.Status)
                 .HasConversion<short>()
@@ -155,6 +161,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             e.HasIndex(x => new
             {
+                x.Visibility,
                 x.Status,
                 x.RecruitmentStatus
             });
@@ -432,16 +439,55 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             e.Property(x => x.UpdatedAt)
                 .IsRequired();
+            e.Property(x => x.ContentHash)
+                .HasMaxLength(64)          
+                .IsRequired();
+
+            e.Property(x => x.Confidence)
+                .HasPrecision(4, 3);      
+
+            e.Property(x => x.RetryCount)
+                .HasDefaultValue(0)
+                .IsRequired();
 
             e.HasOne(x => x.Project)
                 .WithMany(x => x.Moderations)
                 .HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            e.HasOne(x => x.ReviewedBy)              
+                .WithMany()
+                .HasForeignKey(x => x.ReviewedByUserId)   
+                .OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new
             {
                 x.ProjectId,
-                x.CreatedAt
+                x.CreatedAt,
+                x.ContentHash
+            });
+            model.Entity<ProjectLink>(e =>
+            {
+                e.ToTable("ProjectLinks", t =>
+                {
+                    t.HasCheckConstraint("CK_ProjectLinks_CheckResult", "\"CheckResult\" BETWEEN 0 AND 3");
+                });
+
+                e.HasKey(x => x.Id);
+
+                e.Property(x => x.Url).HasMaxLength(2000).IsRequired();
+                e.Property(x => x.NormalizedUrl).HasMaxLength(2000).IsRequired();
+                e.Property(x => x.ResolvedUrl).HasMaxLength(2000);
+
+                e.Property(x => x.CheckResult).HasConversion<short>().IsRequired();
+                e.Property(x => x.CreatedAt).IsRequired();
+
+                e.HasOne(x => x.Project)
+                    .WithMany(x => x.Links)
+                    .HasForeignKey(x => x.ProjectId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                
+                e.HasIndex(x => new { x.ProjectId, x.NormalizedUrl }).IsUnique();
             });
         });
     }

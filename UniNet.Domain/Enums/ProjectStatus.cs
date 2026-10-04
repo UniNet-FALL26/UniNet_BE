@@ -3,10 +3,8 @@
     public enum ProjectStatus : short
     {
         Pending = 0,
-        Private = 1,
-        Public = 2,
-        Active = 3,
-        Completed = 4,
-        Archived = 5
+        Active = 1,
+        Completed = 2,
+        Rejected = 3
     }
 }
