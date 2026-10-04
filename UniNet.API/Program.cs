@@ -15,6 +15,7 @@ builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PortfolioService>();
+builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
@@ -55,6 +56,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = authError.Status;
         await context.Response.WriteAsJsonAsync(new { code = authError.Code, message = authError.Message });
+        return;
+    }
+    if (error is ProjectException projectError)
+    {
+        context.Response.StatusCode = projectError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = projectError.Code, message = projectError.Message });
         return;
     }
     context.Response.StatusCode = 500;
