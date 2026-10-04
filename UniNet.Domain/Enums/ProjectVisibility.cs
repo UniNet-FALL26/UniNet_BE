@@ -6,11 +6,9 @@ using System.Threading.Tasks;
 
 namespace UniNet.Domain.Enums
 {
-    public enum ModerationCheckResult : short
+    public enum ProjectVisibility : short
     {
-        Pending = 0,
-        Passed = 1,
-        Failed = 2,
-        Error = 3
+        Private = 0,
+        Public = 1
     }
 }

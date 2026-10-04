@@ -1,6 +1,77 @@
 @UniNet.API_HostAddress = http://localhost:5239
+@StudentToken = YOUR_STUDENT_TOKEN_HERE
+@AdminToken = YOUR_ADMIN_TOKEN_HERE
 
-GET {{UniNet.API_HostAddress}}/weatherforecast/
+### === PROJECT ENDPOINTS ===
+
+### 1. Create Project (Student Only)
+POST {{UniNet.API_HostAddress}}/api/projects
+Authorization: Bearer {{StudentToken}}
+Content-Type: application/json
+
+{
+  "title": "AI-Powered Chatbot",
+  "projectField": "Artificial Intelligence",
+  "description": "Ứng dụng chatbot sử dụng AI và NLP để tương tác với người dùng",
+  "memberTarget": 5,
+  "recruitmentDeadline": "2024-12-31T23:59:59Z",
+  "expectedOutput": "2025-01-31T23:59:59Z",
+  "visibility": 1,
+  "roleRequirements": ["Backend Developer", "Frontend Developer", "UI/UX Designer"],
+  "skillIds": ["skill-id-1", "skill-id-2"],
+  "links": [
+    {
+      "title": "GitHub",
+      "url": "https://github.com/example/project",
+      "iconUrl": null
+    }
+  ]
+}
+
+### 2. Discover Public Projects (Anonymous)
+GET {{UniNet.API_HostAddress}}/api/projects?keyword=AI&field=AI&page=1&pageSize=10
 Accept: application/json
 
-###
+### 3. Discover Projects with Skill Filter
+GET {{UniNet.API_HostAddress}}/api/projects?skillIds=skill-id-1,skill-id-2&recruitmentStatus=0&page=1&pageSize=10
+Accept: application/json
+
+### 4. Get Project Details (Anonymous)
+GET {{UniNet.API_HostAddress}}/api/projects/{project-id}
+Accept: application/json
+
+### 5. Get Project Details (with Auth - shows if user is creator/member)
+GET {{UniNet.API_HostAddress}}/api/projects/{project-id}
+Authorization: Bearer {{StudentToken}}
+Accept: application/json
+
+### 6. Update Project (Creator Only)
+PUT {{UniNet.API_HostAddress}}/api/projects/{project-id}
+Authorization: Bearer {{StudentToken}}
+Content-Type: application/json
+
+{
+  "title": "AI-Powered Chatbot V2",
+  "description": "Ứng dụng chatbot được cập nhật",
+  "memberTarget": 6,
+  "visibility": 1
+}
+
+### 7. Delete Project (Creator Only)
+DELETE {{UniNet.API_HostAddress}}/api/projects/{project-id}
+Authorization: Bearer {{StudentToken}}
+
+### 8. Get User's Projects (list of created/joined projects)
+GET {{UniNet.API_HostAddress}}/api/projects/me?page=1&pageSize=10
+Authorization: Bearer {{StudentToken}}
+Accept: application/json
+
+### 9. Get Project Members
+GET {{UniNet.API_HostAddress}}/api/projects/{project-id}/members
+Accept: application/json
+
+### 10. Get Project Members with Auth
+GET {{UniNet.API_HostAddress}}/api/projects/{project-id}/members
+Authorization: Bearer {{StudentToken}}
+Accept: application/json
+
