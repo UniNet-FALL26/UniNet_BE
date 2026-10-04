@@ -127,6 +127,7 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
     public async Task<AuthResponse> Refresh(RefreshRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.RefreshToken) || request.RefreshToken.Length > 256) throw new AuthException("INVALID_REFRESH_TOKEN", "Phiên đăng nhập không hợp lệ.", 401);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var hash = Hash(request.RefreshToken);
         var token = await db.RefreshTokens.Include(x => x.Account).ThenInclude(x => x.Profile).SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
         if (token is null || token.RevokedAt is not null) throw new AuthException("INVALID_REFRESH_TOKEN", "Phiên đăng nhập không hợp lệ.", 401);
@@ -136,7 +137,9 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
         var revoked = await db.RefreshTokens.Where(x => x.Id == token.Id && x.RevokedAt == null)
             .ExecuteUpdateAsync(x => x.SetProperty(t => t.RevokedAt, revokedAt), ct);
         if (revoked != 1) throw new AuthException("INVALID_REFRESH_TOKEN", "Phiên đăng nhập không hợp lệ.", 401);
-        return await Issue(token.Account, token.DeviceId, token.DeviceName, ct);
+        var response = await Issue(token.Account, token.DeviceId, token.DeviceName, ct);
+        await transaction.CommitAsync(ct);
+        return response;
     }
     public async Task Logout(Guid accountId, string rawToken, CancellationToken ct)
     {

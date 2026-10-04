@@ -75,6 +75,25 @@ public sealed class AuthTests
         }
     }
     [Fact]
+    public async Task FailedRefreshIssuanceDoesNotConsumeTokenOrLeaveReplacement()
+    {
+        var (connection, db, auth, _) = await Setup();
+        await using (connection) await using (db)
+        {
+            var original = await auth.RegisterStudent(new("A", "rollback@example.com", "Password123", "Password123", null, null), default);
+            var invalidConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "short", ["Jwt:Issuer"] = "UniNet", ["Jwt:Audience"] = "UniNetMobile"
+            }).Build();
+            var broken = new AuthService(db, invalidConfiguration);
+            await Assert.ThrowsAnyAsync<Exception>(() => broken.Refresh(new(original.RefreshToken), default));
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.RefreshTokens.SingleAsync()).RevokedAt);
+            var refreshed = await auth.Refresh(new(original.RefreshToken), default);
+            Assert.NotEqual(original.RefreshToken, refreshed.RefreshToken);
+        }
+    }
+    [Fact]
     public async Task PartnerCannotUpdateStudentProfile()
     {
         var (connection, db, auth, profiles) = await Setup();
