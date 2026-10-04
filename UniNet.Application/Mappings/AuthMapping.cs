@@ -8,7 +8,7 @@ public static class AuthMapping
         (account.Role switch
         {
             AccountRole.Student => !string.IsNullOrWhiteSpace(p.Bio) && !string.IsNullOrWhiteSpace(p.UniversityName),
-            AccountRole.Partner => p.PartnerType.HasValue && !string.IsNullOrWhiteSpace(p.Bio),
+            AccountRole.Partner => p.PartnerType.HasValue && !string.IsNullOrWhiteSpace(p.OrganizationName) && !string.IsNullOrWhiteSpace(p.Bio),
             _ => true
         });
 
@@ -16,8 +16,8 @@ public static class AuthMapping
     {
         var p = account.Profile;
         return new(account.Id, account.Email, account.Role, account.Status, account.EmailVerified,
-            p is null ? null : new(p.Id, p.DisplayName, p.AvatarUrl, p.CoverUrl, p.Bio,
+            p is null ? null : new(p.Id, p.FullName, p.Nickname, p.OrganizationName, p.AvatarUrl, p.CoverUrl, p.Bio,
                 p.UniversityName, p.Major, p.StudentCode, p.PartnerType, p.Industry, p.Website,
-                p.ContactEmail, p.Phone, p.Address, p.TaxCode, p.IsVerified), ProfileComplete(account));
+                p.ContactEmail, p.Phone, p.Address, p.IsVerified), ProfileComplete(account));
     }
 }

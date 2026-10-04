@@ -22,6 +22,12 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static bool ValidEmail(string value) => value.Length <= 255 && Regex.IsMatch(value, @"^[^\s@]+@[^\s@]+\.[^\s@]+$");
     private static void Require(bool condition, string code, string message) { if (!condition) throw new AuthException(code, message); }
+    private static string Nickname(string? value, string fullName)
+    {
+        if (value is null) return fullName[..Math.Min(fullName.Length, 100)];
+        Require(!string.IsNullOrWhiteSpace(value) && value.Trim().Length <= 100, "INVALID_NICKNAME", "Biệt danh phải có từ 1 đến 100 ký tự.");
+        return value.Trim();
+    }
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static string NewRefreshToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     private static AuthException InvalidCredentials() => new("INVALID_CREDENTIALS", "Email hoặc mật khẩu không chính xác.", 401);
@@ -54,18 +60,20 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
         if (await db.Accounts.AnyAsync(x => x.Email == email, ct)) throw new AuthException("EMAIL_ALREADY_EXISTS", "Email này đã được sử dụng.", 409);
         var account = new Account { Email = email, Role = AccountRole.Student };
         account.PasswordHash = hasher.HashPassword(account, request.Password);
-        await SaveRegistration(account, new UserProfile { DisplayName = request.FullName.Trim(), UniversityName = Optional(request.UniversityName), Major = Optional(request.Major) }, ct);
+        await SaveRegistration(account, new UserProfile { FullName = request.FullName.Trim(), Nickname = Nickname(request.Nickname, request.FullName.Trim()), UniversityName = Optional(request.UniversityName), Major = Optional(request.Major) }, ct);
         return await Issue(account, null, null, ct);
     }
     public async Task<AuthResponse> RegisterPartner(RegisterPartnerRequest request, CancellationToken ct)
     {
         var email = Email(request.Email);
-        ValidateCredentials(email, request.Password, request.ConfirmPassword, request.DisplayName);
+        ValidateCredentials(email, request.Password, request.ConfirmPassword, request.FullName ?? "");
+        Require(!string.IsNullOrWhiteSpace(request.OrganizationName) && request.OrganizationName.Trim().Length <= 255, "INVALID_ORGANIZATION_NAME", "Tên tổ chức phải có từ 1 đến 255 ký tự.");
+        var nickname = Nickname(request.Nickname, request.FullName!.Trim());
         Require(request.PartnerType is { } partnerType && Enum.IsDefined(partnerType), "INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
         if (await db.Accounts.AnyAsync(x => x.Email == email, ct)) throw new AuthException("EMAIL_ALREADY_EXISTS", "Email này đã được sử dụng.", 409);
         var account = new Account { Email = email, Role = AccountRole.Partner };
         account.PasswordHash = hasher.HashPassword(account, request.Password);
-        await SaveRegistration(account, new UserProfile { DisplayName = request.DisplayName.Trim(), PartnerType = request.PartnerType }, ct);
+        await SaveRegistration(account, new UserProfile { FullName = request.FullName!.Trim(), Nickname = nickname, OrganizationName = request.OrganizationName.Trim(), PartnerType = request.PartnerType }, ct);
         return await Issue(account, null, null, ct);
     }
     public async Task<AuthResponse> Login(LoginRequest request, CancellationToken ct)
@@ -99,14 +107,14 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
                 Require(request.Role is AccountRole.Student or AccountRole.Partner, "FORBIDDEN_ROLE", "Vai trò không hợp lệ.");
                 Require(request.Role != AccountRole.Partner || request.PartnerType is null || Enum.IsDefined(request.PartnerType.Value), "INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
                 account = new Account { Email = email, GoogleId = payload.Subject, GoogleEmail = email, EmailVerified = true, Role = request.Role };
-                await SaveRegistration(account, new UserProfile { DisplayName = displayName, AvatarUrl = Optional(payload.Picture), PartnerType = request.Role == AccountRole.Partner ? request.PartnerType : null }, ct);
+                await SaveRegistration(account, new UserProfile { FullName = displayName, Nickname = Nickname(null, displayName), AvatarUrl = Optional(payload.Picture), PartnerType = request.Role == AccountRole.Partner ? request.PartnerType : null }, ct);
             }
             else
             {
                 if (account.GoogleId is not null && account.GoogleId != payload.Subject) throw new AuthException("INVALID_GOOGLE_TOKEN", "Google token không hợp lệ.", 401);
                 CheckStatus(account);
                 account.GoogleId = payload.Subject; account.GoogleEmail = email; account.EmailVerified = true;
-                if (account.Profile is null) account.Profile = new UserProfile { DisplayName = displayName };
+                if (account.Profile is null) account.Profile = new UserProfile { FullName = displayName, Nickname = Nickname(null, displayName) };
                 try { await db.SaveChangesAsync(ct); }
                 catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
                 { throw new AuthException("EMAIL_ALREADY_EXISTS", "Email này đã được sử dụng.", 409); }
