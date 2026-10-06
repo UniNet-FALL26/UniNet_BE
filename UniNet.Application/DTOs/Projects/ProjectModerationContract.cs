@@ -1,0 +1,45 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace UniNet.Application.DTOs.Projects
+{
+    public record ProjectModerationInput(
+        string Title,
+        string? Description,
+        string? ProjectField,
+        List<string> Technologies,
+        int MemberTarget,
+        string? ExpectedOutput,
+        List<RoleRequirementRequest> RoleRequirements,
+        List<string> Links
+    );
+
+    public record AiModerationResult(
+        string ContentResult,
+        string LinkResult,
+        bool IsSpam,
+        bool IsSuspicious,
+        bool IsPotentiallyDuplicate,
+        decimal Confidence,
+        string Reason,
+        List<string> Flags
+    );
+    
+
+    // ============ ROLE REQUIREMENT INPUT ============
+
+    public record ProjectRoleModerationInput(
+        string Role,
+        int Quantity,
+        string? Requirements
+    );
+    public sealed class GeminiOptions
+    {
+        public string ApiKey { get; set; } = null!;
+
+        public string Model { get; set; } = "gemini-3.5-flash-lite";
+    }
+}
