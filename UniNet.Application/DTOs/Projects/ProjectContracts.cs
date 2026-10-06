@@ -2,6 +2,13 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application;
 
+// ============ ROLE REQUIREMENT REQUEST ============
+public record RoleRequirementRequest(
+    string Role,
+    int Quantity,
+    string Requirements
+);
+
 // ============ CREATE PROJECT ============
 public record CreateProjectRequest(
     string Title,
@@ -11,9 +18,9 @@ public record CreateProjectRequest(
     DateTimeOffset RecruitmentDeadline,
     DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
-    List<string>? RoleRequirements = null,
+    List<RoleRequirementRequest>? RoleRequirements = null,
     List<Guid>? SkillIds = null
-    
+
 );
 
 
@@ -22,13 +29,9 @@ public record UpdateProjectRequest(
     string? Title = null,
     string? ProjectField = null,
     string? Description = null,
-    int? MemberTarget = null,
     DateTimeOffset? RecruitmentDeadline = null,
-    DateTimeOffset? ExpectedOutput = null,
-    ProjectVisibility? Visibility = null,
-    List<string>? RoleRequirements = null,
-    List<Guid>? SkillIds = null
-   
+    DateTimeOffset? ExpectedOutput = null
+
 );
 
 // ============ PROJECT DETAIL RESPONSE ============
@@ -64,7 +67,8 @@ public record CreatorInfo(
 public record RoleRequirementInfo(
     Guid Id,
     string RoleName,
-    int Quantity
+    int Quantity,
+    string Requirements
 );
 
 public record ProjectSkillInfo(

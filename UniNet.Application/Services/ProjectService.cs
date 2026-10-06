@@ -32,13 +32,38 @@ public sealed class ProjectService(UniNetDbContext db)
         Require(!string.IsNullOrWhiteSpace(request.Description) && request.Description.Trim().Length <= 2000,
             "INVALID_DESCRIPTION", "Mô tả dự án phải có từ 1 đến 2000 ký tự.");
 
-        Require(request.MemberTarget > 0 && request.MemberTarget <= 10,
-            "INVALID_MEMBER_TARGET", "Số lượng thành viên mục tiêu phải từ 1 đến 10.");
+        Require(request.MemberTarget >= 2 && request.MemberTarget <= 10,
+            "INVALID_MEMBER_TARGET", "Số lượng thành viên mục tiêu phải từ 2 đến 10.");
 
         Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow,
             "INVALID_DEADLINE", "Hạn tuyển thành viên phải trong tương lai.");
         Require(request.ExpectedOutput > DateTimeOffset.UtcNow,
             "INVALID_EXPECTED_OUTPUT", "Thời gian hoàn thành dự kiến phải trong tương lai.");
+
+        // Validate role requirements total quantity equals (MemberTarget - 1)
+        if (request.RoleRequirements?.Count > 0)
+        {
+            int totalQuantity = request.RoleRequirements.Sum(r => r.Quantity);
+            int expectedQuantity = request.MemberTarget - 1;
+
+            Require(totalQuantity == expectedQuantity,
+                "INVALID_ROLE_REQUIREMENTS_TOTAL",
+                $"Tổng số lượng tuyển phải bằng {expectedQuantity} (memberTarget - 1 = {request.MemberTarget} - 1).");
+
+            // Validate each role requirement
+            foreach (var roleReq in request.RoleRequirements)
+            {
+                Require(!string.IsNullOrWhiteSpace(roleReq.Role) && roleReq.Role.Trim().Length <= 100,
+                    "INVALID_ROLE_NAME", "Tên vai trò phải có từ 1 đến 100 ký tự.");
+
+                Require(roleReq.Quantity > 0,
+                    "INVALID_ROLE_QUANTITY", "Số lượng tuyển cho mỗi vai trò phải lớn hơn 0.");
+
+                Require(!string.IsNullOrWhiteSpace(roleReq.Requirements),
+                    "INVALID_ROLE_REQUIREMENTS", "Yêu cầu cho vai trò không được để trống.");
+            }
+        }
+
         // Get user profile
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
         Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
@@ -63,15 +88,15 @@ public sealed class ProjectService(UniNetDbContext db)
         // Add role requirements
         if (request.RoleRequirements?.Count > 0)
         {
-            foreach (var role in request.RoleRequirements.Where(r => !string.IsNullOrWhiteSpace(r)))
+            foreach (var roleReq in request.RoleRequirements)
             {
                 project.RoleRequirements.Add(new ProjectRoleRequirement
                 {
                     Id = Guid.NewGuid(),
                     ProjectId = project.Id,
-                    Role = role.Trim(),
-                    Quantity = 1,
-                    Requirements = "",
+                    Role = roleReq.Role.Trim(),
+                    Quantity = roleReq.Quantity,
+                    Requirements = roleReq.Requirements.Trim(),
                     CreatedAt = DateTimeOffset.UtcNow,
                     UpdatedAt = DateTimeOffset.UtcNow
                 });
@@ -100,7 +125,7 @@ public sealed class ProjectService(UniNetDbContext db)
             .Include(p => p.Creator)
             .Include(p => p.RoleRequirements)
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
-            .Include(p => p.Links)
+         
             .Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
@@ -116,7 +141,6 @@ public sealed class ProjectService(UniNetDbContext db)
             .Include(p => p.Creator)
             .Include(p => p.RoleRequirements)
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
-            .Include(p => p.Links)
             .Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
@@ -126,6 +150,10 @@ public sealed class ProjectService(UniNetDbContext db)
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
         Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
         Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Chỉ người tạo dự án mới có thể cập nhật.", 403);
+
+        // Check project state: can only update when ProjectStatus = Active AND RecruitmentStatus = Open
+        Require(project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Open,
+            "INVALID_PROJECT_STATE", "Chỉ có thể cập nhật dự án khi trạng thái là Active và RecruitmentStatus là Open.", 400);
 
         // Update fields
         if (!string.IsNullOrWhiteSpace(request.Title))
@@ -146,12 +174,6 @@ public sealed class ProjectService(UniNetDbContext db)
             project.Description = request.Description.Trim();
         }
 
-        if (request.MemberTarget.HasValue)
-        {
-            Require(request.MemberTarget > 0 && request.MemberTarget <= 10, "INVALID_MEMBER_TARGET", "Số lượng thành viên mục tiêu phải từ 1 đến 10.");
-            project.MemberTarget = request.MemberTarget.Value;
-        }
-
         if (request.RecruitmentDeadline.HasValue)
         {
             Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow, "INVALID_DEADLINE", "Hạn tuyển thành viên phải trong tương lai.");
@@ -163,43 +185,6 @@ public sealed class ProjectService(UniNetDbContext db)
             Require(request.ExpectedOutput > DateTimeOffset.UtcNow, "INVALID_EXPECTED_OUTPUT", "Thời gian hoàn thành dự kiến phải trong tương lai.");
             project.ExpectedOutput = request.ExpectedOutput;
         }
-
-        if (request.Visibility.HasValue)
-        {
-            project.Visibility = request.Visibility.Value;
-        }
-
-        // Update role requirements if provided
-        if (request.RoleRequirements != null)
-        {
-            db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
-            foreach (var role in request.RoleRequirements.Where(r => !string.IsNullOrWhiteSpace(r)))
-            {
-                project.RoleRequirements.Add(new ProjectRoleRequirement
-                {
-                    Id = Guid.NewGuid(),
-                    ProjectId = project.Id,
-                    Role = role.Trim(),
-                    Quantity = 1,
-                    Requirements = "",
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                });
-            }
-        }
-
-        // Update skills if provided
-        if (request.SkillIds != null)
-        {
-            db.ProjectSkills.RemoveRange(project.ProjectSkills);
-            var skills = await db.Skills.Where(s => request.SkillIds.Contains(s.Id) && s.IsActive).ToListAsync(cancellationToken: ct);
-            foreach (var skill in skills)
-            {
-                project.ProjectSkills.Add(new ProjectSkill { ProjectId = project.Id, SkillId = skill.Id });
-            }
-        }
-
-       
 
         project.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -247,7 +232,6 @@ public sealed class ProjectService(UniNetDbContext db)
         // Delete related data
         db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
         db.ProjectSkills.RemoveRange(project.ProjectSkills);
-        db.ProjectLinks.RemoveRange(project.Links);
         db.ProjectMembers.RemoveRange(project.Members);
         db.Projects.Remove(project);
 
@@ -406,7 +390,7 @@ public sealed class ProjectService(UniNetDbContext db)
             .ToList();
 
         var roles = project.RoleRequirements
-            .Select(r => new RoleRequirementInfo(r.Id, r.Role, r.Quantity))
+            .Select(r => new RoleRequirementInfo(r.Id, r.Role, r.Quantity, r.Requirements))
             .ToList();
 
       

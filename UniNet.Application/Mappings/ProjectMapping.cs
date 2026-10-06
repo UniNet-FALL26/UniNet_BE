@@ -25,12 +25,13 @@ public static class ProjectMapping
             .ToList();
 
         var roles = project.RoleRequirements
-            .Select(r => new RoleRequirementInfo(r.Id, r.Role, r.Quantity))
+            .Select(r => new RoleRequirementInfo(r.Id, r.Role, r.Quantity, r.Requirements))
             .ToList();
 
-        
 
-        return new(
+
+        return new(  
+
             project.Id,
             project.Title,
             project.ProjectField,

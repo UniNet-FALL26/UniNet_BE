@@ -20,7 +20,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
-    public DbSet<ProjectLink> ProjectLinks => Set<ProjectLink>();
+
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Account>(e =>
@@ -407,14 +407,29 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_LinkResult",
                     "\"LinkResult\" BETWEEN 0 AND 2");
+
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_Confidence",
+                    "\"Confidence\" IS NULL OR (\"Confidence\" >= 0 AND \"Confidence\" <= 1)");
+
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_AttemptNumber",
+                    "\"AttemptNumber\" > 0");
             });
 
+            // Primary Key
             e.HasKey(x => x.Id);
 
+            // Attempt number
+            e.Property(x => x.AttemptNumber)
+                .IsRequired();
+
+            // Status
             e.Property(x => x.Status)
                 .HasConversion<short>()
                 .IsRequired();
 
+            // AI screening results
             e.Property(x => x.ContentResult)
                 .HasConversion<short>()
                 .IsRequired();
@@ -423,71 +438,73 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasConversion<short>()
                 .IsRequired();
 
+            // AI confidence: 0.000 - 1.000
+            e.Property(x => x.Confidence)
+                .HasPrecision(4, 3);
+
+            // AI violation reason
             e.Property(x => x.ViolationReason)
                 .HasColumnType("text");
 
+            // Raw AI response
             e.Property(x => x.ResultJson)
                 .HasColumnType("jsonb");
 
+            // AI engine/model version
             e.Property(x => x.EngineVersion)
                 .HasMaxLength(100);
 
+            // Hash of project content at moderation time
+            e.Property(x => x.ContentHash)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            // AI processing timestamp
             e.Property(x => x.CheckedAt);
 
+            // AI retry count
+            e.Property(x => x.RetryCount)
+                .HasDefaultValue(0)
+                .IsRequired();
+
+            // Human Moderator review
+            e.Property(x => x.ReviewNote)
+                .HasColumnType("text");
+
+            e.Property(x => x.ReviewAt);
+
+            // Audit timestamps
             e.Property(x => x.CreatedAt)
                 .IsRequired();
 
             e.Property(x => x.UpdatedAt)
                 .IsRequired();
-            e.Property(x => x.ContentHash)
-                .HasMaxLength(64)          
-                .IsRequired();
 
-            e.Property(x => x.Confidence)
-                .HasPrecision(4, 3);      
-
-            e.Property(x => x.RetryCount)
-                .HasDefaultValue(0)
-                .IsRequired();
-
+            // Project 1 : N ProjectModeration
             e.HasOne(x => x.Project)
                 .WithMany(x => x.Moderations)
                 .HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            e.HasOne(x => x.ReviewedBy)              
+            // Moderator/UserProfile 1 : N ProjectModeration
+            e.HasOne(x => x.ReviewedBy)
                 .WithMany()
-                .HasForeignKey(x => x.ReviewedByUserId)   
+                .HasForeignKey(x => x.ReviewedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Each project has unique moderation attempt numbers
             e.HasIndex(x => new
             {
                 x.ProjectId,
-                x.CreatedAt,
-                x.ContentHash
-            });
-            model.Entity<ProjectLink>(e =>
+                x.AttemptNumber
+            })
+            .IsUnique();
+
+            // Useful for finding moderation history / latest attempt
+            e.HasIndex(x => new
             {
-                e.ToTable("ProjectLinks", t =>
-                {
-                    t.HasCheckConstraint("CK_ProjectLinks_CheckResult", "\"CheckResult\" BETWEEN 0 AND 3");
-                });
-
-                e.HasKey(x => x.Id);
-
-                e.Property(x => x.Url).HasMaxLength(2000).IsRequired();
-                e.Property(x => x.NormalizedUrl).HasMaxLength(2000).IsRequired();
-                e.Property(x => x.ResolvedUrl).HasMaxLength(2000);
-
-                e.Property(x => x.CheckResult).HasConversion<short>().IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
-
-                e.HasOne(x => x.Project)
-                    .WithMany(x => x.Links)
-                    .HasForeignKey(x => x.ProjectId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                
-                e.HasIndex(x => new { x.ProjectId, x.NormalizedUrl }).IsUnique();
+                x.ProjectId,
+                x.CreatedAt
             });
         });
     }
