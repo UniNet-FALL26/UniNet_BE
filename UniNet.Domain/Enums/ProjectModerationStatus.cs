@@ -9,7 +9,10 @@ namespace UniNet.Domain.Enums
     public enum  ProjectModerationStatus : short
     {
         Pending = 0,
-        Approved = 1,
-        Rejected = 2
+        Processing = 1,
+        ReviewRequired = 2,
+        Approved = 3,
+        Rejected = 4,
+        Error = 5
     }
 }

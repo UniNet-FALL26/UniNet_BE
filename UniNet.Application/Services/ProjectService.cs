@@ -6,7 +6,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class ProjectService(UniNetDbContext db)
+public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation)
 {
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -114,8 +114,9 @@ public sealed class ProjectService(UniNetDbContext db)
         }
         db.Projects.Add(project);
         await db.SaveChangesAsync(ct);
+        await moderation.ModerateNewProjectAsync(project.Id, userId, ct);
 
-        return await MapToDetailResponseAsync(project, userId, ct);
+        return await GetProjectDetailsAsync(project.Id, userId, ct);
     }
 
     // ============ GET PROJECT DETAILS ============
@@ -151,9 +152,12 @@ public sealed class ProjectService(UniNetDbContext db)
         Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
         Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Chỉ người tạo dự án mới có thể cập nhật.", 403);
 
-        // Check project state: can only update when ProjectStatus = Active AND RecruitmentStatus = Open
-        Require(project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Open,
-            "INVALID_PROJECT_STATE", "Chỉ có thể cập nhật dự án khi trạng thái là Active và RecruitmentStatus là Open.", 400);
+        Require(project.Status is ProjectStatus.Pending or ProjectStatus.Rejected ||
+                (project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Open),
+            "INVALID_PROJECT_STATE", "Chỉ có thể cập nhật dự án Pending, Rejected hoặc Active đang tuyển thành viên.", 400);
+        Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+                (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
+            "MODERATION_IN_PROGRESS", "Không thể chỉnh sửa khi dự án đang được kiểm duyệt.", 409);
 
         // Update fields
         if (!string.IsNullOrWhiteSpace(request.Title))
@@ -186,6 +190,7 @@ public sealed class ProjectService(UniNetDbContext db)
             project.ExpectedOutput = request.ExpectedOutput;
         }
 
+        project.Status = ProjectStatus.Pending;
         project.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
@@ -230,6 +235,9 @@ public sealed class ProjectService(UniNetDbContext db)
         Require(canDelete, "CANNOT_DELETE_PROJECT", reason ?? "Không thể xóa dự án.", 400);
 
         // Delete related data
+        Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+                (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
+            "MODERATION_IN_PROGRESS", "Không thể xóa khi dự án đang được kiểm duyệt.", 409);
         db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
         db.ProjectSkills.RemoveRange(project.ProjectSkills);
         db.ProjectMembers.RemoveRange(project.Members);
@@ -276,17 +284,24 @@ public sealed class ProjectService(UniNetDbContext db)
         CancellationToken ct = default)
     {
         const int maxPageSize = 100;
-        pageSize = Math.Min(pageSize, maxPageSize);
+        pageSize = Math.Clamp(pageSize, 1, maxPageSize);
         page = Math.Max(page, 1);
+        Require(!recruitmentStatus.HasValue || Enum.IsDefined(recruitmentStatus.Value),
+            "INVALID_RECRUITMENT_STATUS", "Trạng thái tuyển thành viên không hợp lệ.");
 
         var query = db.Projects
+            .AsNoTracking()
             .Include(p => p.Creator)
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
             .Include(p => p.Members)
             .AsQueryable();
 
-        // Filter: must be Public
-        query = query.Where(p => p.Visibility == ProjectVisibility.Public);
+        // Apply every eligibility filter before counting or paginating.
+        query = query.Where(p => p.Visibility == ProjectVisibility.Public && p.Status == ProjectStatus.Active);
+        query = query.Where(p => p.Moderations
+            .OrderByDescending(m => m.AttemptNumber)
+            .Select(m => (ProjectModerationStatus?)m.Status)
+            .FirstOrDefault() == ProjectModerationStatus.Approved);
 
         // Filter: must have RecruitmentStatus = Open (default if not specified)
         var filterStatus = recruitmentStatus ?? RecruitmentStatus.Open;
@@ -295,14 +310,14 @@ public sealed class ProjectService(UniNetDbContext db)
         // Filter: keyword (search in title and description)
         if (!string.IsNullOrWhiteSpace(keyword))
         {
-            var lowerKeyword = keyword.ToLower().Trim();
+            var lowerKeyword = keyword.Trim().ToLowerInvariant();
             query = query.Where(p => p.Title.ToLower().Contains(lowerKeyword) || p.Description.ToLower().Contains(lowerKeyword));
         }
 
         // Filter: field
         if (!string.IsNullOrWhiteSpace(field))
         {
-            var lowerField = field.ToLower().Trim();
+            var lowerField = field.Trim().ToLowerInvariant();
             query = query.Where(p => p.ProjectField.ToLower().Contains(lowerField));
         }
 
@@ -316,32 +331,17 @@ public sealed class ProjectService(UniNetDbContext db)
 
         var projects = await query
             .OrderByDescending(p => p.CreatedAt)
-            .Skip((page - 1) * pageSize)
+            .ThenBy(p => p.Id)
+            .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue))
             .Take(pageSize)
             .ToListAsync(cancellationToken: ct);
 
-        // Filter: must have passed moderation (latest moderation is Approved)
-        var approvedProjectIds = new HashSet<Guid>();
-        foreach (var projectId in projects.Select(p => p.Id))
-        {
-            var latestModeration = await db.ProjectModerations
-                .Where(m => m.ProjectId == projectId)
-                .OrderByDescending(m => m.CreatedAt)
-                .FirstOrDefaultAsync(cancellationToken: ct);
-
-            if (latestModeration?.Status == ProjectModerationStatus.Approved)
-            {
-                approvedProjectIds.Add(projectId);
-            }
-        }
-
         var responses = projects
-            .Where(p => approvedProjectIds.Contains(p.Id))
             .Select(p => MapToDiscoveryResponse(p))
             .ToList();
 
-        var totalPages = (total + pageSize - 1) / pageSize;
-        return new(page, pageSize, responses.Count, totalPages, responses);
+        var totalPages = (int)(((long)total + pageSize - 1) / pageSize);
+        return new(page, pageSize, total, totalPages, responses);
     }
 
     // ============ GET PROJECT MEMBERS ============
