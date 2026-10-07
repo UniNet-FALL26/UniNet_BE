@@ -34,17 +34,17 @@ public sealed class ProfileDevelopmentSeed(UniNetDbContext db)
         c.Headline = Fill(c.Headline, "Software Developer", "career.headline");
         c.CareerObjective = Fill(c.CareerObjective, "Không ngừng học hỏi, xây dựng những sản phẩm có giá trị thực tế và phát triển theo định hướng Fullstack Developer.", "career.objective");
         string? Section<T>(string? old, T value, string field) { if (!Empty(old)) return old; changes.Add(field); return JsonSerializer.Serialize(value, Json); }
-        var skillSpecs = new (string Name, string Slug, SkillCategory Category, string Icon)[] {
-            ("ASP.NET Core", "aspnet-core", SkillCategory.Backend, "dotnet"), ("React", "react", SkillCategory.Frontend, "react"),
-            ("React Native", "react-native", SkillCategory.Mobile, "react"), ("TypeScript", "typescript", SkillCategory.Frontend, "typescript"),
-            ("PostgreSQL", "postgresql", SkillCategory.Database, "postgresql"), ("SQL Server", "sql-server", SkillCategory.Database, ""),
-            ("Firebase", "firebase", SkillCategory.Backend, "firebase"), ("Git", "git", SkillCategory.Tools, "git"),
-            ("Docker", "docker", SkillCategory.DevOps, "docker"), ("Figma", "figma", SkillCategory.Design, "figma") };
+        var skillSpecs = new (string Name, SkillCategory Category, string Icon)[] {
+            ("ASP.NET Core", SkillCategory.Backend, "dotnet"), ("React", SkillCategory.Frontend, "react"),
+            ("React Native", SkillCategory.Mobile, "react"), ("TypeScript", SkillCategory.Frontend, "typescript"),
+            ("PostgreSQL", SkillCategory.Database, "postgresql"), ("SQL Server", SkillCategory.Database, ""),
+            ("Firebase", SkillCategory.Backend, "firebase"), ("Git", SkillCategory.Tools, "git"),
+            ("Docker", SkillCategory.DevOps, "docker"), ("Figma", SkillCategory.Design, "figma") };
         if (Empty(c.SkillsJson)) {
             var refs = new List<CareerSkill>();
             foreach (var spec in skillSpecs) {
-                var skill = await db.Skills.SingleOrDefaultAsync(s => s.Slug == spec.Slug, ct) ?? await db.Skills.FirstOrDefaultAsync(s => s.Name.ToLower() == spec.Name.ToLower(), ct);
-                if (skill is null) { skill = new Skill { Name = spec.Name, Slug = spec.Slug, Category = spec.Category, IconUrl = spec.Icon.Length > 0 ? "https://cdn.simpleicons.org/" + spec.Icon : null }; db.Skills.Add(skill); changes.Add("catalog." + spec.Slug); }
+                var skill = await db.Skills.FirstOrDefaultAsync(s => s.Name.ToLower() == spec.Name.ToLower() && s.Category == spec.Category, ct);
+                if (skill is null) { skill = new Skill { Name = spec.Name, Category = spec.Category, IconUrl = spec.Icon.Length > 0 ? "https://cdn.simpleicons.org/" + spec.Icon : null }; db.Skills.Add(skill); changes.Add("catalog." + spec.Name); }
                 refs.Add(new(skill.Id, 1, 1));
             }
             c.SkillsJson = Section(c.SkillsJson, refs, "career.skills");

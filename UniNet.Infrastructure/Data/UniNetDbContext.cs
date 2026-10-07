@@ -77,10 +77,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         {
             e.ToTable("Skills", t => t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 8")); e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(100).IsRequired();
-            e.Property(x => x.Slug).HasMaxLength(100).IsRequired();
             e.Property(x => x.Category).HasConversion<short>();
-            e.HasIndex(x => x.Slug).IsUnique();
-            e.HasIndex(x => new { x.Category, x.IsActive, x.DisplayOrder });
+            e.HasIndex(x => new { x.Category, x.IsActive });
         });
         model.Entity<RefreshToken>(e =>
         {

@@ -18,6 +18,8 @@ public sealed class ProfileController(ProfileService profiles, AuthService auth,
     public Task<PortfolioResponse> Portfolio(Guid profileId, CancellationToken ct) => portfolio.Read(profileId, Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var viewer) ? viewer : null, ct);
     [HttpPut("portfolio/me"), RequestSizeLimit(524288)]
     public Task<PortfolioResponse> SavePortfolio(PortfolioContent request, CancellationToken ct) => portfolio.Save(AccountId, request, ct);
+    [HttpPut("portfolio/editor/me"), RequestSizeLimit(524288)]
+    public Task<PortfolioResponse> SaveEditor(PortfolioEditorRequest request, CancellationToken ct) => portfolio.SaveEditor(AccountId, request, ct);
     [HttpGet("skills")]
     public Task<PortfolioSkillCatalog[]> Skills(CancellationToken ct) => portfolio.Catalog(ct);
     [HttpPut("appearance/me"), RequestSizeLimit(16384)]
