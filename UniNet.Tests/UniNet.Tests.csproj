@@ -12,5 +12,6 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <ProjectReference Include="..\UniNet.Application\UniNet.Application.csproj" />
     <ProjectReference Include="..\UniNet.Infrastructure\UniNet.Infrastructure.csproj" />
+    <ProjectReference Include="..\UniNet.Api\UniNet.API.csproj" />
   </ItemGroup>
 </Project>

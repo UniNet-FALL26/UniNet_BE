@@ -4,6 +4,7 @@
 ## Get latest from `dotnet new gitignore`
 
 # dotenv files
+App_Data/profile-images/
 .env
 
 # User-specific files
