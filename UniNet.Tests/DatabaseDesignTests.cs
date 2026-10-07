@@ -10,6 +10,15 @@ namespace UniNet.Tests;
 public sealed class DatabaseDesignTests
 {
     [Fact]
+    public void SkillsUseExactlyFourCategories()
+    {
+        Assert.Equal(new[] { "Frontend", "Backend", "Design", "ToolsAndOther" }, Enum.GetNames<SkillCategory>());
+        using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_test;Username=postgres").Options);
+        var skill = db.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(Skill))!;
+        Assert.Equal("\"Category\" BETWEEN 0 AND 3", skill.GetCheckConstraints().Single().Sql);
+    }
+    [Fact]
     public void PostgreSqlModelMatchesAccountProfileDesign()
     {
         using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()

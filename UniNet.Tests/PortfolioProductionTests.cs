@@ -8,18 +8,26 @@ using Xunit;
 namespace UniNet.Tests;
 public sealed class PortfolioProductionTests
 {
+    [Fact] public async Task CatalogExposesTheFourUserFacingCategoryLabels()
+    {
+        var (connection,db,a)=await Setup(); await using var connectionScope=connection; await using var dbScope=db;
+        db.Skills.AddRange(Enumerable.Range(0,4).Select(i=>new Skill {Name="Category "+i,Category=(SkillCategory)i}));
+        await db.SaveChangesAsync();
+        var catalog=await new PortfolioService(db).Catalog(default);
+        Assert.Equal(new[]{"Frontend","Backend","Design","Tools & Other"},catalog.Select(s=>s.Category).ToArray());
+    }
     [Fact] public async Task CatalogFiltersInactiveAndUsesNameOrderWithoutRemovedFields()
     {
         var (connection,db,a)=await Setup(); await using var connectionScope=connection; await using var dbScope=db;
         var react=new Skill {Name="React",Category=SkillCategory.Frontend};
-        var docker=new Skill {Name="Docker",Category=SkillCategory.DevOps,IconUrl="https://images.example.org/docker.png"};
+        var docker=new Skill {Name="Docker",Category=SkillCategory.ToolsAndOther,IconUrl="https://images.example.org/docker.png"};
         var inactive=new Skill {Name="Archived",IsActive=false};
         db.Skills.AddRange(react,docker,inactive);await db.SaveChangesAsync();
         var service=new PortfolioService(db);var catalog=await service.Catalog(default);
         Assert.Equal(new[]{docker.Id,react.Id},catalog.Select(x=>x.Id).ToArray());
         using var json=System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(catalog));
         Assert.Equal(new[]{"Category","IconUrl","Id","Name"},json.RootElement[0].EnumerateObject().Select(x=>x.Name).Order(StringComparer.Ordinal).ToArray());
-        Assert.Equal("DevOps",catalog[0].Category);Assert.Equal(docker.IconUrl,catalog[0].IconUrl);
+        Assert.Equal("Tools & Other",catalog[0].Category);Assert.Equal(docker.IconUrl,catalog[0].IconUrl);
         await service.Save(a.Id,new(){Skills=[new(){SkillId=react.Id,Level=2}]},default);
         db.ChangeTracker.Clear();Assert.Equal(react.Id,(await service.Me(a.Id,default)).Portfolio.Skills.Single().SkillId);
     }

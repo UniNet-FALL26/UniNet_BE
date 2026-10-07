@@ -9,7 +9,7 @@ Source: UniNet_Database_Design_v2.docx, design dated 30/09/2026. Follow the fina
 - Users adds FullName (255), Nickname (100), OrganizationName (255); TaxCode moves out of the public profile into verification JSON.
 - UserVerifications preserves multiple attempts, jsonb snapshots/private document metadata, reviewer Account FK with restricted deletion, and UserId/Status index.
 - CareerProfiles has unique UserId, optional creation, all ten jsonb sections, SkillsJson/ProjectsJson GIN indexes; IsPublic defaults false in the entity. No duplicate CV model.
-- Skills keeps Id/Name/IconUrl/Category/IsActive/CreatedAt/UpdatedAt after the user's simplification. Slug, Description and DisplayOrder are removed by a later migration; grouped index is Category/IsActive. SkillsJson references skillId; it is not a relational FK. See [simplify-skill-catalog.md](simplify-skill-catalog.md).
+- Skills keeps Id/Name/IconUrl/Category/IsActive/CreatedAt/UpdatedAt after the user's simplification. Slug, Description and DisplayOrder are removed by a later migration; grouped index is Category/IsActive. Category now has four values (Frontend, Backend, Design, ToolsAndOther), with 24 template skills seeded. SkillsJson references skillId; it is not a relational FK. See [simplify-skill-catalog.md](simplify-skill-catalog.md) and [four-group-skill-catalog.md](four-group-skill-catalog.md).
 - JSON is stored as backend-controlled strings mapped to jsonb. Future write APIs must validate version/shape, skill references and authorization; no raw JSON write APIs are exposed here.
 
 ## Contracts and behavior

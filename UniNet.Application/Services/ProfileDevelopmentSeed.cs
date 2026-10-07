@@ -36,10 +36,10 @@ public sealed class ProfileDevelopmentSeed(UniNetDbContext db)
         string? Section<T>(string? old, T value, string field) { if (!Empty(old)) return old; changes.Add(field); return JsonSerializer.Serialize(value, Json); }
         var skillSpecs = new (string Name, SkillCategory Category, string Icon)[] {
             ("ASP.NET Core", SkillCategory.Backend, "dotnet"), ("React", SkillCategory.Frontend, "react"),
-            ("React Native", SkillCategory.Mobile, "react"), ("TypeScript", SkillCategory.Frontend, "typescript"),
-            ("PostgreSQL", SkillCategory.Database, "postgresql"), ("SQL Server", SkillCategory.Database, ""),
-            ("Firebase", SkillCategory.Backend, "firebase"), ("Git", SkillCategory.Tools, "git"),
-            ("Docker", SkillCategory.DevOps, "docker"), ("Figma", SkillCategory.Design, "figma") };
+            ("React Native", SkillCategory.Frontend, "react"), ("TypeScript", SkillCategory.Frontend, "typescript"),
+            ("PostgreSQL", SkillCategory.Backend, "postgresql"), ("SQL Server", SkillCategory.Backend, ""),
+            ("Firebase", SkillCategory.Backend, "firebase"), ("Git", SkillCategory.ToolsAndOther, "git"),
+            ("Docker", SkillCategory.ToolsAndOther, "docker"), ("Figma", SkillCategory.Design, "figma") };
         if (Empty(c.SkillsJson)) {
             var refs = new List<CareerSkill>();
             foreach (var spec in skillSpecs) {

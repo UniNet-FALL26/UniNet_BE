@@ -121,7 +121,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         return Map(p, true, catalog);
     }
 
-    public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.IconUrl, s.Category.ToString())).ToArrayAsync(ct);
+    public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.IconUrl, s.Category == SkillCategory.ToolsAndOther ? "Tools & Other" : s.Category.ToString())).ToArrayAsync(ct);
     private static PortfolioSkill[] ResolveSkills(string? json, PortfolioSkillCatalog[] catalog)
     {
         var items = Decode<PortfolioSkill[]>(json) ?? [];
