@@ -9,8 +9,22 @@ using UniNet.Domain.Enums;
 namespace UniNet.API.Controllers;
 
 [ApiController, Route("api/projects")]
-public sealed class ProjectsController(ProjectService projects, AuthService auth) : ControllerBase
+public sealed class ProjectsController(ProjectService projects, AuthService auth, ProjectModerationService moderation) : ControllerBase
 {
+    [Authorize(Roles = "Student"), HttpPost("{id:guid}/moderation")]
+    public async Task<IActionResult> SubmitModeration(Guid id, CancellationToken ct)
+    {
+        var result = await moderation.SubmitProjectAsync(id, AccountId, ct);
+        return Ok(result);
+    }
+
+    [Authorize, HttpGet("{id:guid}/moderation")]
+    public async Task<IActionResult> GetModeration(Guid id, CancellationToken ct)
+    {
+        var result = await moderation.GetLatestProjectModerationAsync(id, AccountId, ct);
+        return Ok(result);
+    }
+
     private Guid AccountId =>
         Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ??
                    throw new ProjectException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401));
@@ -62,10 +76,14 @@ public sealed class ProjectsController(ProjectService projects, AuthService auth
             List<Guid>? parsedSkillIds = null;
             if (!string.IsNullOrWhiteSpace(skillIds))
             {
-                parsedSkillIds = skillIds.Split(',')
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .Select(s => Guid.Parse(s.Trim()))
-                    .ToList();
+                parsedSkillIds = [];
+                foreach (var value in skillIds.Split(','))
+                {
+                    if (!Guid.TryParse(value.Trim(), out var skillId))
+                        throw new ProjectException("INVALID_SKILL_IDS", "skillIds phải là danh sách GUID phân tách bằng dấu phẩy.", 400);
+                    parsedSkillIds.Add(skillId);
+                }
+                parsedSkillIds = parsedSkillIds.Distinct().ToList();
             }
 
             var result = await projects.DiscoverPublicProjectsAsync(

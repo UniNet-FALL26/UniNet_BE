@@ -398,15 +398,15 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             {
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_Status",
-                    "\"Status\" BETWEEN 0 AND 2");
+                    "\"Status\" BETWEEN 0 AND 5");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_ContentResult",
-                    "\"ContentResult\" BETWEEN 0 AND 2");
+                    "\"ContentResult\" BETWEEN 0 AND 3");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_LinkResult",
-                    "\"LinkResult\" BETWEEN 0 AND 2");
+                    "\"LinkResult\" BETWEEN 0 AND 3");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_Confidence",

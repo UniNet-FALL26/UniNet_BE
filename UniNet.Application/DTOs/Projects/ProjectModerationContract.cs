@@ -3,9 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using UniNet.Domain.Enums;
 
 namespace UniNet.Application.DTOs.Projects
 {
+    public record ProjectModerationResponse(
+        Guid Id,
+        int AttemptNumber,
+        ProjectModerationStatus Status,
+        ModerationCheckResult ContentResult,
+        ModerationCheckResult LinkResult,
+        decimal? Confidence,
+        string? ViolationReason,
+        DateTimeOffset? CheckedAt,
+        DateTimeOffset? ReviewedAt
+    );
+
     public record ProjectModerationInput(
         string Title,
         string? Description,
