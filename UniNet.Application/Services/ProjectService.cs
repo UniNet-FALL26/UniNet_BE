@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
@@ -6,7 +7,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation)
+public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation) : IProjectService
 {
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -24,21 +25,21 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     {
         // Validate request
         Require(!string.IsNullOrWhiteSpace(request.Title) && request.Title.Trim().Length <= 255, 
-            "INVALID_TITLE", "Tên dự án phải có từ 1 đến 255 ký tự.");
+            "INVALID_TITLE", "Project title must be between 1 and 255 characters.");
 
         Require(!string.IsNullOrWhiteSpace(request.ProjectField) && request.ProjectField.Trim().Length <= 255,
-            "INVALID_FIELD", "Lĩnh vực dự án phải có từ 1 đến 255 ký tự.");
+            "INVALID_FIELD", "Project field must be between 1 and 255 characters.");
 
         Require(!string.IsNullOrWhiteSpace(request.Description) && request.Description.Trim().Length <= 2000,
-            "INVALID_DESCRIPTION", "Mô tả dự án phải có từ 1 đến 2000 ký tự.");
+            "INVALID_DESCRIPTION", "Project description must be between 1 and 2000 characters.");
 
         Require(request.MemberTarget >= 2 && request.MemberTarget <= 10,
-            "INVALID_MEMBER_TARGET", "Số lượng thành viên mục tiêu phải từ 2 đến 10.");
+            "INVALID_MEMBER_TARGET", "Project member target must be between 2 and 10.");
 
         Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow,
-            "INVALID_DEADLINE", "Hạn tuyển thành viên phải trong tương lai.");
+            "INVALID_DEADLINE", "Project recruitment deadline must be in the future.");
         Require(request.ExpectedOutput > DateTimeOffset.UtcNow,
-            "INVALID_EXPECTED_OUTPUT", "Thời gian hoàn thành dự kiến phải trong tương lai.");
+            "INVALID_EXPECTED_OUTPUT", "Project expected output must be in the future.");
 
         // Validate role requirements total quantity equals (MemberTarget - 1)
         if (request.RoleRequirements?.Count > 0)
@@ -48,25 +49,25 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
             Require(totalQuantity == expectedQuantity,
                 "INVALID_ROLE_REQUIREMENTS_TOTAL",
-                $"Tổng số lượng tuyển phải bằng {expectedQuantity} (memberTarget - 1 = {request.MemberTarget} - 1).");
+                $"Total recruitment quantity must equal {expectedQuantity} (memberTarget - 1 = {request.MemberTarget} - 1).");
 
             // Validate each role requirement
             foreach (var roleReq in request.RoleRequirements)
             {
                 Require(!string.IsNullOrWhiteSpace(roleReq.Role) && roleReq.Role.Trim().Length <= 100,
-                    "INVALID_ROLE_NAME", "Tên vai trò phải có từ 1 đến 100 ký tự.");
+                    "INVALID_ROLE_NAME", "Project role name must be between 1 and 100 characters.");
 
                 Require(roleReq.Quantity > 0,
-                    "INVALID_ROLE_QUANTITY", "Số lượng tuyển cho mỗi vai trò phải lớn hơn 0.");
+                    "INVALID_ROLE_QUANTITY", "Project role quantity must be greater than 0.");
 
                 Require(!string.IsNullOrWhiteSpace(roleReq.Requirements),
-                    "INVALID_ROLE_REQUIREMENTS", "Yêu cầu cho vai trò không được để trống.");
+                    "INVALID_ROLE_REQUIREMENTS", "Project role requirements cannot be empty.");
             }
         }
 
         // Get user profile
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
-        Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
+        Require(userProfile != null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
 
         // Create project
         var project = new Project
@@ -127,10 +128,10 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Include(p => p.RoleRequirements)
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
          
-            .Include(p => p.Members)
+            .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
-        Require(project != null, "PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
+        Require(project != null, "PROJECT_NOT_FOUND", "Project not found.", 404);
 
         return await MapToDetailResponseAsync(project, userId, ct);
     }
@@ -142,51 +143,51 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Include(p => p.Creator)
             .Include(p => p.RoleRequirements)
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
-            .Include(p => p.Members)
+            .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
-        Require(project != null, "PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
+        Require(project != null, "PROJECT_NOT_FOUND", "Project not found.", 404);
 
         // Check authorization: only creator can update
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
-        Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
-        Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Chỉ người tạo dự án mới có thể cập nhật.", 403);
+        Require(userProfile != null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
+        Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Only the project creator can update it.", 403);
 
         Require(project.Status is ProjectStatus.Pending or ProjectStatus.Rejected ||
                 (project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Open),
-            "INVALID_PROJECT_STATE", "Chỉ có thể cập nhật dự án Pending, Rejected hoặc Active đang tuyển thành viên.", 400);
+            "INVALID_PROJECT_STATE", "Only projects with Pending, Rejected, or Active (with open recruitment) status can be updated.", 400);
         Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
-            "MODERATION_IN_PROGRESS", "Không thể chỉnh sửa khi dự án đang được kiểm duyệt.", 409);
+            "MODERATION_IN_PROGRESS", "Cannot edit project while it is under moderation.", 409);
 
         // Update fields
         if (!string.IsNullOrWhiteSpace(request.Title))
         {
-            Require(request.Title.Trim().Length <= 255, "INVALID_TITLE", "Tên dự án phải có từ 1 đến 255 ký tự.");
+            Require(request.Title.Trim().Length <= 255, "INVALID_TITLE", "Project title must be between 1 and 255 characters.");
             project.Title = request.Title.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(request.ProjectField))
         {
-            Require(request.ProjectField.Trim().Length <= 255, "INVALID_FIELD", "Lĩnh vực dự án phải có từ 1 đến 255 ký tự.");
+            Require(request.ProjectField.Trim().Length <= 255, "INVALID_FIELD", "Project field must be between 1 and 255 characters.");
             project.ProjectField = request.ProjectField.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(request.Description))
         {
-            Require(request.Description.Trim().Length <= 2000, "INVALID_DESCRIPTION", "Mô tả dự án phải có từ 1 đến 2000 ký tự.");
+            Require(request.Description.Trim().Length <= 2000, "INVALID_DESCRIPTION", "Project description must be between 1 and 2000 characters.");
             project.Description = request.Description.Trim();
         }
 
         if (request.RecruitmentDeadline.HasValue)
         {
-            Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow, "INVALID_DEADLINE", "Hạn tuyển thành viên phải trong tương lai.");
-            project.RecruitmentDeadline = request.RecruitmentDeadline.Value;
+                Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow, "INVALID_DEADLINE", "Recruitment deadline must be in the future.");
+                project.RecruitmentDeadline = request.RecruitmentDeadline.Value;
         }
 
         if (request.ExpectedOutput.HasValue)
         {
-            Require(request.ExpectedOutput > DateTimeOffset.UtcNow, "INVALID_EXPECTED_OUTPUT", "Thời gian hoàn thành dự kiến phải trong tương lai.");
+            Require(request.ExpectedOutput > DateTimeOffset.UtcNow, "INVALID_EXPECTED_OUTPUT", "Expected completion time must be in the future.");
             project.ExpectedOutput = request.ExpectedOutput;
         }
 
@@ -204,12 +205,12 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
-        Require(project != null, "PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
+        Require(project != null, "PROJECT_NOT_FOUND", "Project not found.", 404);
 
         // Check authorization: only creator can delete
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
-        Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
-        Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Chỉ người tạo dự án mới có thể xóa.", 403);
+        Require(userProfile != null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
+        Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Only the project creator can delete it.", 403);
 
         // Check deletion conditions:
         // 1. Project must be Pending OR
@@ -228,16 +229,16 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         else
         {
             reason = project.Status == ProjectStatus.Pending
-                ? "Dự án không ở trạng thái có thể xóa."
-                : "Chỉ có thể xóa dự án qua hạn khi chưa có thành viên nào.";
+                ? "Project is not in a deletable state."
+                : "Only expired projects with no members can be deleted.";
         }
 
-        Require(canDelete, "CANNOT_DELETE_PROJECT", reason ?? "Không thể xóa dự án.", 400);
+        Require(canDelete, "CANNOT_DELETE_PROJECT", reason ?? "Cannot delete project.", 400);
 
         // Delete related data
         Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
-            "MODERATION_IN_PROGRESS", "Không thể xóa khi dự án đang được kiểm duyệt.", 409);
+            "MODERATION_IN_PROGRESS", "Cannot delete project while it is under moderation.", 409);
         db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
         db.ProjectSkills.RemoveRange(project.ProjectSkills);
         db.ProjectMembers.RemoveRange(project.Members);
@@ -255,7 +256,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         page = Math.Max(page, 1);
 
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
-        Require(userProfile != null, "PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
+        Require(userProfile != null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
 
         var query = db.Projects
             .Include(p => p.Creator)
@@ -277,7 +278,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     public async Task<DiscoveryProjectsResponse> DiscoverPublicProjectsAsync(
         string? keyword = null,
         string? field = null,
-        List<Guid>? skillIds = null,
+        List<string>? skillNames = null,
         RecruitmentStatus? recruitmentStatus = null,
         int page = 1,
         int pageSize = 10,
@@ -287,7 +288,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         pageSize = Math.Clamp(pageSize, 1, maxPageSize);
         page = Math.Max(page, 1);
         Require(!recruitmentStatus.HasValue || Enum.IsDefined(recruitmentStatus.Value),
-            "INVALID_RECRUITMENT_STATUS", "Trạng thái tuyển thành viên không hợp lệ.");
+            "INVALID_RECRUITMENT_STATUS", "Invalid recruitment status.");
 
         var query = db.Projects
             .AsNoTracking()
@@ -322,9 +323,11 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         }
 
         // Filter: skills
-        if (skillIds?.Count > 0)
+        var normalizedSkillNames = skillNames?.Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim().ToLowerInvariant()).Distinct().ToList();
+        if (normalizedSkillNames?.Count > 0)
         {
-            query = query.Where(p => p.ProjectSkills.Any(ps => skillIds.Contains(ps.SkillId)));
+            query = query.Where(p => p.ProjectSkills.Any(ps => normalizedSkillNames.Contains(ps.Skill.Name.ToLower())));
         }
 
         var total = await query.CountAsync(cancellationToken: ct);
@@ -348,13 +351,14 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     public async Task<ProjectMembersListResponse> GetProjectMembersAsync(Guid projectId, CancellationToken ct)
     {
         var project = await db.Projects
+            .Include(p => p.Creator)
             .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
-        Require(project != null, "PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
+        Require(project != null, "PROJECT_NOT_FOUND", "Project not found.", 404);
 
         var members = project.Members
-            .Where(m => m.Status == ProjectMemberStatus.Active)
+            .Where(m => m.Status == ProjectMemberStatus.Active && m.UserId != project.CreatorId)
             .Select(m => new ProjectMemberInfo(
                 m.UserId,
                 m.User?.FullName ?? "Unknown",
@@ -365,6 +369,16 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                 m.JoinedAt
             ))
             .ToList();
+
+        members.Insert(0, new ProjectMemberInfo(
+            project.CreatorId,
+            project.Creator.FullName,
+            project.Creator.Nickname,
+            project.Creator.AvatarUrl,
+            "Creator",
+            ProjectMemberStatus.Active,
+            project.CreatedAt
+        ));
 
         return new(projectId, project.Title, members.Count, members);
     }
@@ -395,7 +409,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
       
 
-        var members = isCreator ? project.Members
+        var members = project.Members
             .Where(m => m.Status == ProjectMemberStatus.Active)
             .Select(m => new ProjectMemberInfo(
                 m.UserId,
@@ -406,7 +420,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                 m.Status,
                 m.JoinedAt
             ))
-            .ToList() : null;
+            .ToList();
 
         return new(
             project.Id,

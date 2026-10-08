@@ -3,13 +3,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UniNet.Application;
 using UniNet.Application.Services;
+using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Enums;
 
 namespace UniNet.API.Controllers;
 
 [ApiController, Route("api/projects")]
-public sealed class ProjectsController(ProjectService projects, AuthService auth, ProjectModerationService moderation) : ControllerBase
+public sealed class ProjectsController(IProjectService projects, AuthService auth, ProjectModerationService moderation) : ControllerBase
 {
     [Authorize(Roles = "Student"), HttpPost("{id:guid}/moderation")]
     public async Task<IActionResult> SubmitModeration(Guid id, CancellationToken ct)
@@ -64,7 +65,7 @@ public sealed class ProjectsController(ProjectService projects, AuthService auth
     public async Task<IActionResult> DiscoverProjects(
         [FromQuery] string? keyword,
         [FromQuery] string? field,
-        [FromQuery] string? skillIds,
+        [FromQuery] string? skillNames,
         [FromQuery] RecruitmentStatus? recruitmentStatus,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
@@ -72,22 +73,12 @@ public sealed class ProjectsController(ProjectService projects, AuthService auth
     {
         try
         {
-            // Parse skillIds from comma-separated string
-            List<Guid>? parsedSkillIds = null;
-            if (!string.IsNullOrWhiteSpace(skillIds))
-            {
-                parsedSkillIds = [];
-                foreach (var value in skillIds.Split(','))
-                {
-                    if (!Guid.TryParse(value.Trim(), out var skillId))
-                        throw new ProjectException("INVALID_SKILL_IDS", "skillIds phải là danh sách GUID phân tách bằng dấu phẩy.", 400);
-                    parsedSkillIds.Add(skillId);
-                }
-                parsedSkillIds = parsedSkillIds.Distinct().ToList();
-            }
+            var parsedSkillNames = skillNames?
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
             var result = await projects.DiscoverPublicProjectsAsync(
-                keyword, field, parsedSkillIds, recruitmentStatus, page, pageSize, ct);
+                keyword, field, parsedSkillNames, recruitmentStatus, page, pageSize, ct);
             return Ok(result);
         }
         catch (ProjectException ex)
@@ -99,17 +90,12 @@ public sealed class ProjectsController(ProjectService projects, AuthService auth
     /// <summary>
     /// Xem chi tiết thông tin project
     /// </summary>
-    [AllowAnonymous, HttpGet("{id:guid}")]
+    [Authorize(Roles = "Student,Moderator"), HttpGet("{id:guid}")]
     public async Task<IActionResult> GetProjectDetails(Guid id, CancellationToken ct)
     {
         try
         {
-            Guid? userId = null;
-            if (Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var uid))
-            {
-                userId = uid;
-            }
-            var result = await projects.GetProjectDetailsAsync(id, userId, ct);
+            var result = await projects.GetProjectDetailsAsync(id, AccountId, ct);
             return Ok(result);
         }
         catch (ProjectException ex)
@@ -181,7 +167,7 @@ public sealed class ProjectsController(ProjectService projects, AuthService auth
     }
 
     /// <summary>
-    /// Lấy những member của dự án đó (chỉ active members)
+    /// Lấy người tạo và các thành viên đang hoạt động của dự án
     /// </summary>
     [AllowAnonymous, HttpGet("{id:guid}/members")]
     public async Task<IActionResult> GetProjectMembers(Guid id, CancellationToken ct)
