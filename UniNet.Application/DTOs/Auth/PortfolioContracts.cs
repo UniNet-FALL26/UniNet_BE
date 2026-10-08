@@ -52,6 +52,8 @@ public sealed record PortfolioSocial
 }
 public sealed record PortfolioContent
 {
+    public double? YearsOfExperience { get; init; }
+    public string? Gpa { get; init; }
     public string? Headline { get; init; }
     public string? CareerObjective { get; init; }
     public ProfileAppearance Appearance { get; init; } = new();
@@ -76,9 +78,11 @@ public sealed record PortfolioIdentity(Guid Id, string FullName, string? AvatarU
     public string DisplayName => string.IsNullOrWhiteSpace(Nickname) ? FullName : Nickname;
 }
 public sealed record PortfolioResponse(PortfolioIdentity Profile, PortfolioContent Portfolio, bool IsOwner, PortfolioSkillCatalog[]? SkillCatalog = null);
+public sealed record PortfolioPresentationRequest(string FullName, string? Nickname, string? AvatarUrl, string? CoverUrl, string? Bio);
+public sealed record PortfolioEditorRequest(PortfolioPresentationRequest Profile, PortfolioContent Portfolio);
 
 public sealed record CareerSkill(Guid SkillId, int? Level = null, double? YearsOfExperience = null);
-public sealed record PortfolioSkillCatalog(Guid Id, string Name, string Slug, string? IconUrl, string Category);
+public sealed record PortfolioSkillCatalog(Guid Id, string Name, string? IconUrl, string Category);
 public sealed record PortfolioActivity(string Title, string? Organization = null, string? Description = null, string? Date = null);
 public sealed record PortfolioLanguage(string Name, string Level);
 public sealed record ProfileAppearance { public ProfileAppearanceSettings Profile { get; init; } = new(); }

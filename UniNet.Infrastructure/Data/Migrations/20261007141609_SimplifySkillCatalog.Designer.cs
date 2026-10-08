@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using UniNet.Infrastructure.Data;
@@ -11,9 +12,11 @@ using UniNet.Infrastructure.Data;
 namespace UniNet.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(UniNetDbContext))]
-    partial class UniNetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261007141609_SimplifySkillCatalog")]
+    partial class SimplifySkillCatalog
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -568,7 +571,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.ToTable("Skills", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 3");
+                            t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 8");
                         });
                 });
 

@@ -10,7 +10,7 @@ namespace UniNet.Application.Services;
 public sealed class PortfolioService(UniNetDbContext db)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private sealed record Basic(string? Location, string? Availability, string? ContactEmail, string? CvUrl, PortfolioArticle[]? Articles);
+    private sealed record Basic(string? Location, string? Availability, string? ContactEmail, string? CvUrl, PortfolioArticle[]? Articles, double? YearsOfExperience = null, string? Gpa = null);
     private static T? Decode<T>(string? value)
     {
         if (value is null) return default;
@@ -41,6 +41,8 @@ public sealed class PortfolioService(UniNetDbContext db)
     }
     public static void Validate(PortfolioContent p)
     {
+        if (p.YearsOfExperience is < 0 or > 80 || (p.YearsOfExperience.HasValue && !double.IsFinite(p.YearsOfExperience.Value))) throw new AuthException("INVALID_EXPERIENCE", "Số năm kinh nghiệm phải từ 0 đến 80.");
+        Text(p.Gpa, 20);
         Text(p.Headline, 255); Text(p.CareerObjective); Text(p.Location, 255); Text(p.Availability, 100); Url(p.CvUrl);
         if (!string.IsNullOrWhiteSpace(p.ContactEmail) && (!MailAddress.TryCreate(p.ContactEmail, out var email) || email.Address != p.ContactEmail || p.ContactEmail.Length > 255))
             throw new AuthException("INVALID_PORTFOLIO_EMAIL", "Email liên hệ không hợp lệ.");
@@ -60,7 +62,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         var b = Decode<Basic>(c?.BasicInfoJson);
         return new(new(p.Id, p.FullName, p.AvatarUrl, p.CoverUrl, p.Bio, p.UniversityName, p.Major, p.OrganizationName, p.IsVerified, p.Nickname), new()
         {
-            Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = Decode<ProfileAppearance>(c?.AppearanceJson) ?? new(),
+            Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = Decode<ProfileAppearance>(c?.AppearanceJson) ?? new(), YearsOfExperience = b?.YearsOfExperience, Gpa = b?.Gpa,
             Activities = Decode<PortfolioActivity[]>(c?.ActivitiesJson) ?? [], Languages = Decode<PortfolioLanguage[]>(c?.LanguagesJson) ?? [], Location = b?.Location, Availability = b?.Availability,
             ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl, IsPublic = c?.IsPublic ?? false,
             Skills = ResolveSkills(c?.SkillsJson, catalog), Projects = Decode<PortfolioProject[]>(c?.ProjectsJson) ?? [],
@@ -77,12 +79,26 @@ public sealed class PortfolioService(UniNetDbContext db)
         var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Status == AccountStatus.Active && (x.AccountId == viewerId || (x.CareerProfile != null && x.CareerProfile.IsPublic)), ct) ?? throw Missing();
         return Map(p, p.AccountId == viewerId, await Catalog(ct));
     }
-    public async Task<PortfolioResponse> Save(Guid accountId, PortfolioContent request, CancellationToken ct)
+    public Task<PortfolioResponse> SaveEditor(Guid accountId, PortfolioEditorRequest request, CancellationToken ct)
+    {
+        if (request.Profile is null || request.Portfolio is null) throw new AuthException("INVALID_PORTFOLIO", "Thông tin hồ sơ không hợp lệ.");
+        Text(request.Profile.FullName, 255, true); Text(request.Profile.Nickname, 100); Text(request.Profile.Bio); Url(request.Profile.AvatarUrl); Url(request.Profile.CoverUrl);
+        if (request.Profile.Nickname is not null && string.IsNullOrWhiteSpace(request.Profile.Nickname)) throw new AuthException("INVALID_NICKNAME", "Biệt danh không được để trống.");
+        return Save(accountId, request.Portfolio, ct, request.Profile);
+    }
+    public async Task<PortfolioResponse> Save(Guid accountId, PortfolioContent request, CancellationToken ct, PortfolioPresentationRequest? presentation = null)
     {
         Validate(request);
         var catalog = await Catalog(ct);
         var skills = ReferenceSkills(request.Skills, catalog);
         var p = await Own(accountId, ct);
+        if (presentation is not null)
+        {
+            if (p.FullName != presentation.FullName.Trim()) p.IsVerified = false;
+            p.FullName = presentation.FullName.Trim();
+            if (presentation.Nickname is not null) p.Nickname = presentation.Nickname.Trim();
+            p.AvatarUrl = presentation.AvatarUrl?.Trim(); p.CoverUrl = presentation.CoverUrl?.Trim(); p.Bio = presentation.Bio?.Trim(); p.UpdatedAt = DateTimeOffset.UtcNow;
+        }
         if (p.CareerProfile is null)
         {
             p.CareerProfile = new CareerProfile { UserId = p.Id };
@@ -92,7 +108,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         c.Headline = request.Headline?.Trim(); c.CareerObjective = request.CareerObjective?.Trim(); c.IsPublic = request.IsPublic;
         // Preserve unrelated existing basic metadata and extracurricular activities.
         var basic = Decode<JsonObject>(c.BasicInfoJson) ?? new JsonObject();
-        var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles), Json)!.AsObject();
+        var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles, request.YearsOfExperience, request.Gpa), Json)!.AsObject();
         foreach (var property in changes) basic[property.Key] = property.Value?.DeepClone();
         c.BasicInfoJson = basic.ToJsonString(Json);
         c.SkillsJson = JsonSerializer.Serialize(skills, Json); c.ProjectsJson = JsonSerializer.Serialize(request.Projects, Json);
@@ -105,7 +121,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         return Map(p, true, catalog);
     }
 
-    public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.DisplayOrder).ThenBy(s => s.Name).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.Slug, s.IconUrl, s.Category.ToString())).ToArrayAsync(ct);
+    public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.IconUrl, s.Category == SkillCategory.ToolsAndOther ? "Tools & Other" : s.Category.ToString())).ToArrayAsync(ct);
     private static PortfolioSkill[] ResolveSkills(string? json, PortfolioSkillCatalog[] catalog)
     {
         var items = Decode<PortfolioSkill[]>(json) ?? [];
@@ -123,7 +139,13 @@ public sealed class PortfolioService(UniNetDbContext db)
     {
         var p = appearance?.Profile;
         var keys = new ProfileAppearanceSettings().SectionOrder;
-        if (p is null || p.Template != "developer-modern" || p.Theme is not ("blue" or "orange") || p.Font is not ("Inter" or "System") || p.SectionOrder is null || p.HiddenSections is null || p.SectionOrder.Length > keys.Length || p.HiddenSections.Length > keys.Length || p.SectionOrder.Concat(p.HiddenSections).Any(k => !keys.Contains(k)) || p.SectionOrder.Distinct().Count() != p.SectionOrder.Length || p.HiddenSections.Distinct().Count() != p.HiddenSections.Length)
+        var validTemplateTheme = p is not null && (p.Template switch
+        {
+            "developer-modern" => p.Theme is "blue" or "orange",
+            "developer-landscape" => p.Theme is "blue" or "pink" or "mint",
+            _ => false
+        });
+        if (p is null || !validTemplateTheme || p.Font is not ("Inter" or "System") || p.SectionOrder is null || p.HiddenSections is null || p.SectionOrder.Length > keys.Length || p.HiddenSections.Length > keys.Length || p.SectionOrder.Concat(p.HiddenSections).Any(k => !keys.Contains(k)) || p.SectionOrder.Distinct().Count() != p.SectionOrder.Length || p.HiddenSections.Distinct().Count() != p.HiddenSections.Length)
             throw new AuthException("INVALID_APPEARANCE", "Mẫu hoặc màu hồ sơ không hợp lệ.");
     }
     public async Task<PortfolioResponse> SaveAppearance(Guid accountId, ProfileAppearance appearance, CancellationToken ct)

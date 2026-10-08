@@ -22,6 +22,7 @@ builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
+builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddEndpointsApiExplorer();
