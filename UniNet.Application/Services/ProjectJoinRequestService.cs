@@ -16,14 +16,14 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     {
         var student = await GetStudentAsync(accountId, ct);
         var project = await GetProjectAsync(projectId, ct);
-        Require(project.CreatorId != student.Id, "CANNOT_JOIN_OWN_PROJECT", "Bạn không thể gửi yêu cầu vào dự án của mình.", 403);
+        Require(project.CreatorId != student.Id, "CANNOT_JOIN_OWN_PROJECT", "You cannot send a request to join your own project.", 403);
         Require(!string.IsNullOrWhiteSpace(request.Role) && request.Role.Trim().Length <= 150,
-            "INVALID_ROLE", "Vai trò phải có từ 1 đến 150 ký tự.");
+            "INVALID_ROLE", "Role must be between 1 and 150 characters.");
         await RequireRecruitingAsync(project, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == student.Id &&
-            m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "Bạn đã là thành viên dự án.", 409);
+            m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
         Require(!await db.ProjectJoinRequests.AnyAsync(r => r.ProjectId == projectId && r.UserId == student.Id &&
-            r.Status == ProjectJoinRequestStatus.Pending, ct), "JOIN_REQUEST_EXISTS", "Bạn đã có yêu cầu đang chờ xử lý.", 409);
+            r.Status == ProjectJoinRequestStatus.Pending, ct), "JOIN_REQUEST_EXISTS", "You already have a pending request.", 409);
 
         var now = DateTimeOffset.UtcNow;
         var entity = new ProjectJoinRequest
@@ -69,26 +69,26 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     {
         var actor = await GetStudentAsync(accountId, ct);
         var request = await Requests().FirstOrDefaultAsync(r => r.Id == requestId, ct)
-            ?? throw new ProjectJoinRequestException("JOIN_REQUEST_NOT_FOUND", "Yêu cầu tham gia không tồn tại.", 404);
+            ?? throw new ProjectJoinRequestException("JOIN_REQUEST_NOT_FOUND", "Join request not found.", 404);
         RequireEligible(request.Project);
         if (decision == ProjectJoinRequestStatus.Cancelled)
-            Require(request.UserId == actor.Id, "FORBIDDEN", "Bạn chỉ có thể hủy yêu cầu của mình.", 403);
+            Require(request.UserId == actor.Id, "FORBIDDEN", "You can only cancel your own request.", 403);
         else
             RequireCreator(request.Project, actor.Id);
         Require(request.Status == ProjectJoinRequestStatus.Pending,
-            "INVALID_JOIN_REQUEST_STATE", "Chỉ có thể xử lý yêu cầu đang Pending.", 409);
+            "INVALID_JOIN_REQUEST_STATE", "Only pending requests can be processed.", 409);
 
         var now = DateTimeOffset.UtcNow;
         if (decision == ProjectJoinRequestStatus.Accepted)
         {
             await GetStudentAsync(request.User.AccountId, ct);
             Require(request.UserId != request.Project.CreatorId,
-                "CANNOT_JOIN_OWN_PROJECT", "Người tạo dự án không thể tham gia qua yêu cầu.", 409);
+                "CANNOT_JOIN_OWN_PROJECT", "You cannot send a request to join your own project.", 409);
             await RequireRecruitingAsync(request.Project, ct);
             var member = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == request.ProjectId &&
                 m.UserId == request.UserId, ct);
             Require(member?.Status != ProjectMemberStatus.Active,
-                "ALREADY_PROJECT_MEMBER", "Sinh viên đã là thành viên dự án.", 409);
+                "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
             if (member == null)
             {
                 member = new ProjectMember
@@ -118,7 +118,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     private async Task<ProjectJoinRequestsResponse> ListAsync(IQueryable<ProjectJoinRequest> query,
         ProjectJoinRequestStatus? status, int page, int pageSize, CancellationToken ct)
     {
-        Require(!status.HasValue || Enum.IsDefined(status.Value), "INVALID_STATUS", "Trạng thái yêu cầu không hợp lệ.");
+        Require(!status.HasValue || Enum.IsDefined(status.Value), "INVALID_STATUS", "Invalid request status.");
         if (status.HasValue) query = query.Where(r => r.Status == status.Value);
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -132,33 +132,33 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     private async Task<UserProfile> GetStudentAsync(Guid accountId, CancellationToken ct)
     {
         var profile = await db.UserProfiles.Include(p => p.Account).FirstOrDefaultAsync(p => p.AccountId == accountId, ct)
-            ?? throw new ProjectJoinRequestException("PROFILE_NOT_FOUND", "Hồ sơ người dùng không tồn tại.", 404);
+            ?? throw new ProjectJoinRequestException("PROFILE_NOT_FOUND", "User profile not found.", 404);
         Require(profile.Account.Role == AccountRole.Student && profile.Account.Status == AccountStatus.Active,
-            "FORBIDDEN", "Chỉ tài khoản sinh viên đang hoạt động được thực hiện thao tác này.", 403);
+            "FORBIDDEN", "Only active student accounts can perform this action.", 403);
         return profile;
     }
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken ct)
     {
         var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
-            ?? throw new ProjectJoinRequestException("PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
+            ?? throw new ProjectJoinRequestException("PROJECT_NOT_FOUND", "Project not found.", 404);
         RequireEligible(project);
         return project;
     }
 
     private static void RequireEligible(Project project) => Require(
         project.Visibility == ProjectVisibility.Public && project.Status == ProjectStatus.Active,
-        "INVALID_PROJECT_STATE", "Dự án phải là Public và Active.", 409);
+        "INVALID_PROJECT_STATE", "Project must be Public and Active.", 409);
 
     private static void RequireCreator(Project project, Guid profileId) => Require(project.CreatorId == profileId,
-        "FORBIDDEN", "Chỉ người tạo dự án được xem và xử lý yêu cầu tham gia.", 403);
+        "FORBIDDEN", "Only the project creator can view and process join requests.", 403);
 
     private async Task RequireRecruitingAsync(Project project, CancellationToken ct)
     {
         Require(project.RecruitmentStatus == RecruitmentStatus.Open && project.RecruitmentDeadline > DateTimeOffset.UtcNow,
-            "RECRUITMENT_CLOSED", "Dự án không còn nhận thành viên.", 409);
+            "RECRUITMENT_CLOSED", "Project is no longer accepting members.", 409);
         Require(await MemberCountAsync(project, ct) < project.MemberTarget,
-            "PROJECT_FULL", "Dự án đã đủ thành viên.", 409);
+            "PROJECT_FULL", "Project has reached its member limit.", 409);
     }
 
     // The creator occupies one slot even when no ProjectMember row exists for them.
@@ -180,7 +180,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         catch (Exception ex) when (ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure } ||
             ex is DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.SerializationFailure } })
         {
-            throw new ProjectJoinRequestException("JOIN_REQUEST_CONFLICT", "Dữ liệu vừa thay đổi. Vui lòng thử lại.", 409);
+            throw new ProjectJoinRequestException("JOIN_REQUEST_CONFLICT", "Data has been modified. Please try again.", 409);
         }
     }
 

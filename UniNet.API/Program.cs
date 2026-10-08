@@ -15,8 +15,9 @@ builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PortfolioService>();
-builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
@@ -92,6 +93,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = joinRequestError.Status;
         await context.Response.WriteAsJsonAsync(new { code = joinRequestError.Code, message = joinRequestError.Message });
+        return;
+    }
+    if (error is ProjectInvitationException invitationError)
+    {
+        context.Response.StatusCode = invitationError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = invitationError.Code, message = invitationError.Message });
         return;
     }
     if (error is ProjectException projectError)
