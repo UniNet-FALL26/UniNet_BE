@@ -14,5 +14,4 @@ public interface IProjectService
         string? keyword = null, string? field = null, List<string>? skillNames = null,
         RecruitmentStatus? recruitmentStatus = null, int page = 1, int pageSize = 10,
         CancellationToken ct = default);
-    Task<ProjectMembersListResponse> GetProjectMembersAsync(Guid projectId, CancellationToken ct);
 }

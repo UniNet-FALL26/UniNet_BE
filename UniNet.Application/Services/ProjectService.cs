@@ -347,42 +347,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         return new(page, pageSize, total, totalPages, responses);
     }
 
-    // ============ GET PROJECT MEMBERS ============
-    public async Task<ProjectMembersListResponse> GetProjectMembersAsync(Guid projectId, CancellationToken ct)
-    {
-        var project = await db.Projects
-            .Include(p => p.Creator)
-            .Include(p => p.Members).ThenInclude(m => m.User)
-            .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
-
-        Require(project != null, "PROJECT_NOT_FOUND", "Project not found.", 404);
-
-        var members = project.Members
-            .Where(m => m.Status == ProjectMemberStatus.Active && m.UserId != project.CreatorId)
-            .Select(m => new ProjectMemberInfo(
-                m.UserId,
-                m.User?.FullName ?? "Unknown",
-                m.User?.Nickname ?? "Unknown",
-                m.User?.AvatarUrl,
-                m.Role,
-                m.Status,
-                m.JoinedAt
-            ))
-            .ToList();
-
-        members.Insert(0, new ProjectMemberInfo(
-            project.CreatorId,
-            project.Creator.FullName,
-            project.Creator.Nickname,
-            project.Creator.AvatarUrl,
-            "Creator",
-            ProjectMemberStatus.Active,
-            project.CreatedAt
-        ));
-
-        return new(projectId, project.Title, members.Count, members);
-    }
-
     // ============ MAPPING HELPERS ============
     private async Task<ProjectDetailResponse> MapToDetailResponseAsync(Project project, Guid? userId, CancellationToken ct)
     {
