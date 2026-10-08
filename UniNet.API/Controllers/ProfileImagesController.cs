@@ -11,7 +11,7 @@ public sealed class ProfileImagesController(ProfileImageStorage images) : Contro
 {
     [Authorize, HttpPost, RequestSizeLimit(ProfileImageStorage.MaxBytes + 65536)]
     [RequestFormLimits(MultipartBodyLengthLimit = ProfileImageStorage.MaxBytes + 65536)]
-    public async Task<IActionResult> Upload([FromForm] IFormFile file, CancellationToken ct)
+    public async Task<IActionResult> Upload(IFormFile file, CancellationToken ct)
     {
         if (!Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out _))
             throw new AuthException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401);
