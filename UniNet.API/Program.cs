@@ -18,6 +18,7 @@ builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
@@ -99,6 +100,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = invitationError.Status;
         await context.Response.WriteAsJsonAsync(new { code = invitationError.Code, message = invitationError.Message });
+        return;
+    }
+    if (error is ProjectMemberException memberError)
+    {
+        context.Response.StatusCode = memberError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = memberError.Code, message = memberError.Message });
         return;
     }
     if (error is ProjectException projectError)

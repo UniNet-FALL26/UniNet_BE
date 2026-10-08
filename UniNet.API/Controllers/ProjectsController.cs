@@ -166,20 +166,4 @@ public sealed class ProjectsController(IProjectService projects, AuthService aut
         }
     }
 
-    /// <summary>
-    /// Lấy người tạo và các thành viên đang hoạt động của dự án
-    /// </summary>
-    [AllowAnonymous, HttpGet("{id:guid}/members")]
-    public async Task<IActionResult> GetProjectMembers(Guid id, CancellationToken ct)
-    {
-        try
-        {
-            var result = await projects.GetProjectMembersAsync(id, ct);
-            return Ok(result);
-        }
-        catch (ProjectException ex)
-        {
-            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
-        }
-    }
 }
