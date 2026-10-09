@@ -17,6 +17,10 @@ public sealed class ProjectMemberController(IProjectMemberService members) : Con
     public Task<ProjectMembersListResponse> GetProjectMembers(Guid projectId, CancellationToken ct)
         => members.GetProjectMembersAsync(projectId, ct);
 
+    [Authorize(Roles = "Student"), HttpGet("{projectId:guid}/recommended-members")]
+    public Task<List<RecommendedProjectMemberResponse>> GetRecommendedMembers(Guid projectId, CancellationToken ct)
+        => members.GetRecommendedMembersAsync(projectId, AccountId, ct);
+
     [Authorize(Roles = "Student"), HttpPatch("{projectId:guid}/members/{userId:guid}/kick")]
     public Task<ProjectMemberResponse> Kick(Guid projectId, Guid userId, CancellationToken ct)
         => members.KickAsync(projectId, userId, AccountId, ct);

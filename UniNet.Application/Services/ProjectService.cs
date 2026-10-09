@@ -16,8 +16,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         if (!condition) throw new ProjectException(code, message, status);
     }
 
-    private static ProjectException NotFound() => new("PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
-    private static ProjectException Unauthorized() => new("UNAUTHORIZED", "Bạn không có quyền thực hiện hành động này.", 403);
+    private static ProjectException NotFound() => new("PROJECT_NOT_FOUND", "Project not found.", 404);
+    private static ProjectException Unauthorized() => new("UNAUTHORIZED", "You are not authorized to perform this action.", 403);
     private static ProjectException InvalidState(string reason) => new("INVALID_PROJECT_STATE", reason, 400);
 
     // ============ CREATE PROJECT ============

@@ -2,6 +2,14 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application;
 
+public record RecommendedProjectMemberResponse(
+    Guid UserId,
+    string FullName,
+    string? AvatarUrl,
+    double MatchScore,
+    List<string> MatchedSkills,
+    List<string> MissingSkills);
+
 public record ProjectMemberResponse(
     Guid Id,
     Guid ProjectId,

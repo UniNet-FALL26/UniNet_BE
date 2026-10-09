@@ -11,6 +11,59 @@ namespace UniNet.Application.Services;
 
 public sealed class ProjectMemberService(UniNetDbContext db) : IProjectMemberService
 {
+    public async Task<List<RecommendedProjectMemberResponse>> GetRecommendedMembersAsync(Guid projectId,
+        Guid accountId, CancellationToken ct = default)
+    {
+        var actor = await db.UserProfiles.AsNoTracking()
+            .Where(u => u.AccountId == accountId)
+            .Select(u => new { u.Id, u.Account.Role, u.Account.Status })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new ProjectMemberException("PROFILE_NOT_FOUND", "User profile not found.", 404);
+        Require(actor.Role == AccountRole.Student && actor.Status == AccountStatus.Active,
+            "FORBIDDEN", "Only active student accounts can perform this action.", 403);
+
+        var project = await db.Projects.AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => new { p.CreatorId })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new ProjectMemberException("PROJECT_NOT_FOUND", "Project not found.", 404);
+        Require(project.CreatorId == actor.Id,
+            "FORBIDDEN", "Only the project creator can access member recommendations.", 403);
+
+        var requiredSkills = await db.ProjectSkills.AsNoTracking()
+            .Where(s => s.ProjectId == projectId)
+            .Select(s => new { s.SkillId, s.Skill.Name })
+            .OrderBy(s => s.Name).ThenBy(s => s.SkillId)
+            .ToListAsync(ct);
+        if (requiredSkills.Count == 0) return [];
+
+        var requiredSkillIds = requiredSkills.Select(s => s.SkillId).ToArray();
+        var matches = await db.UserSkills.AsNoTracking()
+            .Where(s => requiredSkillIds.Contains(s.SkillId) && s.UserId != project.CreatorId &&
+                s.User.Account.Role == AccountRole.Student && s.User.Account.Status == AccountStatus.Active &&
+                !db.ProjectMembers.Any(m => m.ProjectId == projectId && m.UserId == s.UserId &&
+                    m.Status == ProjectMemberStatus.Active) &&
+                !db.ProjectInvitations.Any(i => i.ProjectId == projectId && i.InviteeId == s.UserId &&
+                    i.Status == ProjectInvitationStatus.Sent) &&
+                !db.ProjectJoinRequests.Any(r => r.ProjectId == projectId && r.UserId == s.UserId &&
+                    r.Status == ProjectJoinRequestStatus.Pending))
+            .Select(s => new { s.UserId, s.User.FullName, s.User.AvatarUrl, s.SkillId })
+            .ToListAsync(ct);
+
+        return matches.GroupBy(s => new { s.UserId, s.FullName, s.AvatarUrl })
+            .Select(group =>
+            {
+                var matchedIds = group.Select(s => s.SkillId).ToHashSet();
+                return new RecommendedProjectMemberResponse(
+                    group.Key.UserId, group.Key.FullName, group.Key.AvatarUrl,
+                    matchedIds.Count * 100.0 / requiredSkills.Count,
+                    requiredSkills.Where(s => matchedIds.Contains(s.SkillId)).Select(s => s.Name).ToList(),
+                    requiredSkills.Where(s => !matchedIds.Contains(s.SkillId)).Select(s => s.Name).ToList());
+            })
+            .OrderByDescending(u => u.MatchScore).ThenBy(u => u.FullName).ThenBy(u => u.UserId)
+            .ToList();
+    }
+
     // ============ GET PROJECT MEMBERS ============
     public async Task<ProjectMembersListResponse> GetProjectMembersAsync(Guid projectId, CancellationToken ct)
     {

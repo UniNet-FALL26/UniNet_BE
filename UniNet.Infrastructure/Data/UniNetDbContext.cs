@@ -20,6 +20,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
+    public DbSet<UserSkill> UserSkills => Set<UserSkill>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -504,6 +505,47 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 x.ProjectId,
                 x.CreatedAt
             });
+        });
+        model.Entity<UserSkill>(e =>
+        {
+            e.ToTable("UserSkills");
+
+            // Primary key
+            e.HasKey(x => x.Id);
+
+            // Skill proficiency level
+            e.Property(x => x.Level)
+                .HasConversion<short>()
+                .IsRequired();
+
+            // Audit timestamps
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            // User 1 : N UserSkills
+            e.HasOne(x => x.User)
+                .WithMany(x => x.UserSkills)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Skill 1 : N UserSkills
+            e.HasOne(x => x.Skill)
+                .WithMany(x => x.UserSkills)
+                .HasForeignKey(x => x.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Prevent duplicate skills for the same user
+            e.HasIndex(x => new
+            {
+                x.UserId,
+                x.SkillId
+            }).IsUnique();
+
+            // Support skill-based user recommendations
+            e.HasIndex(x => x.SkillId);
         });
     }
 }
