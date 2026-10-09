@@ -49,18 +49,49 @@ public sealed class ProjectMemberService(UniNetDbContext db) : IProjectMemberSer
                     r.Status == ProjectJoinRequestStatus.Pending))
             .Select(s => new { s.UserId, s.User.FullName, s.User.AvatarUrl, s.SkillId })
             .ToListAsync(ct);
+        if (matches.Count == 0) return [];
+
+        var teamIds = (await db.ProjectMembers.AsNoTracking()
+            .Where(m => m.ProjectId == projectId && m.Status == ProjectMemberStatus.Active)
+            .Select(m => m.UserId)
+            .ToListAsync(ct)).Append(project.CreatorId).Distinct().ToArray();
+        var candidateIds = matches.Select(s => s.UserId).Distinct().ToArray();
+
+        // Historical membership remains collaboration history after a member leaves.
+        // Union includes creators and counts each participant only once per completed project.
+        var participants = db.Projects.AsNoTracking()
+            .Where(p => p.Status == ProjectStatus.Completed && p.Id != projectId)
+            .Select(p => new { ProjectId = p.Id, UserId = p.CreatorId })
+            .Union(db.ProjectMembers.AsNoTracking()
+                .Where(m => m.Project.Status == ProjectStatus.Completed && m.ProjectId != projectId)
+                .Select(m => new { m.ProjectId, m.UserId }));
+
+        var collaborationTotals = await participants.Where(p => candidateIds.Contains(p.UserId))
+            .Join(participants.Where(p => teamIds.Contains(p.UserId)),
+                candidate => candidate.ProjectId, teammate => teammate.ProjectId,
+                (candidate, teammate) => new { candidate.UserId })
+            .GroupBy(p => p.UserId)
+            .Select(group => new { UserId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(p => p.UserId, p => p.Count, ct);
 
         return matches.GroupBy(s => new { s.UserId, s.FullName, s.AvatarUrl })
             .Select(group =>
             {
                 var matchedIds = group.Select(s => s.SkillId).ToHashSet();
+                var skillMatch = matchedIds.Count * 100.0 / requiredSkills.Count;
+                // CollaborationCount is the average across all current teammates, including zero counts.
+                var collaborationCount = collaborationTotals.GetValueOrDefault(group.Key.UserId) / (double)teamIds.Length;
+                var diversityScore = 100.0 / (1 + collaborationCount);
+                var finalScore = 0.8 * skillMatch + 0.2 * diversityScore;
                 return new RecommendedProjectMemberResponse(
                     group.Key.UserId, group.Key.FullName, group.Key.AvatarUrl,
-                    matchedIds.Count * 100.0 / requiredSkills.Count,
+                    skillMatch,
                     requiredSkills.Where(s => matchedIds.Contains(s.SkillId)).Select(s => s.Name).ToList(),
-                    requiredSkills.Where(s => !matchedIds.Contains(s.SkillId)).Select(s => s.Name).ToList());
+                    requiredSkills.Where(s => !matchedIds.Contains(s.SkillId)).Select(s => s.Name).ToList(),
+                    skillMatch, diversityScore, collaborationCount, finalScore);
             })
-            .OrderByDescending(u => u.MatchScore).ThenBy(u => u.FullName).ThenBy(u => u.UserId)
+            .OrderByDescending(u => u.FinalScore).ThenByDescending(u => u.SkillMatch)
+            .ThenBy(u => u.FullName).ThenBy(u => u.UserId)
             .ToList();
     }
 

@@ -8,7 +8,11 @@ public record RecommendedProjectMemberResponse(
     string? AvatarUrl,
     double MatchScore,
     List<string> MatchedSkills,
-    List<string> MissingSkills);
+    List<string> MissingSkills,
+    double SkillMatch,
+    double DiversityScore,
+    double CollaborationCount,
+    double FinalScore);
 
 public record ProjectMemberResponse(
     Guid Id,

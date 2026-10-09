@@ -1,4 +1,6 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -7,7 +9,8 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation) : IProjectService
+public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation,
+    IConfiguration configuration) : IProjectService
 {
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -113,8 +116,33 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                 project.ProjectSkills.Add(new ProjectSkill { ProjectId = project.Id, SkillId = skill.Id });
             }
         }
-        db.Projects.Add(project);
-        await db.SaveChangesAsync(ct);
+        var projectLimit = configuration.GetValue<int>("Projects:MaxOngoingProjectsPerStudent", 3);
+        if (projectLimit <= 0)
+            throw new InvalidOperationException("Projects:MaxOngoingProjectsPerStudent must be greater than 0.");
+
+        await using (var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct))
+        {
+            // Serialize creation per leader across API instances; count after acquiring the lock.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM \"Users\" WHERE \"Id\" = {userProfile.Id} FOR UPDATE", ct);
+
+            var ongoingCount = await db.Projects.AsNoTracking()
+                .Where(p => p.CreatorId == userProfile.Id)
+                .Where(p => p.Status == ProjectStatus.Pending || p.Status == ProjectStatus.Active ||
+                    (p.Status == ProjectStatus.Rejected && p.Moderations
+                        .OrderByDescending(m => m.AttemptNumber)
+                        .Select(m => m.Status == ProjectModerationStatus.Pending ||
+                            m.Status == ProjectModerationStatus.Processing ||
+                            m.Status == ProjectModerationStatus.ReviewRequired)
+                        .FirstOrDefault()))
+                .CountAsync(ct);
+            Require(ongoingCount < projectLimit, "PROJECT_LIMIT_REACHED",
+                $"You can lead a maximum of {projectLimit} ongoing projects simultaneously.", 409);
+
+            db.Projects.Add(project);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
         await moderation.ModerateNewProjectAsync(project.Id, userId, ct);
 
         return await GetProjectDetailsAsync(project.Id, userId, ct);
