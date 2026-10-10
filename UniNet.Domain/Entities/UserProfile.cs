@@ -32,4 +32,7 @@ public sealed class UserProfile
     public List<ProjectJoinRequest> JoinRequests { get; set; } = [];
     public List<UserSkill> UserSkills { get; set; } = [];
     public CareerProfile? CareerProfile { get; set; }
+    public List<CompanySavedStudent> SavedByCompanies { get; set; } = [];
+    public List<StudentSavedJob> SavedJobs { get; set; } = [];
+    public List<JobApplication> JobApplications { get; set; } = [];
 }

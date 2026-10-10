@@ -21,6 +21,12 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<Job> Jobs => Set<Job>();
+    public DbSet<JobSkill> JobSkills => Set<JobSkill>();
+    public DbSet<CompanySavedStudent> CompanySavedStudents => Set<CompanySavedStudent>();
+    public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
+    public DbSet<JobApplication> JobApplications => Set<JobApplication>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -507,6 +513,75 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 x.ProjectId,
                 x.CreatedAt
             });
+        });
+        model.Entity<Company>(e =>
+        {
+            e.ToTable("Company");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CompanyName).HasMaxLength(255).IsRequired();
+            e.Property(x => x.AvatarUrl).HasColumnType("text");
+            e.Property(x => x.CoverUrl).HasColumnType("text");
+            e.Property(x => x.Phone).HasMaxLength(30);
+            e.Property(x => x.Address).HasColumnType("text");
+            e.Property(x => x.Website).HasColumnType("text");
+            e.HasOne(x => x.Account).WithOne(x => x.Company).HasForeignKey<Company>(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.AccountId).IsUnique();
+        });
+        model.Entity<Job>(e =>
+        {
+            e.ToTable("Jobs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(255).IsRequired();
+            e.Property(x => x.WorkType).HasColumnType("smallint");
+            e.Property(x => x.MinSalaryVnd).HasPrecision(14, 0);
+            e.Property(x => x.MaxSalaryVnd).HasPrecision(14, 0);
+            e.Property(x => x.Location).HasMaxLength(255);
+            e.Property(x => x.Description).HasColumnType("text");
+            e.Property(x => x.RequiredJson).HasColumnType("jsonb");
+            e.Property(x => x.BenefitsJson).HasColumnType("jsonb");
+            e.Property(x => x.Status).HasColumnType("smallint");
+            e.HasOne(x => x.Company).WithMany(x => x.Jobs).HasForeignKey(x => x.CompanyUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.CompanyUserId);
+            e.HasIndex(x => new { x.Status, x.Deadline });
+        });
+        model.Entity<JobSkill>(e =>
+        {
+            e.ToTable("JobSkills");
+            e.HasKey(x => new { x.JobId, x.SkillId });
+            e.Property(x => x.RequirementType).HasColumnType("smallint");
+            e.HasOne(x => x.Job).WithMany(x => x.JobSkills).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Skill).WithMany(x => x.JobSkills).HasForeignKey(x => x.SkillId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.SkillId);
+        });
+        model.Entity<CompanySavedStudent>(e =>
+        {
+            e.ToTable("CompanySavedStudents");
+            e.HasKey(x => new { x.CompanyUserId, x.StudentUserId });
+            e.Property(x => x.Note).HasColumnType("text");
+            e.HasOne(x => x.Company).WithMany(x => x.SavedStudents).HasForeignKey(x => x.CompanyUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Student).WithMany(x => x.SavedByCompanies).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.StudentUserId);
+        });
+        model.Entity<StudentSavedJob>(e =>
+        {
+            e.ToTable("StudentSavedJobs");
+            e.HasKey(x => new { x.StudentUserId, x.JobId });
+            e.HasOne(x => x.Student).WithMany(x => x.SavedJobs).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Job).WithMany(x => x.SavedByStudents).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.JobId);
+        });
+        model.Entity<JobApplication>(e =>
+        {
+            e.ToTable("JobApplications");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CoverMessage).HasMaxLength(300);
+            e.Property(x => x.AiMatchScore).HasPrecision(5, 2);
+            e.Property(x => x.ProfileSnapshot).HasColumnType("jsonb");
+            e.Property(x => x.Status).HasColumnType("smallint");
+            e.HasOne(x => x.Job).WithMany(x => x.Applications).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Student).WithMany(x => x.JobApplications).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.JobId, x.Status });
+            e.HasIndex(x => new { x.StudentUserId, x.AppliedAt });
         });
         model.Entity<UserSkill>(e =>
         {

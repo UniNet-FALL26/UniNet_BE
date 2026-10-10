@@ -14,5 +14,6 @@ public sealed class Account
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public UserProfile? Profile { get; set; }
+    public Company? Company { get; set; }
     public List<RefreshToken> RefreshTokens { get; set; } = [];
 }
