@@ -26,8 +26,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     {
         model.Entity<Account>(e =>
         {
-            e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 2"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);
+            e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 4"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);
             e.Property(x => x.Email).HasMaxLength(255).IsRequired(); e.HasIndex(x => x.Email).IsUnique();
+            e.HasIndex(x => x.Role).HasDatabaseName("IX_Accounts_SingleAdmin")
+                .IsUnique().HasFilter("\"Role\" = 2");
             e.Property(x => x.PasswordHash).HasColumnType("text");
             e.Property(x => x.GoogleId).HasMaxLength(255); e.HasIndex(x => x.GoogleId).IsUnique().HasFilter("\"GoogleId\" IS NOT NULL");
             e.Property(x => x.GoogleEmail).HasMaxLength(255);

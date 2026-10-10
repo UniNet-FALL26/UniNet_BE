@@ -16,6 +16,83 @@ namespace UniNet.Application.Services;
 public sealed class ProjectModerationService(
     IAIModerationService aiModerationService, UniNetDbContext db, IConfiguration configuration)
 {
+    public async Task<PendingProjectModerationsResponse> GetPendingProjectsAsync(
+        int page, int pageSize, CancellationToken ct)
+    {
+        if (page < 1 || pageSize < 1 || pageSize > 100 || (long)(page - 1) * pageSize > int.MaxValue)
+            throw new ProjectException("INVALID_PAGINATION", "Page must be positive and pageSize must be between 1 and 100.");
+
+        var query = db.ProjectModerations.AsNoTracking()
+            .Where(m => m.Status == ProjectModerationStatus.ReviewRequired &&
+                !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId &&
+                    other.AttemptNumber > m.AttemptNumber));
+        var total = await query.CountAsync(ct);
+        var pending = await query
+            .Include(m => m.Project).ThenInclude(p => p.Creator)
+            .Include(m => m.Project).ThenInclude(p => p.RoleRequirements)
+            .Include(m => m.Project).ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+            .Include(m => m.Project).ThenInclude(p => p.Members)
+            .OrderBy(m => m.CreatedAt).ThenBy(m => m.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+
+        return new(page, pageSize, total, (int)Math.Ceiling((double)total / pageSize),
+            pending.Select(m => new PendingProjectModerationResponse(
+                ProjectMapping.ToDetailResponse(m.Project, null), ToResponse(m), m.ResultJson, m.CreatedAt)).ToList());
+    }
+
+    public Task<ProjectModerationResponse> ApproveProjectAsync(
+        Guid projectId, Guid accountId, ReviewProjectRequest request, CancellationToken ct)
+        => ReviewProjectAsync(projectId, accountId, request, ProjectModerationStatus.Approved, ct);
+
+    public Task<ProjectModerationResponse> RejectProjectAsync(
+        Guid projectId, Guid accountId, ReviewProjectRequest request, CancellationToken ct)
+        => ReviewProjectAsync(projectId, accountId, request, ProjectModerationStatus.Rejected, ct);
+
+    private async Task<ProjectModerationResponse> ReviewProjectAsync(
+        Guid projectId, Guid accountId, ReviewProjectRequest request, ProjectModerationStatus decision, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (!await db.Projects.AnyAsync(p => p.Id == projectId, ct))
+            throw new ProjectException("PROJECT_NOT_FOUND", "Project not found.", 404);
+
+        var note = request.ReviewNote?.Trim();
+        if (decision == ProjectModerationStatus.Rejected && string.IsNullOrWhiteSpace(note))
+            throw new ProjectException("REVIEW_NOTE_REQUIRED", "A review note explaining the rejection is required.");
+
+        var reviewerId = await db.UserProfiles.Where(p => p.AccountId == accountId)
+            .Select(p => (Guid?)p.Id).FirstOrDefaultAsync(ct)
+            ?? throw new ProjectException("PROFILE_NOT_FOUND", "Moderator profile not found.", 403);
+        var latest = await db.ProjectModerations.AsNoTracking().Where(m => m.ProjectId == projectId)
+            .OrderByDescending(m => m.AttemptNumber).FirstOrDefaultAsync(ct);
+        if (latest == null || latest.Status != ProjectModerationStatus.ReviewRequired)
+            throw new ProjectException("INVALID_MODERATION_STATE", "The latest moderation attempt must require review.", 409);
+
+        var now = DateTimeOffset.UtcNow;
+        // Compare and update in one statement so concurrent reviewers cannot both succeed.
+        var updated = await db.ProjectModerations
+            .Where(m => m.Id == latest.Id && m.Status == ProjectModerationStatus.ReviewRequired &&
+                !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId &&
+                    other.AttemptNumber > m.AttemptNumber))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(m => m.Status, decision)
+                .SetProperty(m => m.ReviewedByUserId, reviewerId)
+                .SetProperty(m => m.ReviewNote, note)
+                .SetProperty(m => m.ReviewAt, now)
+                .SetProperty(m => m.UpdatedAt, now), ct);
+        if (updated != 1)
+            throw new ProjectException("INVALID_MODERATION_STATE", "This moderation attempt has already been reviewed or superseded.", 409);
+
+        var projectStatus = decision == ProjectModerationStatus.Approved ? ProjectStatus.Active : ProjectStatus.Rejected;
+        await db.Projects.Where(p => p.Id == projectId).ExecuteUpdateAsync(setters => setters
+            .SetProperty(p => p.Status, projectStatus)
+            .SetProperty(p => p.UpdatedAt, now), ct);
+        await transaction.CommitAsync(ct);
+
+        latest.Status = decision;
+        latest.ReviewAt = now;
+        return ToResponse(latest);
+    }
+
     internal Task<ProjectModerationResponse> ModerateNewProjectAsync(Guid projectId, Guid accountId, CancellationToken ct)
         => ModerateProjectAsync(projectId, accountId, isInitialAttempt: true, ct);
 

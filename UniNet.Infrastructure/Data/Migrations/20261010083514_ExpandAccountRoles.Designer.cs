@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using UniNet.Infrastructure.Data;
@@ -11,9 +12,11 @@ using UniNet.Infrastructure.Data;
 namespace UniNet.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(UniNetDbContext))]
-    partial class UniNetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261010083514_ExpandAccountRoles")]
+    partial class ExpandAccountRoles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -70,11 +73,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("GoogleId")
                         .IsUnique()
                         .HasFilter("\"GoogleId\" IS NOT NULL");
-
-                    b.HasIndex("Role")
-                        .IsUnique()
-                        .HasDatabaseName("IX_Accounts_SingleAdmin")
-                        .HasFilter("\"Role\" = 2");
 
                     b.ToTable("Accounts", null, t =>
                         {
