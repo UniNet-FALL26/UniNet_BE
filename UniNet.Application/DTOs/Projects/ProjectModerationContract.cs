@@ -7,6 +7,23 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application.DTOs.Projects
 {
+    public record ReviewProjectRequest(string? ReviewNote = null);
+
+    public record PendingProjectModerationResponse(
+        ProjectDetailResponse Project,
+        ProjectModerationResponse Moderation,
+        string? ResultJson,
+        DateTimeOffset SubmittedAt
+    );
+
+    public record PendingProjectModerationsResponse(
+        int Page,
+        int PageSize,
+        int TotalItems,
+        int TotalPages,
+        List<PendingProjectModerationResponse> Projects
+    );
+
     public record ProjectModerationResponse(
         Guid Id,
         int AttemptNumber,
