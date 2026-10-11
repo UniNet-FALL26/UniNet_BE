@@ -66,7 +66,7 @@ public sealed class PortfolioProductionTests
         var service=new PortfolioService(db); var before=a.Profile!.CareerProfile!.ProjectsJson;
         await service.SaveAppearance(a.Id,new ProfileAppearance { Profile=new() { Theme="orange", HiddenSections=["certificates"] } },default);
         db.ChangeTracker.Clear(); var result=await service.Me(a.Id,default);
-        Assert.Equal("orange",result.Portfolio.Appearance.Profile.Theme); Assert.Equal(before,(await db.CareerProfiles.SingleAsync()).ProjectsJson);
+        Assert.Equal("amber",result.Portfolio.Appearance.Profile.Theme); Assert.Equal(before,(await db.CareerProfiles.SingleAsync()).ProjectsJson);
         Assert.False(result.Portfolio.IsPublic); Assert.Contains("keep",(await db.CareerProfiles.SingleAsync()).AppearanceJson); Assert.Single(await db.CareerProfiles.ToListAsync());
         await Assert.ThrowsAsync<AuthException>(()=>service.SaveAppearance(Guid.NewGuid(),new(),default));
         await Assert.ThrowsAsync<AuthException>(()=>service.Read(a.Profile.Id,null,default));
@@ -123,7 +123,7 @@ public sealed class PortfolioProductionTests
         a.Profile.CareerProfile.LanguagesJson="[{\"name\":\"Vietnamese\",\"level\":\"Native\"}]";
         await db.SaveChangesAsync();
         var saved=await service.Save(a.Id,new(){Headline="Updated content"},default);
-        Assert.Equal("orange",saved.Portfolio.Appearance.Profile.Theme);Assert.Single(saved.Portfolio.Activities!);Assert.Single(saved.Portfolio.Languages!);
+        Assert.Equal("amber",saved.Portfolio.Appearance.Profile.Theme);Assert.Single(saved.Portfolio.Activities!);Assert.Single(saved.Portfolio.Languages!);
     }
     [Fact] public async Task AppearanceCreatesOneCareerProfileWhenMissingAndRejectsInactiveOwner()
     {

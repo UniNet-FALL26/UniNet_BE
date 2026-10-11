@@ -731,6 +731,47 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("UserSkills", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("CreatedAtUnix")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ImageUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("State")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("ImageUrl")
+                        .IsUnique();
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("State", "CreatedAtUnix");
+
+                    b.ToTable("PortraitAssets", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1200,6 +1241,15 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Skill");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.RefreshToken", b =>
