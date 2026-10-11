@@ -5,6 +5,8 @@ namespace UniNet.Application;
 
 public record RegisterStudentRequest(string FullName, string Email, string Password, string ConfirmPassword, string? UniversityName, string? Major, string? Nickname = null);
 public record RegisterPartnerRequest(string OrganizationName, string Email, string Password, string ConfirmPassword, PartnerType? PartnerType, [property: JsonIgnore] string? FullName = null, [property: JsonIgnore] string? Nickname = null);
+public record RegisterAdminRequest(string FullName, string Email, string Password, string ConfirmPassword, string? Nickname = null);
+public record CreateStaffAccountRequest(string FullName, string Email, string Password, string ConfirmPassword, AccountRole Role, string? Nickname = null);
 public record LoginRequest(string Email, string Password, bool RememberMe = false, string? DeviceId = null, string? DeviceName = null);
 public record GoogleLoginRequest(string IdToken, AccountRole Role = AccountRole.Student, PartnerType? PartnerType = null);
 public record RefreshRequest(string RefreshToken);

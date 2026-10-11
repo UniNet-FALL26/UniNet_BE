@@ -80,8 +80,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             ProjectField = request.ProjectField.Trim(),
             Description = request.Description.Trim(),
             MemberTarget = request.MemberTarget,
-            RecruitmentDeadline = request.RecruitmentDeadline,
-            ExpectedOutput = request.ExpectedOutput,
+            RecruitmentDeadline = request.RecruitmentDeadline.ToUniversalTime(),
+            ExpectedOutput = request.ExpectedOutput?.ToUniversalTime(),
             Visibility = request.Visibility,
             Status = ProjectStatus.Pending,
             RecruitmentStatus = RecruitmentStatus.Open,
@@ -154,6 +154,10 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var project = await db.Projects
             .Include(p => p.Creator)
             .Include(p => p.RoleRequirements)
+            .Include(p => p.Invitations).ThenInclude(i => i.Inviter)
+            .Include(p => p.Invitations).ThenInclude(i => i.Invitee)
+            .Include(p => p.JoinRequests).ThenInclude(r => r.User)
+            .AsSplitQuery()
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
          
             .Include(p => p.Members).ThenInclude(m => m.User)
@@ -280,7 +284,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Guid userId, int page = 1, int pageSize = 10, CancellationToken ct = default)
     {
         const int maxPageSize = 100;
-        pageSize = Math.Min(pageSize, maxPageSize);
+        pageSize = Math.Clamp(pageSize, 1, maxPageSize);
         page = Math.Max(page, 1);
 
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
@@ -289,6 +293,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var query = db.Projects
             .Include(p => p.Creator)
             .Include(p => p.Members)
+            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
             .Where(p => p.CreatorId == userProfile.Id || p.Members.Any(m => m.UserId == userProfile.Id && m.Status == ProjectMemberStatus.Active))
             .OrderByDescending(p => p.CreatedAt);
 
@@ -300,6 +305,26 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
         var responses = projects.Select(p => MapToListItemResponse(p)).ToList();
         return (responses, total);
+    }
+
+    public async Task<DiscoveryProjectsResponse> GetProjectsByStatusAsync(
+        Guid userId, ProjectStatus status, int page = 1, int pageSize = 10, CancellationToken ct = default)
+    {
+        Require(Enum.IsDefined(status), "INVALID_PROJECT_STATUS", "Invalid project status.");
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.Projects.AsNoTracking()
+            .Where(p => p.Creator.AccountId == userId && p.Status == status);
+        var total = await query.CountAsync(ct);
+        Require(total > 0, "PROJECT_NOT_FOUND", "Project not found.", 404);
+        var projects = await query.Include(p => p.Creator)
+            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+            .Include(p => p.Members).AsSplitQuery()
+            .OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
+            .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue))
+            .Take(pageSize).ToListAsync(ct);
+        return new(page, pageSize, total, (int)(((long)total + pageSize - 1) / pageSize),
+            projects.Select(MapToDiscoveryResponse).ToList());
     }
 
     // ============ DISCOVER PUBLIC PROJECTS ============
@@ -433,7 +458,9 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             skills,
             isCreator,
             isMember,
-            members
+            members,
+            project.Invitations.Select(ProjectInvitationMapping.ToResponse).ToList(),
+            project.JoinRequests.Select(ProjectJoinRequestMapping.ToResponse).ToList()
         );
     }
 
@@ -451,7 +478,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.Status,
             project.RecruitmentStatus,
             project.CreatedAt,
-            new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl)
+            new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category.ToString(), ps.Skill.IconUrl, null)).ToList()
         );
     }
 

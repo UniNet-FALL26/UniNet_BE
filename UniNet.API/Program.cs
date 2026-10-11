@@ -7,6 +7,7 @@ using UniNet.Application.Services;
 using UniNet.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
 var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
 var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is required.");
@@ -21,12 +22,20 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestServ
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
+builder.Services.AddHttpClient<UniNet.API.Services.IPortraitProcessor, UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromMinutes(3))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<UniNet.Application.Interfaces.ICloudImageStorage, UniNet.API.Services.CloudinaryImageStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>();
+builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
+builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddEndpointsApiExplorer();

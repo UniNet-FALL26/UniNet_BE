@@ -80,6 +80,7 @@ public sealed record PortfolioIdentity(Guid Id, string FullName, string? AvatarU
 public sealed record PortfolioResponse(PortfolioIdentity Profile, PortfolioContent Portfolio, bool IsOwner, PortfolioSkillCatalog[]? SkillCatalog = null);
 public sealed record PortfolioPresentationRequest(string FullName, string? Nickname, string? AvatarUrl, string? CoverUrl, string? Bio);
 public sealed record PortfolioEditorRequest(PortfolioPresentationRequest Profile, PortfolioContent Portfolio);
+public sealed record PortfolioDisplayRequest(bool? ShowPortfolio);
 
 public sealed record CareerSkill(Guid SkillId, int? Level = null, double? YearsOfExperience = null);
 public sealed record PortfolioSkillCatalog(Guid Id, string Name, string? IconUrl, string Category);
@@ -88,6 +89,7 @@ public sealed record PortfolioLanguage(string Name, string Level);
 public sealed record ProfileAppearance { public ProfileAppearanceSettings Profile { get; init; } = new(); }
 public sealed record ProfileAppearanceSettings
 {
+    public bool? ShowPortfolio { get; init; }
     public string Template { get; init; } = "developer-modern";
     public string Theme { get; init; } = "blue";
     public string Font { get; init; } = "Inter";
