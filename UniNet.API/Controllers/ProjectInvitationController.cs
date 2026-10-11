@@ -43,7 +43,7 @@ public sealed class ProjectInvitationController(IProjectInvitationService invita
     public Task<ProjectInvitationResponse> Cancel(Guid invitationId, CancellationToken ct)
         => invitations.CancelAsync(invitationId, AccountId, ct);
 
-    [HttpPatch("invitations/{invitationId:guid}/decline")]
+    [HttpPatch("invitations/{invitationId:guid}/reject")]
     public Task<ProjectInvitationResponse> Decline(Guid invitationId, CancellationToken ct)
         => invitations.DeclineAsync(invitationId, AccountId, ct);
 
