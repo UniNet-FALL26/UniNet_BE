@@ -14,12 +14,13 @@ if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("J
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
+builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
-builder.Services.AddScoped<UniNet.Application.Interfaces.ICompanyService, UniNet.Application.Services.CompanyService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
@@ -109,10 +110,10 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         await context.Response.WriteAsJsonAsync(new { code = memberError.Code, message = memberError.Message });
         return;
     }
-    if (error is UniNet.Application.Common.CompanyException companyError)
+    if (error is UniNet.Application.Common.PartnerException partnerError)
     {
-        context.Response.StatusCode = companyError.Status;
-        await context.Response.WriteAsJsonAsync(new { code = companyError.Code, message = companyError.Message });
+        context.Response.StatusCode = partnerError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = partnerError.Code, message = partnerError.Message });
         return;
     }
     if (error is ProjectException projectError)

@@ -66,14 +66,15 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
     public async Task<AuthResponse> RegisterPartner(RegisterPartnerRequest request, CancellationToken ct)
     {
         var email = Email(request.Email);
-        ValidateCredentials(email, request.Password, request.ConfirmPassword, request.FullName ?? "");
+        ValidateCredentials(email, request.Password, request.ConfirmPassword, request.OrganizationName);
         Require(!string.IsNullOrWhiteSpace(request.OrganizationName) && request.OrganizationName.Trim().Length <= 255, "INVALID_ORGANIZATION_NAME", "Tên tổ chức phải có từ 1 đến 255 ký tự.");
-        var nickname = Nickname(request.Nickname, request.FullName!.Trim());
+        var organizationName = request.OrganizationName.Trim();
+        var nickname = organizationName[..Math.Min(organizationName.Length, 100)];
         Require(request.PartnerType is { } partnerType && Enum.IsDefined(partnerType), "INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
         if (await db.Accounts.AnyAsync(x => x.Email == email, ct)) throw new AuthException("EMAIL_ALREADY_EXISTS", "Email này đã được sử dụng.", 409);
         var account = new Account { Email = email, Role = AccountRole.Partner };
         account.PasswordHash = hasher.HashPassword(account, request.Password);
-        await SaveRegistration(account, new UserProfile { FullName = request.FullName!.Trim(), Nickname = nickname, OrganizationName = request.OrganizationName.Trim(), PartnerType = request.PartnerType }, ct);
+        await SaveRegistration(account, new UserProfile { FullName = organizationName, Nickname = nickname, OrganizationName = organizationName, PartnerType = request.PartnerType }, ct);
         return await Issue(account, null, null, ct);
     }
     public async Task<AuthResponse> Login(LoginRequest request, CancellationToken ct)

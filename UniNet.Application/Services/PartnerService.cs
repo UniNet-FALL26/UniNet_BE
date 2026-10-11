@@ -1,8 +1,7 @@
 using System.Text.Json;
-using System.Net.Mail;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Application.Common;
-using UniNet.Application.DTOs.Company;
+using UniNet.Application.DTOs.Partner;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -11,110 +10,53 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class CompanyService(UniNetDbContext db) : ICompanyService
+public sealed class PartnerService(UniNetDbContext db) : IPartnerService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly DateTimeOffset NoLaterThan = DateTimeOffset.UtcNow.AddDays(7);
 
-    public async Task<CompanyProfileResponse> GetProfileAsync(Guid accountId, CancellationToken ct)
+    public async Task<PartnerDashboardResponse> GetDashboardAsync(Guid accountId, CancellationToken ct)
     {
-        var (company, profile) = await GetCompanyAndProfileAsync(accountId, ct);
-        var openJobs = await db.Jobs.AsNoTracking().Where(x => x.CompanyUserId == company.Id &&
-                x.Status == (short)CompanyJobStatus.Published && (x.Deadline == null || x.Deadline > DateTimeOffset.UtcNow))
-            .Include(x => x.JobSkills).ThenInclude(x => x.Skill)
-            .OrderByDescending(x => x.CreatedAt).Take(10).ToListAsync(ct);
-        var counts = await GetApplicantCountsAsync(openJobs.Select(x => x.Id), ct);
-        return ToProfile(company, profile, openJobs.Select(x => ToJob(x, counts.GetValueOrDefault(x.Id))).ToList());
-    }
-
-    public async Task<CompanyProfileResponse> UpdateProfileAsync(Guid accountId, UpdateCompanyProfileRequest request, CancellationToken ct)
-    {
-        ValidateRequired(request.CompanyName, 255, "Company name");
-        ValidateMax(request.Description, 5000, "Description");
-        ValidateMax(request.Industry, 150, "Industry");
-        ValidateMax(request.Phone, 30, "Phone");
-        ValidateMax(request.ContactEmail, 255, "Contact email");
-        ValidateMax(request.Website, 2048, "Website");
-        ValidateMax(request.AvatarUrl, 2048, "Avatar URL");
-        ValidateMax(request.CoverUrl, 2048, "Cover URL");
-        ValidateMax(request.Address, 1000, "Address");
-        ValidateEmail(request.ContactEmail, "Contact email");
-        ValidatePhone(request.Phone);
-        ValidateHttpUrl(request.Website, "Website");
-        ValidateHttpUrl(request.AvatarUrl, "Avatar URL");
-        ValidateHttpUrl(request.CoverUrl, "Cover URL");
-        var (company, profile) = await GetCompanyAndProfileAsync(accountId, ct);
-        var changed = company.CompanyName != request.CompanyName.Trim() || profile.Industry != Clean(request.Industry) ||
-            company.Website != Clean(request.Website) || company.Phone != Clean(request.Phone) || company.Address != Clean(request.Address) || profile.ContactEmail != Clean(request.ContactEmail);
-        company.CompanyName = request.CompanyName.Trim();
-        company.AvatarUrl = Clean(request.AvatarUrl);
-        company.CoverUrl = Clean(request.CoverUrl);
-        company.Phone = Clean(request.Phone);
-        company.Address = Clean(request.Address);
-        company.Website = Clean(request.Website);
-        company.UpdatedAt = DateTimeOffset.UtcNow;
-        profile.OrganizationName = company.CompanyName;
-        profile.Bio = Clean(request.Description);
-        profile.Industry = Clean(request.Industry);
-        profile.Website = company.Website;
-        profile.Phone = company.Phone;
-        profile.Address = company.Address;
-        profile.ContactEmail = Clean(request.ContactEmail);
-        profile.AvatarUrl = company.AvatarUrl;
-        profile.CoverUrl = company.CoverUrl;
-        profile.IsVerified = changed ? false : profile.IsVerified;
-        profile.UpdatedAt = company.UpdatedAt;
-        await db.SaveChangesAsync(ct);
-        var openJobs = await db.Jobs.AsNoTracking().Where(x => x.CompanyUserId == company.Id &&
-                x.Status == (short)CompanyJobStatus.Published && (x.Deadline == null || x.Deadline > DateTimeOffset.UtcNow))
-            .Include(x => x.JobSkills).ThenInclude(x => x.Skill)
-            .OrderByDescending(x => x.CreatedAt).Take(10).ToListAsync(ct);
-        var counts = await GetApplicantCountsAsync(openJobs.Select(x => x.Id), ct);
-        return ToProfile(company, profile, openJobs.Select(x => ToJob(x, counts.GetValueOrDefault(x.Id))).ToList());
-    }
-
-    public async Task<CompanyDashboardResponse> GetDashboardAsync(Guid accountId, CancellationToken ct)
-    {
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
+        var profile = await GetPartnerProfileAsync(accountId, ct);
         var now = DateTimeOffset.UtcNow;
-        var jobs = db.Jobs.AsNoTracking().Where(x => x.CompanyUserId == company.Id);
+        var jobs = db.Jobs.AsNoTracking().Where(x => x.PartnerId == profile.Id);
         var total = await jobs.CountAsync(ct);
-        var published = await jobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Published &&
+        var published = await jobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Published &&
             (x.Deadline == null || x.Deadline > now), ct);
-        var drafts = await jobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Draft, ct);
-        var closed = await jobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Closed, ct);
-        var expiring = await jobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Published &&
+        var drafts = await jobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Draft, ct);
+        var closed = await jobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Closed, ct);
+        var expiring = await jobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Published &&
             x.Deadline != null && x.Deadline >= now && x.Deadline <= now.AddDays(7), ct);
-        var appQuery = db.JobApplications.Where(x => x.Job.CompanyUserId == company.Id);
+        var appQuery = db.JobApplications.Where(x => x.Job.PartnerId == profile.Id);
         var appCounts = await appQuery.GroupBy(x => x.Status).Select(g => new { Status = g.Key, Count = g.Count() }).ToListAsync(ct);
         int AppCount(short status) => appCounts.Where(x => x.Status == status).Select(x => x.Count).FirstOrDefault();
-        var openJobs = await jobs.Where(x => x.Status == (short)CompanyJobStatus.Published &&
+        var openJobs = await jobs.Where(x => x.Status == (short)PartnerJobStatus.Published &&
                 (x.Deadline == null || x.Deadline > now))
             .Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .OrderBy(x => x.Deadline).ThenByDescending(x => x.CreatedAt).Take(3).ToListAsync(ct);
         var counts = await GetApplicantCountsAsync(openJobs.Select(x => x.Id), ct);
-        return new(company.CompanyName, total, published, drafts, closed, expiring,
+        return new((profile.OrganizationName ?? profile.FullName), total, published, drafts, closed, expiring,
             appCounts.Sum(x => x.Count), AppCount((short)JobApplicationStatus.Pending), AppCount((short)JobApplicationStatus.Viewed),
             AppCount((short)JobApplicationStatus.Interview), AppCount((short)JobApplicationStatus.Accepted), AppCount((short)JobApplicationStatus.Rejected),
             openJobs.Select(x => ToJob(x, counts.GetValueOrDefault(x.Id))).ToList());
     }
 
-    public async Task<CompanyJobsResponse> ListJobsAsync(Guid accountId, CompanyJobStatus? status, string? keyword,
+    public async Task<PartnerJobsResponse> ListJobsAsync(Guid accountId, PartnerJobStatus? status, string? keyword,
         int page, int pageSize, CancellationToken ct)
     {
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
+        var profile = await GetPartnerProfileAsync(accountId, ct);
         ValidateStatus(status, allowExpired: true);
         Require(page >= 1, "INVALID_PAGE", "Page must be greater than or equal to 1.");
         Require(pageSize is >= 1 and <= 100, "INVALID_PAGE_SIZE", "Page size must be between 1 and 100.");
         ValidateMax(keyword, 100, "Keyword");
         var now = DateTimeOffset.UtcNow;
-        var query = db.Jobs.AsNoTracking().Where(x => x.CompanyUserId == company.Id);
-        if (status == CompanyJobStatus.Expired)
-            query = query.Where(x => x.Status == (short)CompanyJobStatus.Expired ||
-                (x.Status == (short)CompanyJobStatus.Published && x.Deadline <= now));
+        var query = db.Jobs.AsNoTracking().Where(x => x.PartnerId == profile.Id);
+        if (status == PartnerJobStatus.Expired)
+            query = query.Where(x => x.Status == (short)PartnerJobStatus.Expired ||
+                (x.Status == (short)PartnerJobStatus.Published && x.Deadline <= now));
         else if (status.HasValue)
             query = query.Where(x => x.Status == (short)status.Value &&
-                (status != CompanyJobStatus.Published || x.Deadline == null || x.Deadline > now));
+                (status != PartnerJobStatus.Published || x.Deadline == null || x.Deadline > now));
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             var term = keyword.Trim();
@@ -125,36 +67,37 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
             .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue)).Take(pageSize)
             .Include(x => x.JobSkills).ThenInclude(x => x.Skill).ToListAsync(ct);
         var applicantCounts = await GetApplicantCountsAsync(rows.Select(x => x.Id), ct);
-        var allCompanyJobs = db.Jobs.AsNoTracking().Where(x => x.CompanyUserId == company.Id);
-        var total = await allCompanyJobs.CountAsync(ct);
-        var published = await allCompanyJobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Published &&
+        var allPartnerJobs = db.Jobs.AsNoTracking().Where(x => x.PartnerId == profile.Id);
+        var total = await allPartnerJobs.CountAsync(ct);
+        var published = await allPartnerJobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Published &&
             (x.Deadline == null || x.Deadline > now), ct);
-        var drafts = await allCompanyJobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Draft, ct);
-        var closingSoon = await allCompanyJobs.CountAsync(x => x.Status == (short)CompanyJobStatus.Published &&
+        var drafts = await allPartnerJobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Draft, ct);
+        var closingSoon = await allPartnerJobs.CountAsync(x => x.Status == (short)PartnerJobStatus.Published &&
             x.Deadline != null && x.Deadline >= now && x.Deadline <= now.AddDays(7), ct);
         return new(page, pageSize, totalItems, (int)(((long)totalItems + pageSize - 1) / pageSize), total, published, drafts,
             closingSoon, rows.Select(x => ToJob(x, applicantCounts.GetValueOrDefault(x.Id))).ToList());
     }
 
-    public async Task<CompanyJobResponse> GetJobAsync(Guid accountId, Guid jobId, CancellationToken ct)
+    public async Task<PartnerJobResponse> GetJobAsync(Guid accountId, Guid jobId, CancellationToken ct)
     {
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
-        var job = await OwnedJobs(company.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
-            ?? throw new CompanyException("JOB_NOT_FOUND", "Job post was not found.", 404);
+            ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
         var applicantCount = await db.JobApplications.CountAsync(x => x.JobId == job.Id, ct);
         return ToJob(job, applicantCount);
     }
 
-    public async Task<CompanyJobResponse> CreateJobAsync(Guid accountId, SaveCompanyJobRequest request, CancellationToken ct)
+    public async Task<PartnerJobResponse> CreateJobAsync(Guid accountId, SavePartnerJobRequest request, CancellationToken ct)
     {
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
+        var profile = await GetPartnerProfileAsync(accountId, ct);
         ValidateJob(request);
+        if (request.Status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
         var skills = await LoadSkillsAsync(request.Skills, ct);
         var now = DateTimeOffset.UtcNow;
         var job = new Job
         {
-            Id = Guid.NewGuid(), CompanyUserId = company.Id, Company = company,
+            Id = Guid.NewGuid(), PartnerId = profile.Id, Partner = profile,
             Title = request.Title.Trim(),
             WorkType = (short)request.WorkType, MinSalaryVnd = request.MinSalaryVnd, MaxSalaryVnd = request.MaxSalaryVnd,
             Location = request.Location.Trim(), Description = request.Description.Trim(),
@@ -172,13 +115,14 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
         return ToJob(job, 0);
     }
 
-    public async Task<CompanyJobResponse> UpdateJobAsync(Guid accountId, Guid jobId, SaveCompanyJobRequest request, CancellationToken ct)
+    public async Task<PartnerJobResponse> UpdateJobAsync(Guid accountId, Guid jobId, SavePartnerJobRequest request, CancellationToken ct)
     {
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
+        var profile = await GetPartnerProfileAsync(accountId, ct);
         ValidateJob(request);
-        var job = await OwnedJobs(company.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
+        if (request.Status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
+        var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
-            ?? throw new CompanyException("JOB_NOT_FOUND", "Job post was not found.", 404);
+            ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
         var skills = await LoadSkillsAsync(request.Skills, ct);
         var requestedSkills = skills.ToDictionary(x => x.skill.Id);
         foreach (var existing in job.JobSkills.ToList())
@@ -215,15 +159,16 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
         return ToJob(job, applicantCount);
     }
 
-    public async Task<CompanyJobResponse> UpdateJobStatusAsync(Guid accountId, Guid jobId, CompanyJobStatus status, CancellationToken ct)
+    public async Task<PartnerJobResponse> UpdateJobStatusAsync(Guid accountId, Guid jobId, PartnerJobStatus status, CancellationToken ct)
     {
         ValidateStatus(status, allowExpired: false);
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
-        var job = await OwnedJobs(company.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
-            ?? throw new CompanyException("JOB_NOT_FOUND", "Job post was not found.", 404);
-        if (status == CompanyJobStatus.Published && job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow)
-            throw new CompanyException("INVALID_DEADLINE", "A job with a past deadline cannot be published.");
+            ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
+        if (status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
+        if (status == PartnerJobStatus.Published && job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow)
+            throw new PartnerException("INVALID_DEADLINE", "A job with a past deadline cannot be published.");
         job.Status = (short)status;
         job.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -233,45 +178,38 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
 
     public async Task DeleteJobAsync(Guid accountId, Guid jobId, CancellationToken ct)
     {
-        var (company, _) = await GetCompanyAndProfileAsync(accountId, ct);
-        var job = await OwnedJobs(company.Id).FirstOrDefaultAsync(x => x.Id == jobId, ct)
-            ?? throw new CompanyException("JOB_NOT_FOUND", "Job post was not found.", 404);
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        var job = await OwnedJobs(profile.Id).FirstOrDefaultAsync(x => x.Id == jobId, ct)
+            ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
 
         if (await db.JobApplications.AnyAsync(x => x.JobId == job.Id, ct))
-            throw new CompanyException("JOB_HAS_APPLICATIONS", "A job with applications cannot be deleted.", 409);
+            throw new PartnerException("JOB_HAS_APPLICATIONS", "A job with applications cannot be deleted.", 409);
         if (await db.StudentSavedJobs.AnyAsync(x => x.JobId == job.Id, ct))
-            throw new CompanyException("JOB_HAS_SAVED_STUDENTS", "A job saved by students cannot be deleted.", 409);
+            throw new PartnerException("JOB_HAS_SAVED_STUDENTS", "A job saved by students cannot be deleted.", 409);
 
         db.Jobs.Remove(job);
         await db.SaveChangesAsync(ct);
     }
 
-    private IQueryable<Job> OwnedJobs(Guid companyId) => db.Jobs.Where(x => x.CompanyUserId == companyId);
+    private IQueryable<Job> OwnedJobs(Guid partnerId) => db.Jobs.Where(x => x.PartnerId == partnerId);
 
-    private async Task<(Company company, UserProfile profile)> GetCompanyAndProfileAsync(Guid accountId, CancellationToken ct)
+    private async Task<UserProfile> GetPartnerProfileAsync(Guid accountId, CancellationToken ct)
     {
         var account = await db.Accounts.Include(x => x.Profile).SingleOrDefaultAsync(x => x.Id == accountId, ct)
-            ?? throw new CompanyException("ACCOUNT_NOT_FOUND", "Account was not found.", 404);
+            ?? throw new PartnerException("ACCOUNT_NOT_FOUND", "Account was not found.", 404);
         Require(account.Role == AccountRole.Partner && account.Status == AccountStatus.Active,
-            "FORBIDDEN", "Only active partner accounts can access company features.", 403);
-        var profile = account.Profile ?? throw new CompanyException("PROFILE_NOT_FOUND", "Company profile was not found.", 404);
-        var company = await db.Companies.FirstOrDefaultAsync(x => x.AccountId == accountId, ct);
-        if (company is null)
-        {
-            company = new Company
-            {
-                Id = Guid.NewGuid(), AccountId = accountId,
-                CompanyName = string.IsNullOrWhiteSpace(profile.OrganizationName) ? profile.FullName : profile.OrganizationName,
-                AvatarUrl = profile.AvatarUrl, CoverUrl = profile.CoverUrl,
-                Phone = profile.Phone, Address = profile.Address, Website = profile.Website,
-                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
-            };
-            db.Companies.Add(company);
-            await db.SaveChangesAsync(ct);
-        }
-        return (company, profile);
+            "FORBIDDEN", "Only active partner accounts can access recruitment features.", 403);
+        return account.Profile ?? throw new PartnerException("PROFILE_NOT_FOUND", "Partner profile was not found.", 404);
     }
-
+    private async Task EnsurePartnerVerifiedAsync(UserProfile profile, CancellationToken ct)
+    {
+        var latestStatus = await db.UserVerifications.AsNoTracking()
+            .Where(x => x.UserId == profile.Id && x.VerificationType == VerificationType.Partner)
+            .OrderByDescending(x => x.SubmittedAt).ThenByDescending(x => x.CreatedAt)
+            .Select(x => (VerificationStatus?)x.Status).FirstOrDefaultAsync(ct);
+        Require(profile.IsVerified && latestStatus == VerificationStatus.Approved,
+            "PARTNER_VERIFICATION_REQUIRED", "Hồ sơ đối tác cần được admin xác minh trước khi đăng tuyển công khai.", 403);
+    }
     private async Task<List<(Skill skill, JobSkillRequirementType requirementType)>> LoadSkillsAsync(
         IReadOnlyList<JobSkillInput>? inputs, CancellationToken ct)
     {
@@ -293,11 +231,7 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
             .Select(g => new { JobId = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.JobId, x => x.Count, ct);
     }
 
-    private static CompanyProfileResponse ToProfile(Company company, UserProfile profile, IReadOnlyList<CompanyJobResponse> openJobs)
-        => new(company.Id, company.CompanyName, profile.Bio, profile.Industry, company.Website, company.Phone, company.Address,
-            profile.ContactEmail, company.AvatarUrl, company.CoverUrl, profile.IsVerified, company.UpdatedAt, openJobs);
-
-    private static CompanyJobResponse ToJob(Job job, int applicantCount)
+    private static PartnerJobResponse ToJob(Job job, int applicantCount)
     {
         var requirements = DeserializeRequirements(job.RequiredJson);
         return new(job.Id, job.Title, (JobWorkType)job.WorkType, job.MinSalaryVnd, job.MaxSalaryVnd,
@@ -309,10 +243,10 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
             DeserializeBenefits(job.BenefitsJson), applicantCount, job.CreatedAt, job.UpdatedAt);
     }
 
-    private static CompanyJobStatus GetStatus(Job job) => job.Status == (short)CompanyJobStatus.Published &&
-        job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow ? CompanyJobStatus.Expired : (CompanyJobStatus)job.Status;
+    private static PartnerJobStatus GetStatus(Job job) => job.Status == (short)PartnerJobStatus.Published &&
+        job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow ? PartnerJobStatus.Expired : (PartnerJobStatus)job.Status;
 
-    private static string SerializeRequirements(SaveCompanyJobRequest request) => JsonSerializer.Serialize(new JobRequirementsDocument(
+    private static string SerializeRequirements(SavePartnerJobRequest request) => JsonSerializer.Serialize(new JobRequirementsDocument(
         CleanLines(request.Responsibilities), CleanLines(request.RequiredQualifications), CleanLines(request.PreferredQualifications),
         CleanLines(request.ProjectAreas)), JsonOptions);
 
@@ -333,7 +267,7 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
     private static IReadOnlyList<string> CleanLines(IReadOnlyList<string>? values) =>
         (values ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal).ToList();
 
-    private static void ValidateJob(SaveCompanyJobRequest request)
+    private static void ValidateJob(SavePartnerJobRequest request)
     {
         ValidateRequired(request.Title, 255, "Title");
         ValidateRequired(request.Location, 255, "Location");
@@ -341,7 +275,7 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
         ValidateMax(request.Description, 20000, "Description");
         Require(Enum.IsDefined(request.WorkType), "INVALID_WORK_TYPE", "Work type is invalid.");
         ValidateStatus(request.Status, allowExpired: false);
-        Require(request.Deadline > DateTimeOffset.UtcNow || request.Status == CompanyJobStatus.Draft,
+        Require(request.Deadline > DateTimeOffset.UtcNow || request.Status == PartnerJobStatus.Draft,
             "INVALID_DEADLINE", "A published job must have a future deadline.");
         Require(request.StartAt is null || request.StartAt <= request.Deadline,
             "INVALID_DATE_RANGE", "Start date must be on or before the application deadline.");
@@ -372,14 +306,14 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
         }
     }
 
-    private static void ValidateStatus(CompanyJobStatus? status, bool allowExpired)
+    private static void ValidateStatus(PartnerJobStatus? status, bool allowExpired)
     {
         if (status.HasValue) ValidateStatus(status.Value, allowExpired);
     }
 
-    private static void ValidateStatus(CompanyJobStatus status, bool allowExpired)
+    private static void ValidateStatus(PartnerJobStatus status, bool allowExpired)
     {
-        Require(Enum.IsDefined(status) && (allowExpired || status != CompanyJobStatus.Expired),
+        Require(Enum.IsDefined(status) && (allowExpired || status != PartnerJobStatus.Expired),
             "INVALID_JOB_STATUS", "Job status is invalid.");
     }
 
@@ -389,43 +323,12 @@ public sealed class CompanyService(UniNetDbContext db) : ICompanyService
         Require((values ?? []).All(x => x is not null), "INVALID_FIELD", $"{field} entries cannot be null.");
         foreach (var value in values ?? []) ValidateMax(value, maxLength, field);
     }
-    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static void ValidateRequired(string value, int maxLength, string field)
         => Require(!string.IsNullOrWhiteSpace(value) && value.Trim().Length <= maxLength, "INVALID_FIELD", $"{field} is required and must be at most {maxLength} characters.");
     private static void ValidateMax(string? value, int maxLength, string field)
-        => Require(value is null || value.Length <= maxLength, "INVALID_FIELD", $"{field} must be at most {maxLength} characters.");
-    private static void ValidateEmail(string? value, string field)
+        => Require(value is null || value.Length <= maxLength, "INVALID_FIELD", $"{field} must be at most {maxLength} characters.");    private static void Require(bool condition, string code, string message, int status = 400)
     {
-        if (string.IsNullOrWhiteSpace(value)) return;
-        try
-        {
-            var parsed = new MailAddress(value.Trim());
-            Require(parsed.Address.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase), "INVALID_EMAIL", $"{field} must be a valid email address.");
-        }
-        catch (FormatException)
-        {
-            throw new CompanyException("INVALID_EMAIL", $"{field} must be a valid email address.");
-        }
-    }
-    private static void ValidatePhone(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return;
-        var phone = value.Trim();
-        Require(phone.All(c => char.IsDigit(c) || c is '+' or '-' or '(' or ')' or ' '),
-            "INVALID_PHONE", "Phone may contain digits, spaces, +, - and parentheses only.");
-        var digitCount = phone.Count(char.IsDigit);
-        Require(digitCount is >= 7 and <= 15, "INVALID_PHONE", "Phone must contain between 7 and 15 digits.");
-    }
-    private static void ValidateHttpUrl(string? value, string field)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return;
-        var valid = Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) &&
-            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) && !string.IsNullOrWhiteSpace(uri.Host);
-        Require(valid, "INVALID_URL", $"{field} must be an absolute HTTP or HTTPS URL.");
-    }
-    private static void Require(bool condition, string code, string message, int status = 400)
-    {
-        if (!condition) throw new CompanyException(code, message, status);
+        if (!condition) throw new PartnerException(code, message, status);
     }
 
     private sealed record JobRequirementsDocument(
