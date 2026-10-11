@@ -69,7 +69,8 @@ public static class ProjectMapping
             project.Status,
             project.RecruitmentStatus,
             project.CreatedAt,
-            new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl)
+            new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category.ToString(), ps.Skill.IconUrl, null)).ToList()
         );
     }
 
