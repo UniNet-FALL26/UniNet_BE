@@ -13,4 +13,5 @@ public sealed class Skill
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ProjectSkill> ProjectSkills { get; set; } = [];
     public List<UserSkill> UserSkills { get; set; } = [];
+    public List<JobSkill> JobSkills { get; set; } = [];
 }
