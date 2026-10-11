@@ -27,7 +27,7 @@ builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationServic
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
-builder.Services.AddHttpClient<UniNet.API.Services.IPortraitProcessor, UniNet.API.Services.PortraitProcessor>(client => client.Timeout = TimeSpan.FromMinutes(3))
+builder.Services.AddHttpClient<UniNet.API.Services.IPortraitProcessor, UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromMinutes(3))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
