@@ -155,71 +155,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("CareerProfiles", (string)null);
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Company", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Address")
-                        .HasColumnType("text");
-
-                    b.Property<string>("AvatarUrl")
-                        .HasColumnType("text");
-
-                    b.Property<string>("CompanyName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("CoverUrl")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Phone")
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Website")
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccountId")
-                        .IsUnique();
-
-                    b.ToTable("Company", (string)null);
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.CompanySavedStudent", b =>
-                {
-                    b.Property<Guid>("CompanyUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("StudentUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("SavedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("CompanyUserId", "StudentUserId");
-
-                    b.HasIndex("StudentUserId");
-
-                    b.ToTable("CompanySavedStudents", (string)null);
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.Property<Guid>("Id")
@@ -228,9 +163,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<string>("BenefitsJson")
                         .HasColumnType("jsonb");
-
-                    b.Property<Guid>("CompanyUserId")
-                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -252,6 +184,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<decimal?>("MinSalaryVnd")
                         .HasPrecision(14)
                         .HasColumnType("numeric(14,0)");
+
+                    b.Property<Guid>("PartnerId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("RequiredJson")
                         .HasColumnType("jsonb");
@@ -275,7 +210,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CompanyUserId");
+                    b.HasIndex("PartnerId");
 
                     b.HasIndex("Status", "Deadline");
 
@@ -772,6 +707,25 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("StudentSavedJobs", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.Property<Guid>("UserBookmarkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserBookmarkId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("User1SavedUser2", (string)null);
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1195,45 +1149,15 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Company", b =>
-                {
-                    b.HasOne("UniNet.Domain.Account", "Account")
-                        .WithOne("Company")
-                        .HasForeignKey("UniNet.Domain.Company", "AccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Account");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.CompanySavedStudent", b =>
-                {
-                    b.HasOne("UniNet.Domain.Company", "Company")
-                        .WithMany("SavedStudents")
-                        .HasForeignKey("CompanyUserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.UserProfile", "Student")
-                        .WithMany("SavedByCompanies")
-                        .HasForeignKey("StudentUserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Student");
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
-                    b.HasOne("UniNet.Domain.Company", "Company")
-                        .WithMany("Jobs")
-                        .HasForeignKey("CompanyUserId")
+                    b.HasOne("UniNet.Domain.UserProfile", "Partner")
+                        .WithMany("PostedJobs")
+                        .HasForeignKey("PartnerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Company");
+                    b.Navigation("Partner");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.JobApplication", b =>
@@ -1455,6 +1379,23 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
+                        .WithMany("SavedUsers")
+                        .HasForeignKey("UserBookmarkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany("SavedByUsers")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+
+                    b.Navigation("UserBookmark");
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.TaskReport", "TaskReport")
@@ -1574,18 +1515,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Account", b =>
                 {
-                    b.Navigation("Company");
-
                     b.Navigation("Profile");
 
                     b.Navigation("RefreshTokens");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Company", b =>
-                {
-                    b.Navigation("Jobs");
-
-                    b.Navigation("SavedStudents");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
@@ -1645,11 +1577,15 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Navigation("Members");
 
+                    b.Navigation("PostedJobs");
+
                     b.Navigation("ReceivedInvitations");
 
-                    b.Navigation("SavedByCompanies");
+                    b.Navigation("SavedByUsers");
 
                     b.Navigation("SavedJobs");
+
+                    b.Navigation("SavedUsers");
 
                     b.Navigation("SentInvitations");
 

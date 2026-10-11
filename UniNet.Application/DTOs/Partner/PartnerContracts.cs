@@ -1,35 +1,9 @@
 using UniNet.Domain.Enums;
 
-namespace UniNet.Application.DTOs.Company;
+namespace UniNet.Application.DTOs.Partner;
 
-public sealed record UpdateCompanyProfileRequest(
-    string CompanyName,
-    string? Description,
-    string? Industry,
-    string? Website,
-    string? Phone,
-    string? Address,
-    string? ContactEmail,
-    string? AvatarUrl,
-    string? CoverUrl);
-
-public sealed record CompanyProfileResponse(
-    Guid Id,
-    string CompanyName,
-    string? Description,
-    string? Industry,
-    string? Website,
-    string? Phone,
-    string? Address,
-    string? ContactEmail,
-    string? AvatarUrl,
-    string? CoverUrl,
-    bool IsVerified,
-    DateTimeOffset UpdatedAt,
-    IReadOnlyList<CompanyJobResponse> OpenJobs);
-
-public sealed record CompanyDashboardResponse(
-    string CompanyName,
+public sealed record PartnerDashboardResponse(
+    string OrganizationName,
     int TotalJobs,
     int PublishedJobs,
     int DraftJobs,
@@ -41,12 +15,12 @@ public sealed record CompanyDashboardResponse(
     int InterviewApplications,
     int AcceptedApplications,
     int RejectedApplications,
-    IReadOnlyList<CompanyJobResponse> OpenJobs);
+    IReadOnlyList<PartnerJobResponse> OpenJobs);
 
 public sealed record JobSkillInput(Guid SkillId, JobSkillRequirementType RequirementType);
 public sealed record JobBenefitInput(string Title, string Description);
 
-public sealed record SaveCompanyJobRequest(
+public sealed record SavePartnerJobRequest(
     string Title,
     JobWorkType WorkType,
     decimal? MinSalaryVnd,
@@ -55,7 +29,7 @@ public sealed record SaveCompanyJobRequest(
     string Description,
     DateTimeOffset? StartAt,
     DateTimeOffset Deadline,
-    CompanyJobStatus Status,
+    PartnerJobStatus Status,
     IReadOnlyList<string>? Responsibilities = null,
     IReadOnlyList<string>? RequiredQualifications = null,
     IReadOnlyList<string>? PreferredQualifications = null,
@@ -63,9 +37,9 @@ public sealed record SaveCompanyJobRequest(
     IReadOnlyList<JobSkillInput>? Skills = null,
     IReadOnlyList<JobBenefitInput>? Benefits = null);
 
-public sealed record UpdateCompanyJobStatusRequest(CompanyJobStatus Status);
+public sealed record UpdatePartnerJobStatusRequest(PartnerJobStatus Status);
 
-public sealed record CompanyJobResponse(
+public sealed record PartnerJobResponse(
     Guid Id,
     string Title,
     JobWorkType WorkType,
@@ -73,7 +47,7 @@ public sealed record CompanyJobResponse(
     decimal? MaxSalaryVnd,
     string? Location,
     string? Description,
-    CompanyJobStatus Status,
+    PartnerJobStatus Status,
     DateTimeOffset? StartAt,
     DateTimeOffset? Deadline,
     IReadOnlyList<string> Responsibilities,
@@ -88,7 +62,7 @@ public sealed record CompanyJobResponse(
 
 public sealed record JobSkillResponse(Guid SkillId, string Name, short Category, JobSkillRequirementType RequirementType);
 
-public sealed record CompanyJobsResponse(
+public sealed record PartnerJobsResponse(
     int Page,
     int PageSize,
     int TotalItems,
@@ -97,4 +71,4 @@ public sealed record CompanyJobsResponse(
     int PublishedJobs,
     int DraftJobs,
     int ClosingSoonJobs,
-    IReadOnlyList<CompanyJobResponse> Jobs);
+    IReadOnlyList<PartnerJobResponse> Jobs);
