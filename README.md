@@ -13,7 +13,7 @@ Set these environment variables or use .NET user secrets in `UniNet.API`:
 
 Never commit credentials. The API fails at startup if the database connection or JWT key is missing. Google login returns `GOOGLE_NOT_CONFIGURED` until a client ID is configured.
 
-EF design-time commands also read `ConnectionStrings__UniNet` from the ignored `UniNet_BE/.env` file when the environment variable is not set. Explicit environment configuration takes precedence. This local file loading applies to EF tooling; configure the API runtime through environment variables or user secrets as above.
+The API reads the ignored `UniNet_BE/.env` file at startup (or `.env` in its content root), including nested keys using `__`. Local file values override appsettings/user secrets; explicit process environment and command-line values take precedence. EF design-time commands also read `ConnectionStrings__UniNet` from this file when the environment variable is not set.
 
 ## Commands
 
