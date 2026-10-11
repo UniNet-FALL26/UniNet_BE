@@ -19,6 +19,7 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, Projec
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.ICompanyService, UniNet.Application.Services.CompanyService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
