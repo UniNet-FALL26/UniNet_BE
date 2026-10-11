@@ -4,6 +4,7 @@
 ## Get latest from `dotnet new gitignore`
 
 # dotenv files
+__pycache__/
 App_Data/profile-images/
 .env
 

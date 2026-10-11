@@ -1,0 +1,4 @@
+rembg[cpu]==2.0.67
+Pillow==11.3.0
+fastapi==0.116.1
+uvicorn==0.35.0

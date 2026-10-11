@@ -94,9 +94,13 @@ public sealed class PortfolioService(UniNetDbContext db)
         var catalog = await Catalog(ct);
         var skills = ReferenceSkills(request.Skills, catalog);
         var p = await Own(accountId, ct);
+        foreach (var url in request.Projects.Select(x => x.CoverUrl).Concat(request.Articles.Select(x => x.CoverUrl)).Concat(request.Certificates.Select(x => x.LogoUrl)))
+            await PortraitAssetPolicy.RetainReference(db, accountId, url, null, ct);
         if (presentation is not null)
         {
             RequireStudent(p);
+            await PortraitAssetPolicy.Retain(db, accountId, presentation.AvatarUrl, p.AvatarUrl, ct);
+            await PortraitAssetPolicy.RetainReference(db, accountId, presentation.CoverUrl, p.CoverUrl, ct);
             if (p.FullName != presentation.FullName.Trim()) p.IsVerified = false;
             p.FullName = presentation.FullName.Trim();
             if (presentation.Nickname is not null) p.Nickname = presentation.Nickname.Trim();
