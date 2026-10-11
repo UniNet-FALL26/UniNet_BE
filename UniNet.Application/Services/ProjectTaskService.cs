@@ -1,4 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using System.Text.RegularExpressions;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -7,9 +10,16 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
+public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration configuration) : IProjectTaskService
 {
-    private static void Require(bool condition, string code, string message, int status = 400)
+    private sealed record ValidatedEvidence(
+        string FileUrl,
+        string? PublicId,
+        string? ResourceType,
+        string? FileName,
+        string? Format);
+
+    private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)
     {
         if (!condition)
             throw new ProjectException(code, message, status);
@@ -177,7 +187,10 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
         return report ?? throw new ProjectException("TASK_REPORT_NOT_FOUND", "Task report not found.", 404);
     }
 
-    private static (string Content, List<string> EvidenceUrls) ValidateReport(SubmitTaskReportRequest request)
+    private static (string Content, List<ValidatedEvidence> Evidence) ValidateReport(
+        SubmitTaskReportRequest request,
+        Guid submitterAccountId,
+        string? cloudName)
     {
         if (request is null)
             throw new ProjectException("INVALID_TASK_REPORT", "Report body is required.");
@@ -187,20 +200,124 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
         if (evidence is null)
             throw new ProjectException("INVALID_TASK_EVIDENCE", "Evidence list is required.");
 
-        var evidenceUrls = new List<string>(evidence.Count);
+        var validatedEvidence = new List<ValidatedEvidence>(evidence.Count);
         foreach (var item in evidence)
         {
-            var fileUrl = item?.FileUrl?.Trim();
+            Require(item is not null, "INVALID_TASK_EVIDENCE_URL", "Evidence item is required.");
+            var fileUrl = item.FileUrl.Trim();
             Require(!string.IsNullOrWhiteSpace(fileUrl) && fileUrl.Length <= 2048 &&
                 Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri) &&
-                (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) &&
+                uri.Scheme == Uri.UriSchemeHttps &&
                 string.IsNullOrEmpty(uri.UserInfo),
                 "INVALID_TASK_EVIDENCE_URL",
-                "Evidence URLs must be absolute HTTP or HTTPS URLs without embedded credentials.");
-            evidenceUrls.Add(new Uri(fileUrl!, UriKind.Absolute).AbsoluteUri);
+                "Evidence URLs must be absolute HTTPS URLs without embedded credentials.");
+
+            var metadataCount = new[] { item.PublicId, item.ResourceType, item.FileName, item.Format }
+                .Count(value => value is not null);
+            if (metadataCount == 0)
+            {
+                validatedEvidence.Add(new(fileUrl!, null, null, null, null));
+                continue;
+            }
+
+            var publicId = item.PublicId?.Trim();
+            var resourceType = item.ResourceType?.Trim();
+            var fileName = item.FileName?.Trim();
+            var format = item.Format?.Trim().ToLowerInvariant();
+            Require(
+                !string.IsNullOrWhiteSpace(publicId) &&
+                !string.IsNullOrWhiteSpace(resourceType) &&
+                !string.IsNullOrWhiteSpace(format) &&
+                IsValidCloudinaryEvidence(
+                    fileUrl!,
+                    publicId!,
+                    resourceType!,
+                    fileName,
+                    format!,
+                    submitterAccountId,
+                    cloudName),
+                "INVALID_TASK_EVIDENCE_METADATA",
+                "Uploaded evidence metadata must match a secure Cloudinary asset uploaded by the current user.");
+
+            validatedEvidence.Add(new(
+                fileUrl!,
+                publicId,
+                resourceType,
+                fileName,
+                format));
         }
 
-        return (request.Content.Trim(), evidenceUrls);
+        return (request.Content.Trim(), validatedEvidence);
+    }
+
+    private static bool IsValidCloudinaryEvidence(
+        string fileUrl,
+        string publicId,
+        string resourceType,
+        string? fileName,
+        string format,
+        Guid accountId,
+        string? cloudName)
+    {
+        var supportedFormat = resourceType switch
+        {
+            "image" => format is "png" or "jpg" or "webp",
+            "raw" => format is "pdf" or "docx" or "xlsx" or "pptx" or "txt",
+            _ => false
+        };
+        if (!supportedFormat || string.IsNullOrWhiteSpace(cloudName) || publicId.Length > 255)
+            return false;
+
+        var prefix = resourceType == "image"
+            ? $"uninet/images/{accountId:N}/"
+            : $"uninet/evidence/{accountId:N}/";
+        if (!publicId.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+
+        var storedName = publicId[prefix.Length..];
+        var expectedName = resourceType == "image" ? storedName : Path.GetFileNameWithoutExtension(storedName);
+        var expectedExtension = resourceType == "image" ? string.Empty : $".{format}";
+        if (!Regex.IsMatch(expectedName, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant) ||
+            resourceType == "image" && storedName != expectedName ||
+            resourceType == "raw" && !storedName.EndsWith(expectedExtension, StringComparison.Ordinal))
+            return false;
+
+        if (fileName is not null)
+        {
+            if (fileName.Length > 255 || fileName.Any(char.IsControl) ||
+                fileName.Contains('/') || fileName.Contains('\\') || fileName is "." or "..")
+                return false;
+            var fileExtension = Path.GetExtension(fileName);
+            var validFileExtension = resourceType == "image"
+                ? format == "jpg"
+                    ? string.Equals(fileExtension, ".jpg", StringComparison.OrdinalIgnoreCase) ||
+                      string.Equals(fileExtension, ".jpeg", StringComparison.OrdinalIgnoreCase)
+                    : string.Equals(fileExtension, $".{format}", StringComparison.OrdinalIgnoreCase)
+                : string.Equals(fileExtension, $".{format}", StringComparison.OrdinalIgnoreCase);
+            if (!validFileExtension)
+                return false;
+        }
+
+        if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            uri.Host != "res.cloudinary.com" ||
+            !uri.IsDefaultPort ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+            return false;
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 5 ||
+            !string.Equals(segments[0], cloudName, StringComparison.Ordinal) ||
+            !string.Equals(segments[1], resourceType, StringComparison.Ordinal) ||
+            !string.Equals(segments[2], "upload", StringComparison.Ordinal) ||
+            !Regex.IsMatch(segments[3], "^v[0-9]+$", RegexOptions.CultureInvariant))
+            return false;
+
+        var deliveredAsset = string.Join('/', segments.Skip(4));
+        var expectedAsset = resourceType == "image" ? $"{publicId}.{format}" : publicId;
+        return string.Equals(deliveredAsset, expectedAsset, StringComparison.Ordinal);
     }
 
     private static TaskReportResponse MapReport(TaskReport report)
@@ -217,7 +334,14 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
             report.Evidence
                 .OrderBy(e => e.CreatedAt)
                 .ThenBy(e => e.Id)
-                .Select(e => new TaskEvidenceResponse(e.Id, e.FileUrl, e.CreatedAt))
+                .Select(e => new TaskEvidenceResponse(
+                    e.Id,
+                    e.FileUrl,
+                    e.CreatedAt,
+                    e.PublicId,
+                    e.ResourceType,
+                    e.FileName,
+                    e.Format))
                 .ToList(),
             report.Reviews
                 .OrderBy(r => r.ReviewedAt)
@@ -513,7 +637,7 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
         Guid projectId, Guid taskId, Guid accountId, SubmitTaskReportRequest request, CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
-        var (content, evidenceUrls) = ValidateReport(request);
+        var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
         var latestVersion = await db.TaskReports.AsNoTracking()
             .Where(r => r.ProjectTaskId == taskId && r.SubmittedById == submitter.Id)
             .OrderByDescending(r => r.Version)
@@ -533,9 +657,13 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
             Status = TaskReportStatus.Submitted,
             SubmittedAt = now,
             UpdatedAt = now,
-            Evidence = evidenceUrls.Select(url => new TaskEvidence
+            Evidence = evidence.Select(item => new TaskEvidence
             {
-                FileUrl = url,
+                FileUrl = item.FileUrl,
+                PublicId = item.PublicId,
+                ResourceType = item.ResourceType,
+                FileName = item.FileName,
+                Format = item.Format,
                 CreatedAt = now
             }).ToList()
         };
@@ -567,7 +695,7 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
             "Only the latest report that requires revision can be revised.",
             409);
 
-        var (content, evidenceUrls) = ValidateReport(request);
+        var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
         var now = DateTimeOffset.UtcNow;
         var revised = new TaskReport
         {
@@ -578,9 +706,13 @@ public sealed class ProjectTaskService(UniNetDbContext db) : IProjectTaskService
             Status = TaskReportStatus.Submitted,
             SubmittedAt = now,
             UpdatedAt = now,
-            Evidence = evidenceUrls.Select(url => new TaskEvidence
+            Evidence = evidence.Select(item => new TaskEvidence
             {
-                FileUrl = url,
+                FileUrl = item.FileUrl,
+                PublicId = item.PublicId,
+                ResourceType = item.ResourceType,
+                FileName = item.FileName,
+                Format = item.Format,
                 CreatedAt = now
             }).ToList()
         };

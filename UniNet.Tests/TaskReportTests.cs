@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using UniNet.Application;
 using UniNet.Application.Services;
 using UniNet.Domain;
@@ -29,7 +30,10 @@ public sealed class TaskReportTests
             .UseSqlite(connection)
             .Options);
         await db.Database.EnsureCreatedAsync();
-        return (connection, db, new ProjectTaskService(db));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Cloudinary:CloudName"] = "fixture" })
+            .Build();
+        return (connection, db, new ProjectTaskService(db, configuration));
     }
 
     private static async Task<Scenario> CreateScenarioAsync(UniNetDbContext db)
@@ -111,6 +115,25 @@ public sealed class TaskReportTests
         params string[] urls)
         => new(content, urls.Select(url => new TaskEvidenceRequest(url)).ToList());
 
+    private static TaskEvidenceRequest CloudinaryEvidence(
+        Guid accountId,
+        string resourceType,
+        string fileName,
+        string format,
+        string fileId)
+    {
+        var publicId = resourceType == "image"
+            ? $"uninet/images/{accountId:N}/{fileId}"
+            : $"uninet/evidence/{accountId:N}/{fileId}.{format}";
+        var deliveryPath = resourceType == "image" ? $"{publicId}.{format}" : publicId;
+        return new(
+            $"https://res.cloudinary.com/fixture/{resourceType}/upload/v123/{deliveryPath}",
+            publicId,
+            resourceType,
+            fileName,
+            format);
+    }
+
     [Fact]
     public async Task ReportEvidenceAndReviewHaveEfCoreEntitiesAndConstraints()
     {
@@ -164,6 +187,96 @@ public sealed class TaskReportTests
     }
 
     [Fact]
+    public async Task SubmitReportPersistsUploadResponseMetadataWithCloudinaryEvidence()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateScenarioAsync(db);
+            var task = await CreateAssignedTaskAsync(tasks, scenario);
+            var evidence = CloudinaryEvidence(
+                scenario.AssignedAccount.Id,
+                "raw",
+                "login-test.pdf",
+                "pdf",
+                "11111111111111111111111111111111");
+
+            var report = await tasks.SubmitTaskReportAsync(
+                scenario.Project.Id,
+                task.Id,
+                scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("Login test evidence attached.", [evidence]),
+                default);
+            var saved = Assert.Single(await db.TaskEvidence.ToListAsync());
+
+            Assert.Equal(evidence.FileUrl, saved.FileUrl);
+            Assert.Equal(evidence.PublicId, saved.PublicId);
+            Assert.Equal(evidence.ResourceType, saved.ResourceType);
+            Assert.Equal(evidence.FileName, saved.FileName);
+            Assert.Equal(evidence.Format, saved.Format);
+            Assert.Equal(evidence.PublicId, Assert.Single(report.Evidence).PublicId);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsCloudinaryEvidenceWhosePublicIdBelongsToAnotherAccount()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateScenarioAsync(db);
+            var task = await CreateAssignedTaskAsync(tasks, scenario);
+            var evidence = CloudinaryEvidence(
+                Guid.NewGuid(),
+                "raw",
+                "foreign.pdf",
+                "pdf",
+                "22222222222222222222222222222222");
+
+            var error = await Assert.ThrowsAsync<ProjectException>(() => tasks.SubmitTaskReportAsync(
+                scenario.Project.Id,
+                task.Id,
+                scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("Attempt to reference another account's file.", [evidence]),
+                default));
+
+            Assert.Equal("INVALID_TASK_EVIDENCE_METADATA", error.Code);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsInsecureCloudinaryEvidenceAndPartialUploadMetadata()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateScenarioAsync(db);
+            var task = await CreateAssignedTaskAsync(tasks, scenario);
+            var evidence = CloudinaryEvidence(
+                scenario.AssignedAccount.Id,
+                "raw",
+                "insecure.pdf",
+                "pdf",
+                "33333333333333333333333333333333");
+            var insecure = evidence with { FileUrl = evidence.FileUrl.Replace("https:", "http:", StringComparison.Ordinal) };
+            var partial = evidence with { PublicId = null };
+
+            var insecureError = await Assert.ThrowsAsync<ProjectException>(() => tasks.SubmitTaskReportAsync(
+                scenario.Project.Id, task.Id, scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("Insecure URL.", [insecure]), default));
+            var partialError = await Assert.ThrowsAsync<ProjectException>(() => tasks.SubmitTaskReportAsync(
+                scenario.Project.Id, task.Id, scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("Incomplete metadata.", [partial]), default));
+
+            Assert.Equal("INVALID_TASK_EVIDENCE_URL", insecureError.Code);
+            Assert.Equal("INVALID_TASK_EVIDENCE_METADATA", partialError.Code);
+        }
+    }
+
+    [Fact]
     public async Task MemberNotAssignedToTaskCannotSubmitReport()
     {
         var (connection, db, tasks) = await Setup();
@@ -189,6 +302,7 @@ public sealed class TaskReportTests
     [InlineData("   ")]
     [InlineData("javascript:alert(1)")]
     [InlineData("/relative/evidence")]
+    [InlineData("http://example.com/insecure")]
     public async Task InvalidEvidenceUrlIsRejected(string url)
     {
         var (connection, db, tasks) = await Setup();
@@ -301,6 +415,40 @@ public sealed class TaskReportTests
     }
 
     [Fact]
+    public async Task RevisedReportKeepsEachVersionEvidenceMetadataAndPreviousReview()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateScenarioAsync(db);
+            var task = await CreateAssignedTaskAsync(tasks, scenario);
+            var originalEvidence = CloudinaryEvidence(
+                scenario.AssignedAccount.Id, "raw", "first.pdf", "pdf", "44444444444444444444444444444444");
+            var original = await tasks.SubmitTaskReportAsync(
+                scenario.Project.Id, task.Id, scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("First version.", [originalEvidence]), default);
+            await tasks.ReviewTaskReportAsync(
+                scenario.Project.Id, task.Id, original.Id, scenario.LeaderAccount.Id,
+                new ReviewTaskReportRequest(TaskReportReviewDecision.RevisionRequested, "Add the missing evidence."),
+                default);
+
+            var revisedEvidence = CloudinaryEvidence(
+                scenario.AssignedAccount.Id, "raw", "second.pdf", "pdf", "55555555555555555555555555555555");
+            var revised = await tasks.ReviseTaskReportAsync(
+                scenario.Project.Id, task.Id, original.Id, scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("Second version.", [revisedEvidence]), default);
+            var history = await tasks.GetTaskReportsAsync(
+                scenario.Project.Id, task.Id, scenario.AssignedAccount.Id, page: 1, pageSize: 10, default);
+
+            var oldVersion = Assert.Single(history.Reports, item => item.Id == original.Id);
+            Assert.Equal(originalEvidence.PublicId, Assert.Single(oldVersion.Evidence).PublicId);
+            Assert.Equal("Add the missing evidence.", Assert.Single(oldVersion.Reviews).Feedback);
+            Assert.Equal(revisedEvidence.PublicId, Assert.Single(revised.Evidence).PublicId);
+        }
+    }
+
+    [Fact]
     public async Task NonLeaderCannotReviewReport()
     {
         var (connection, db, tasks) = await Setup();
@@ -389,6 +537,30 @@ public sealed class TaskReportTests
                 scenario.Project.Id, task.Id, report.Id, scenario.LeaderAccount.Id,
                 new ReviewTaskReportRequest(TaskReportReviewDecision.Approved), default));
             Assert.Equal("TASK_REPORT_NOT_REVIEWABLE", reviewAgain.Code);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptsEvidenceFileNameWithUppercaseExtensionFromUploadResponse()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateScenarioAsync(db);
+            var task = await CreateAssignedTaskAsync(tasks, scenario);
+            var evidence = CloudinaryEvidence(
+                scenario.AssignedAccount.Id, "raw", "results.PDF", "pdf",
+                "55555555555555555555555555555555");
+
+            var report = await tasks.SubmitTaskReportAsync(
+                scenario.Project.Id,
+                task.Id,
+                scenario.AssignedAccount.Id,
+                new SubmitTaskReportRequest("Uploaded report.", [evidence]),
+                default);
+
+            Assert.Equal("results.PDF", Assert.Single(report.Evidence).FileName);
         }
     }
 }

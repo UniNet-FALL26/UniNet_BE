@@ -493,6 +493,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.ToTable("TaskEvidence");
             e.HasKey(x => x.Id);
             e.Property(x => x.FileUrl).HasMaxLength(2048).IsRequired();
+            e.Property(x => x.PublicId).HasMaxLength(255);
+            e.Property(x => x.ResourceType).HasMaxLength(10);
+            e.Property(x => x.FileName).HasMaxLength(255);
+            e.Property(x => x.Format).HasMaxLength(10);
             e.Property(x => x.CreatedAt).IsRequired();
 
             e.HasOne(x => x.TaskReport)

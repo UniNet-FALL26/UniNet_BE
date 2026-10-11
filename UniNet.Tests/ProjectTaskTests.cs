@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using UniNet.Application;
 using UniNet.Application.Services;
 using UniNet.Domain;
@@ -22,7 +23,8 @@ public sealed class ProjectTaskTests
             .Options);
 
         await db.Database.EnsureCreatedAsync();
-        return (connection, db, new ProjectTaskService(db));
+        var configuration = new ConfigurationBuilder().Build();
+        return (connection, db, new ProjectTaskService(db, configuration));
     }
 
     private static async Task<(Account LeaderAccount, UserProfile LeaderProfile, Account MemberAccount, UserProfile MemberProfile, Project Project)> CreateProjectScenario(UniNetDbContext db)

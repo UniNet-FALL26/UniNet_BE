@@ -47,7 +47,12 @@ public record ProjectTaskListResponse(
     List<ProjectTaskResponse> Tasks
 );
 
-public record TaskEvidenceRequest(string FileUrl);
+public record TaskEvidenceRequest(
+    string FileUrl,
+    string? PublicId = null,
+    string? ResourceType = null,
+    string? FileName = null,
+    string? Format = null);
 
 public record SubmitTaskReportRequest(
     string Content,
@@ -62,7 +67,11 @@ public record ReviewTaskReportRequest(
 public record TaskEvidenceResponse(
     Guid Id,
     string FileUrl,
-    DateTimeOffset CreatedAt
+    DateTimeOffset CreatedAt,
+    string? PublicId = null,
+    string? ResourceType = null,
+    string? FileName = null,
+    string? Format = null
 );
 
 public record TaskReportReviewResponse(

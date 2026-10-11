@@ -36,12 +36,34 @@ public sealed class PortfolioHttpTests
     private sealed class ImageFixture : ICloudImageStorage
     {
         public int Uploads;
+        public ImageUploadRequest? LastUpload;
         public Task<ImageUploadResult> Upload(ImageUploadRequest request, CancellationToken ct)
         {
-            Uploads++; Assert.Equal(PortraitFixture.Png, request.Bytes);
-            return Task.FromResult(new ImageUploadResult($"https://res.cloudinary.com/fixture/image/upload/v1/{request.PublicId}.{request.Format}", request.PublicId, request.Format));
+            Uploads++;
+            LastUpload = request;
+            if (request.ResourceType == "image")
+                Assert.Equal(PortraitFixture.Png, request.Bytes);
+            var suffix = request.ResourceType == "image" ? $".{request.Format}" : string.Empty;
+            return Task.FromResult(new ImageUploadResult(
+                $"https://res.cloudinary.com/fixture/{request.ResourceType}/upload/v1/{request.PublicId}{suffix}",
+                request.PublicId,
+                request.Format,
+                request.ResourceType));
         }
         public Task Destroy(string publicId, CancellationToken ct) => Task.CompletedTask;
+    }
+    private static byte[] CreateOfficePackage(string mainPart)
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new System.IO.Compression.ZipArchive(
+                   stream,
+                   System.IO.Compression.ZipArchiveMode.Create,
+                   leaveOpen: true))
+        {
+            archive.CreateEntry("[Content_Types].xml");
+            archive.CreateEntry(mainPart);
+        }
+        return stream.ToArray();
     }
     [Fact]
     public async Task SharedImageUploadWorksForActiveStudentAndPartnerWithoutChangingProfile()
@@ -65,11 +87,70 @@ public sealed class PortfolioHttpTests
             Assert.Equal("png", result.Format); Assert.Matches($"^uninet/images/{id:N}/[a-f0-9]{{32}}$", result.PublicId);
             Assert.True(publicIds.Add(result.PublicId)); Assert.EndsWith($"/{result.PublicId}.png", result.ImageUrl);
             Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
+            Assert.Equal("image", result.ResourceType);
         }
         Assert.Equal(3, server.Uploads);
         Assert.Null((await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!.Profile.AvatarUrl);
         await using var scope = server.Scope();
         Assert.Empty(await scope.ServiceProvider.GetRequiredService<UniNetDbContext>().PortraitAssets.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task SharedUploadEndpointAcceptsPdfAndDocxAsRawResources()
+    {
+        await using var server = await TestApi.Start();
+        using var owner = server.Client(server.OwnerId);
+        var pdf = Encoding.ASCII.GetBytes("%PDF-1.7\nfixture\n%%EOF");
+        using (var body = new MultipartFormDataContent())
+        {
+            var content = new ByteArrayContent(pdf);
+            content.Headers.ContentType = new("application/pdf");
+            body.Add(content, "file", "task-report.pdf");
+
+            var response = await owner.PostAsync("api/images", body);
+            response.EnsureSuccessStatusCode();
+            var result = (await response.Content.ReadFromJsonAsync<ImageUploadResult>())!;
+
+            Assert.Equal("raw", result.ResourceType);
+            Assert.Equal("pdf", result.Format);
+            Assert.Equal("task-report.pdf", result.FileName);
+            Assert.Matches($"^uninet/evidence/{server.OwnerId:N}/[a-f0-9]{{32}}\\.pdf$", result.PublicId);
+            Assert.StartsWith("https://res.cloudinary.com/fixture/raw/upload/", result.ImageUrl);
+        }
+
+        using (var body = new MultipartFormDataContent())
+        {
+            var content = new ByteArrayContent(CreateOfficePackage("word/document.xml"));
+            content.Headers.ContentType = new("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            body.Add(content, "file", "task-report.docx");
+
+            var response = await owner.PostAsync("api/images", body);
+            response.EnsureSuccessStatusCode();
+            var result = (await response.Content.ReadFromJsonAsync<ImageUploadResult>())!;
+
+            Assert.Equal("raw", result.ResourceType);
+            Assert.Equal("docx", result.Format);
+            Assert.Equal("task-report.docx", result.FileName);
+            Assert.EndsWith(".docx", result.PublicId);
+        }
+
+        Assert.Equal(2, server.Uploads);
+    }
+
+    [Fact]
+    public async Task SharedUploadEndpointRejectsDocumentWithMismatchedMimeBeforeCloudinary()
+    {
+        await using var server = await TestApi.Start();
+        using var owner = server.Client(server.OwnerId);
+        using var body = new MultipartFormDataContent();
+        var content = new ByteArrayContent(Encoding.ASCII.GetBytes("%PDF-1.7\n%%EOF"));
+        content.Headers.ContentType = new("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        body.Add(content, "file", "task-report.pdf");
+
+        var response = await owner.PostAsync("api/images", body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, server.Uploads);
     }
     [Fact]
     public async Task SharedImageUploadRejectsInvalidFilesAndInactiveAccountsBeforeCloudinary()
@@ -79,7 +160,9 @@ public sealed class PortfolioHttpTests
         {
             using var body = new MultipartFormDataContent(); body.Add(new ByteArrayContent(bytes), "file", "fake.png");
             var response = await owner.PostAsync("api/images", body);
-            Assert.Contains(response.StatusCode, new[] { HttpStatusCode.BadRequest, HttpStatusCode.RequestEntityTooLarge });
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var error = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+            Assert.Equal("INVALID_IMAGE", error!["code"]);
         }
         await using (var scope = server.Scope())
         {
@@ -172,6 +255,7 @@ public sealed class PortfolioHttpTests
         private const string Key = "isolated-portfolio-http-key-01234567890123456789";
         public Guid OwnerId => ownerId; public Guid ProfileId => profileId; public Guid CompanyId => companyId;
         public int Uploads => ((ImageFixture)app.Services.GetRequiredService<ICloudImageStorage>()).Uploads;
+        public ImageUploadRequest? LastUpload => ((ImageFixture)app.Services.GetRequiredService<ICloudImageStorage>()).LastUpload;
         public AsyncServiceScope Scope() => app.Services.CreateAsyncScope();
         public HttpClient Client(Guid? accountId = null, string role = "Student")
         {
@@ -189,6 +273,7 @@ public sealed class PortfolioHttpTests
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders(); builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
             builder.Services.AddDbContext<UniNetDbContext>(options => options.UseSqlite($"Data Source={databasePath}"));
+            builder.Configuration["Cloudinary:CloudName"] = "fixture";
             builder.Services.AddScoped<PortfolioService>(); builder.Services.AddScoped<ProfileService>(); builder.Services.AddScoped<AuthService>();
             builder.Services.AddSingleton<IPortraitProcessor, PortraitFixture>(); builder.Services.AddSingleton<IPortraitCloudStorage, PortraitFixture>(); builder.Services.AddSingleton<PortraitSessions>();
             builder.Services.AddSingleton<ICloudImageStorage, ImageFixture>();

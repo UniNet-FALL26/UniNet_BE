@@ -13,16 +13,20 @@ namespace UniNet.API.Controllers;
 [ApiController, Authorize, Route("api/images")]
 public sealed class CloundController(ICloudImageStorage images, UniNetDbContext db) : ControllerBase
 {
-    [HttpPost, RequestSizeLimit(ImageFileReader.MaxBytes + 65536)]
-    [RequestFormLimits(MultipartBodyLengthLimit = ImageFileReader.MaxBytes + 65536)]
+    [HttpPost, RequestSizeLimit(UploadFileReader.MaxRequestBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = UploadFileReader.MaxRequestBytes)]
     public async Task<ActionResult<ImageUploadResult>> Upload(IFormFile file, CancellationToken ct)
     {
         if (!Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var owner)
             || !await db.Accounts.AnyAsync(a => a.Id == owner && a.Status == AccountStatus.Active, ct))
             throw new AuthException("UNAUTHORIZED", "Tài khoản không hợp lệ.", 401);
-        var image = await ImageFileReader.Read(file, ct);
-        var publicId = $"uninet/images/{owner:N}/{Guid.NewGuid():N}";
+        var upload = await UploadFileReader.Read(file, ct);
+        var publicId = upload.ResourceType == "image"
+            ? $"uninet/images/{owner:N}/{Guid.NewGuid():N}"
+            : $"uninet/evidence/{owner:N}/{Guid.NewGuid():N}.{upload.Format}";
         Response.Headers.CacheControl = "no-store";
-        return Ok(await images.Upload(new(image.Bytes, publicId, image.Format), ct));
+        var result = await images.Upload(
+            new(upload.Bytes, publicId, upload.Format, upload.ResourceType), ct);
+        return Ok(result with { FileName = upload.FileName });
     }
 }
