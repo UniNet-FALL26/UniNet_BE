@@ -726,6 +726,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("User1SavedUser2", (string)null);
+                });
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1396,6 +1397,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
 
                     b.Navigation("UserBookmark");
+                });
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.TaskReport", "TaskReport")
