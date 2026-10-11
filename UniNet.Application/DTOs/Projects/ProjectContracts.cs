@@ -54,7 +54,9 @@ public record ProjectDetailResponse(
     List<ProjectSkillInfo> Skills,
     bool IsCreator,
     bool IsMember,
-    List<ProjectMemberInfo>? Members = null
+    List<ProjectMemberInfo>? Members = null,
+    List<ProjectInvitationResponse>? Invitations = null,
+    List<ProjectJoinRequestResponse>? JoinRequests = null
     );
 
 public record CreatorInfo(
@@ -94,7 +96,8 @@ public record ProjectListItemResponse(
     ProjectStatus Status,
     RecruitmentStatus RecruitmentStatus,
     DateTimeOffset CreatedAt,
-    CreatorInfo Creator
+    CreatorInfo Creator,
+    List<ProjectSkillInfo> Skills
 );
 
 // ============ PROJECT MEMBER RESPONSE ============

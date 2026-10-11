@@ -90,6 +90,21 @@ public sealed class ProjectsController(IProjectService projects, AuthService aut
     /// <summary>
     /// Xem chi tiết thông tin project
     /// </summary>
+    [Authorize(Roles = "Student"), HttpGet("status/{status}")]
+    public async Task<IActionResult> GetProjectsByStatus(
+        ProjectStatus status, [FromQuery] int page = 1, [FromQuery] int pageSize = 10,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            return Ok(await projects.GetProjectsByStatusAsync(AccountId, status, page, pageSize, ct));
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
     [Authorize(Roles = "Student,Moderator"), HttpGet("{id:guid}")]
     public async Task<IActionResult> GetProjectDetails(Guid id, CancellationToken ct)
     {
@@ -149,6 +164,8 @@ public sealed class ProjectsController(IProjectService projects, AuthService aut
     {
         try
         {
+            page = Math.Max(page, 1);
+            pageSize = Math.Clamp(pageSize, 1, 100);
             var (projectsList, total) = await projects.ListUserProjectsAsync(AccountId, page, pageSize, ct);
             var totalPages = (total + pageSize - 1) / pageSize;
             return Ok(new
