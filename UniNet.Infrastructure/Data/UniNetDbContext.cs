@@ -6,6 +6,7 @@ namespace UniNet.Infrastructure.Data;
 
 public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) : DbContext(options)
 {
+    public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
@@ -35,6 +36,14 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<PortraitAsset>(e =>
+        {
+            e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);
+            e.Property(x => x.PublicId).HasMaxLength(255); e.HasIndex(x => x.PublicId).IsUnique();
+            e.Property(x => x.ImageUrl).HasMaxLength(2048); e.HasIndex(x => x.ImageUrl).IsUnique();
+            e.Property(x => x.State).IsConcurrencyToken(); e.HasIndex(x => new { x.State, x.CreatedAtUnix });
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
         model.Entity<Account>(e =>
         {
             e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 4"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);

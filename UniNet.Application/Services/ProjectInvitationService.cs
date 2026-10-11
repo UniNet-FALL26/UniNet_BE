@@ -107,6 +107,15 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             if (await MemberCountAsync(invitation.Project, ct) + 1 >= invitation.Project.MemberTarget)
                 invitation.Project.RecruitmentStatus = RecruitmentStatus.Full;
             invitation.Project.UpdatedAt = now;
+
+            var requests = await db.ProjectJoinRequests.Where(r =>
+                r.ProjectId == invitation.ProjectId && r.UserId == invitation.InviteeId &&
+                r.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
+            foreach (var request in requests)
+            {
+                request.Status = ProjectJoinRequestStatus.Cancelled;
+                request.UpdatedAt = now;
+            }
         }
         invitation.Status = decision;
         invitation.UpdatedAt = now;
