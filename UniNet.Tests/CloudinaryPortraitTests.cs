@@ -16,7 +16,7 @@ public sealed class CloudinaryPortraitTests
         {
             Calls++; Assert.Equal("https://api.cloudinary.com/v1_1/fixture/image/upload", request.RequestUri!.AbsoluteUri);
             Body = await request.Content!.ReadAsStringAsync(ct);
-            return new(HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { public_id = Id, format = jpeg ? "jpg" : "png", secure_url = $"https://res.cloudinary.com/fixture/image/upload/v1/{Id}.png" })) };
+            return new(HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { public_id = Id, format = jpeg ? "jpg" : "png", resource_type = "image", secure_url = $"https://res.cloudinary.com/fixture/image/upload/v1/{Id}.png" })) };
         }
     }
     private static IConfiguration Config() => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {

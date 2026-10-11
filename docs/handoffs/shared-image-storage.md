@@ -1,23 +1,44 @@
-# Shared Cloudinary storage
+# Shared Cloudinary storage: task evidence handoff
 
-- Contract: `UniNet.Application/Interfaces/ICloudImageStorage.cs`; implementation: `UniNet.API/Services/CloudinaryImageStorage.cs`; controller: `UniNet.API/Controllers/CloundController.cs`; DI in `UniNet.API/Program.cs`. Inject the interface into backend features. Upload returns `ImageUploadResult(ImageUrl, PublicId, Format)`; `Destroy` is idempotent for absent assets. The caller must authorize deletion and manage persisted references.
-- Portrait-specific `CloudinaryPortraitStorage` is now a thin adapter: forces PNG and maps `IMAGE_*` errors to existing `PORTRAIT_*` codes. Portrait IDs, preview/confirm/save, account ownership and cleanup remain unchanged. No Cloudinary transport/signing depends on Gemini.
-- `POST /api/images`: Bearer token for an existing active account of any role; multipart `file`; JPG/PNG/WebP <= 5 MB. Reads bounded bytes and detects signatures, ignoring filename/MIME. Server chooses `uninet/images/<account-guid>/<random-guid>` and uses `overwrite=false`. HTTP 200 body: `{ "imageUrl": "https://res.cloudinary.com/...", "publicId": "uninet/images/...", "format": "png" }`. Errors use existing `{ code, message }`: 400 invalid image, 401 invalid/inactive account, 503 missing storage config, 502 provider failure. Larger HTTP bodies may return 413.
-- `ImageFileReader` also serves legacy local `ProfileImageStorage`; `/api/profile/images` upload/read stays available for existing callers.
+## Contract
+The existing authenticated `POST /api/images` endpoint accepts multipart field `file` for an active account. Images (PNG/JPG/WEBP) upload through Cloudinary's `image` resource (maximum 5 MB); PDF/DOCX/XLSX/PPTX/TXT documents use `raw` (maximum 10 MB). The server detects content, checks document MIME/extension, and generates resource-specific IDs. Image callers keep the original response fields; the additive response fields are `resourceType` and `fileName`. Invalid or oversized image uploads retain the original `INVALID_IMAGE` error code. Legacy OLE `.doc`, `.xls`, and `.ppt` are not accepted because the generic OLE header does not distinguish those file formats.
 
-Backend usage (choose IDs on the server, using safe path segments):
+Example response for a PDF:
 
-```csharp
-using UniNet.Application.Interfaces;
-
-// ICloudImageStorage images is supplied through constructor injection.
-var id = $"uninet/projects/{projectId:N}/{Guid.NewGuid():N}";
-var uploaded = await images.Upload(new ImageUploadRequest(validatedBytes, id, "webp"), ct);
-// Persist uploaded.ImageUrl in the feature's own authorized save operation.
+```json
+{
+  "imageUrl": "https://res.cloudinary.com/<cloud>/raw/upload/v123/uninet/evidence/<account>/<guid>.pdf",
+  "publicId": "uninet/evidence/<account>/<guid>.pdf",
+  "format": "pdf",
+  "resourceType": "raw",
+  "fileName": "test-results.pdf"
+}
 ```
 
-Configuration is shared with portraits: backend-only `Cloudinary__CloudName`, `Cloudinary__ApiKey`, `Cloudinary__ApiSecret`. Do not copy secrets to Expo. Signed multipart upload, folder and overwrite parameters follow [Cloudinary Upload API](https://cloudinary.com/documentation/image_upload_api_reference).
+## Task report usage
+The frontend uploads first, then maps `imageUrl` to `evidence[].fileUrl` and forwards the metadata to the report endpoint. The report body continues to use the existing `content` and `evidence` properties:
 
-Lifecycle: the generic API uploads immediately and does not save a profile or register a `PortraitAsset`. Student avatars continue to use portrait confirmation because their save policy requires an owned portrait record. Covers, project images and company images can use generic URLs through their normal save flows. Generic unused uploads need cleanup owned by the consuming feature; there is no unrestricted public delete endpoint. No DB migration/dependency/deployment was added.
+```json
+{
+  "content": "Report text",
+  "evidence": [{
+    "fileUrl": "https://res.cloudinary.com/<cloud>/raw/upload/v123/uninet/evidence/<account>/<guid>.pdf",
+    "publicId": "uninet/evidence/<account>/<guid>.pdf",
+    "resourceType": "raw",
+    "fileName": "test-results.pdf",
+    "format": "pdf"
+  }]
+}
+```
 
-Verification: all 120 backend tests passed with `dotnet test UniNet.Tests/UniNet.Tests.csproj --no-restore -m:1 --verbosity quiet`; build succeeded with existing unrelated warnings. xUnit fixtures cover all three formats, SHA-256 signatures, malformed/foreign provider responses, provider failures, idempotent deletion, active student/partner HTTP upload, unique server IDs, invalid/oversized files and inactive accounts. Local-image and portrait regression tests run in the backend suite. Frontend verification and usage are in FE `docs/handoffs/shared-image-storage.md`. Live Cloudinary upload was not exercised; fixture tests never use real credentials.
+When metadata is present, the backend verifies HTTPS, Cloudinary host/configured cloud/resource path, supported format and that the generated ID belongs to the authenticated submitter. URL-only evidence remains accepted for backwards compatibility when its URL is HTTPS. The additive nullable evidence metadata migration is generated but has not been applied; apply it only to the intended database after review.
+
+## Implementation references
+- Upload controller: `UniNet.API/Controllers/CloundController.cs`
+- Content validation and size limits: `UniNet.API/Services/UploadFileReader.cs`
+- Cloudinary resource routing and provider response validation: `UniNet.API/Services/CloudinaryImageStorage.cs`
+- Upload contract: `UniNet.Application/Interfaces/ICloudImageStorage.cs`
+- Report evidence validation: `UniNet.Application/Services/ProjectTaskService.cs`
+- Evidence metadata migration: `UniNet.Infrastructure/Data/Migrations/20261011151850_AddTaskEvidenceUploadMetadata.cs`
+
+Cloudinary raw delivery and inline preview depend on the account's access settings and client support; Office documents may require download rather than preview. On rejected provider responses, backend logs report per-check booleans only, never the response values, URLs, IDs, signatures, credentials, or file bytes. These tests use fixture providers and do not verify live Cloudinary behavior. The implementation does not scan files for malware. Generic uploads do not persist feature records or provide an unrestricted delete endpoint; the consuming feature owns its reference/lifecycle.
