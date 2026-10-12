@@ -156,6 +156,8 @@ public sealed class ProjectMemberService(UniNetDbContext db) : IProjectMemberSer
 
     private async Task RemoveAsync(ProjectMember member, Project project, ProjectMemberStatus status, CancellationToken ct)
     {
+        Require(project.Status == ProjectStatus.Active,
+            "INVALID_PROJECT_STATE", "Only Active projects allow members to leave or be kicked.", 409);
         Require(member.Status == ProjectMemberStatus.Active,
             "INVALID_MEMBER_STATE", "Only active members can be kicked or leave the project.", 409);
         var now = DateTimeOffset.UtcNow;
