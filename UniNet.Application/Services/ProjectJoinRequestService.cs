@@ -19,7 +19,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         Require(project.CreatorId != student.Id, "CANNOT_JOIN_OWN_PROJECT", "You cannot send a request to join your own project.", 403);
         Require(!string.IsNullOrWhiteSpace(request.Role) && request.Role.Trim().Length <= 150,
             "INVALID_ROLE", "Role must be between 1 and 150 characters.");
-        await RequireRecruitingAsync(project, ct);
+        await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == student.Id &&
             m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
         Require(!await db.ProjectJoinRequests.AnyAsync(r => r.ProjectId == projectId && r.UserId == student.Id &&
@@ -84,7 +84,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
             await GetStudentAsync(request.User.AccountId, ct);
             Require(request.UserId != request.Project.CreatorId,
                 "CANNOT_JOIN_OWN_PROJECT", "You cannot send a request to join your own project.", 409);
-            await RequireRecruitingAsync(request.Project, ct);
+            await RequireRecruitingAsync(request.Project, request.Role, ct);
             var member = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == request.ProjectId &&
                 m.UserId == request.UserId, ct);
             Require(member?.Status != ProjectMemberStatus.Active,
@@ -162,12 +162,15 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     private static void RequireCreator(Project project, Guid profileId) => Require(project.CreatorId == profileId,
         "FORBIDDEN", "Only the project creator can view and process join requests.", 403);
 
-    private async Task RequireRecruitingAsync(Project project, CancellationToken ct)
+    private async Task RequireRecruitingAsync(Project project, string role, CancellationToken ct)
     {
         Require(project.RecruitmentStatus == RecruitmentStatus.Open && project.RecruitmentDeadline > DateTimeOffset.UtcNow,
             "RECRUITMENT_CLOSED", "Project is no longer accepting members.", 409);
         Require(await MemberCountAsync(project, ct) < project.MemberTarget,
             "PROJECT_FULL", "Project has reached its member limit.", 409);
+        var roleError = await ProjectRoleCapacity.CheckAsync(db, project, role, ct);
+        if (roleError is { } error)
+            throw new ProjectJoinRequestException(error.Code, error.Message, 409);
     }
 
     // The creator occupies one slot even when no ProjectMember row exists for them.
