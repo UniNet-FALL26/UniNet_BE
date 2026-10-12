@@ -170,7 +170,10 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
             "PROJECT_FULL", "Project has reached its member limit.", 409);
         var roleError = await ProjectRoleCapacity.CheckAsync(db, project, role, ct);
         if (roleError is { } error)
-            throw new ProjectJoinRequestException(error.Code, error.Message, 409);
+            throw new ProjectJoinRequestException(error.Code,
+                error.Code == "PROJECT_ROLE_FULL"
+                    ? "You cannot join this project because another person is already in it."
+                    : error.Message, 409);
     }
 
     // The creator occupies one slot even when no ProjectMember row exists for them.
