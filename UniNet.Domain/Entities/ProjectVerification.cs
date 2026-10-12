@@ -20,13 +20,21 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? ScheduledEndAt { get; set; }
         public DateTimeOffset? MeetingStartAt { get; set; }
         public DateTimeOffset? MeetingEndAt { get; set; }
-        public Guid FinalizedByUserId { get; set; }
+        public Guid? FinalizedByUserId { get; set; }
         public DateTimeOffset? FinalizedAt { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
         public Project Project { get; set; } = null!;
         public UserProfile RequestByUser { get; set; } = null!;
-        public UserProfile FinalizedByUser { get; set; } = null!;
+        public UserProfile? FinalizedByUser { get; set; }
+        public Guid PackageId { get; set; }
+        public Package Package { get; set; } = null!;
+        public string? CancellationReason { get; set; }
+        public DateTimeOffset? CancelledAt { get; set; }
+        public DateTimeOffset? AiReviewedAt { get; set; }
+        public int? AiEvidenceVersion { get; set; }
+        public string AiAdditionalEvidenceJson { get; set; } = "[]";
+        public List<ProjectVerificationEvidence> EvidenceSubmissions { get; set; } = [];
         public List<VerificationAssignment> Assignments { get; set; } = [];
         public List<VerificationTransaction> VerificationTransactions { get; set; } = [];
     }

@@ -33,6 +33,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<ProjectVerification> ProjectVerifications => Set<ProjectVerification>();
+    public DbSet<ProjectVerificationEvidence> ProjectVerificationEvidence => Set<ProjectVerificationEvidence>();
     public DbSet<VerificationAssignment> VerificationAssignments => Set<VerificationAssignment>();
     public DbSet<VerificationReport> VerificationReports => Set<VerificationReport>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
@@ -713,6 +714,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
             e.Property(x => x.AiSummary).HasColumnType("text");
             e.Property(x => x.AiScore).HasPrecision(5, 2);
+            e.Property(x => x.AiAdditionalEvidenceJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.CancellationReason).HasColumnType("text");
             e.Property(x => x.SubmittedAt).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
@@ -723,9 +726,26 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasForeignKey(x => x.RequestByUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.FinalizedByUser).WithMany(x => x.FinalizedVerifications)
                 .HasForeignKey(x => x.FinalizedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Package).WithMany()
+                .HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(x => new { x.ProjectId, x.Status });
+            e.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" = 0")
+                .HasDatabaseName("IX_ProjectVerifications_PendingProject");
             e.HasIndex(x => new { x.RequestByUserId, x.SubmittedAt });
+        });
+        model.Entity<ProjectVerificationEvidence>(e =>
+        {
+            e.ToTable("ProjectVerificationEvidence", t =>
+                t.HasCheckConstraint("CK_ProjectVerificationEvidence_Version", "\"Version\" > 0"));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.EvidenceJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.SubmittedAt).IsRequired();
+            e.HasOne(x => x.ProjectVerification).WithMany(x => x.EvidenceSubmissions)
+                .HasForeignKey(x => x.ProjectVerificationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.SubmittedByUser).WithMany()
+                .HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.ProjectVerificationId, x.Version }).IsUnique();
         });
         model.Entity<VerificationAssignment>(e =>
         {
