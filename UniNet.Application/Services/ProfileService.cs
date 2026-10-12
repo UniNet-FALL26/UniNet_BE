@@ -39,6 +39,8 @@ public sealed class ProfileService(UniNetDbContext db)
         Max(request.UniversityName, 255, "Trường đại học"); Max(request.Major, 255, "Ngành học"); Max(request.StudentCode, 50, "Mã sinh viên");
         var account = await Load(accountId, AccountRole.Student, ct);
         var p = account.Profile!;
+        await PortraitAssetPolicy.Retain(db, accountId, request.AvatarUrl, p.AvatarUrl, ct);
+        await PortraitAssetPolicy.RetainReference(db, accountId, request.CoverUrl, p.CoverUrl, ct);
         if (p.FullName != request.FullName.Trim() || p.UniversityName != Optional(request.UniversityName) || p.Major != Optional(request.Major) || p.StudentCode != Optional(request.StudentCode)) p.IsVerified = false;
         p.FullName = request.FullName.Trim(); p.Nickname = Nickname(request.Nickname, p.Nickname); p.AvatarUrl = Optional(request.AvatarUrl); p.CoverUrl = Optional(request.CoverUrl);
         p.Bio = Optional(request.Bio); p.UniversityName = Optional(request.UniversityName); p.Major = Optional(request.Major);
@@ -50,16 +52,34 @@ public sealed class ProfileService(UniNetDbContext db)
     }
     public async Task<AccountResponse> Partner(Guid accountId, PartnerProfileRequest request, CancellationToken ct)
     {
-        ValidateName(request.FullName); ValidateName(request.OrganizationName);
+        ValidateName(request.OrganizationName);
         if (request.PartnerType is not { } partnerType || !Enum.IsDefined(partnerType)) throw new AuthException("INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
         Max(request.Industry, 150, "Lĩnh vực"); Max(request.ContactEmail, 255, "Email liên hệ"); Max(request.Phone, 30, "Số điện thoại");
+        Max(request.Website, 2048, "Website"); Max(request.Address, 2000, "Địa chỉ");
         var account = await Load(accountId, AccountRole.Partner, ct);
         var p = account.Profile!;
-        if (p.FullName != request.FullName.Trim() || p.OrganizationName != request.OrganizationName.Trim() || p.PartnerType != request.PartnerType || p.Industry != Optional(request.Industry) || p.Website != Optional(request.Website) || p.ContactEmail != Optional(request.ContactEmail) || p.Phone != Optional(request.Phone) || p.Address != Optional(request.Address)) p.IsVerified = false;
-        p.FullName = request.FullName.Trim(); p.Nickname = Nickname(request.Nickname, p.Nickname); p.OrganizationName = request.OrganizationName.Trim(); p.AvatarUrl = Optional(request.AvatarUrl); p.CoverUrl = Optional(request.CoverUrl);
-        p.Bio = Optional(request.Bio); p.PartnerType = request.PartnerType; p.Industry = Optional(request.Industry);
-        p.Website = Optional(request.Website); p.ContactEmail = Optional(request.ContactEmail); p.Phone = Optional(request.Phone);
-        p.Address = Optional(request.Address);
+        var organizationName = request.OrganizationName.Trim();
+        var changed = p.FullName != organizationName || p.OrganizationName != organizationName || p.PartnerType != request.PartnerType ||
+            p.Industry != Optional(request.Industry) || p.Website != Optional(request.Website) || p.ContactEmail != Optional(request.ContactEmail) ||
+            p.Phone != Optional(request.Phone) || p.Address != Optional(request.Address);
+        if (changed)
+        {
+            p.IsVerified = false;
+            var pendingOrApproved = await db.UserVerifications
+                .Where(x => x.UserId == p.Id && x.VerificationType == VerificationType.Partner &&
+                    (x.Status == VerificationStatus.Pending || x.Status == VerificationStatus.Approved))
+                .OrderByDescending(x => x.SubmittedAt).ThenByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+            if (pendingOrApproved is not null)
+            {
+                pendingOrApproved.Status = VerificationStatus.Cancelled;
+                pendingOrApproved.RejectReason = "Thông tin hồ sơ đã thay đổi sau khi gửi xác minh; vui lòng gửi yêu cầu mới.";
+                pendingOrApproved.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+        p.FullName = organizationName; p.Nickname = organizationName[..Math.Min(organizationName.Length, 100)]; p.OrganizationName = organizationName;
+        p.AvatarUrl = Optional(request.AvatarUrl); p.CoverUrl = Optional(request.CoverUrl); p.Bio = Optional(request.Bio);
+        p.PartnerType = request.PartnerType; p.Industry = Optional(request.Industry); p.Website = Optional(request.Website);
+        p.ContactEmail = Optional(request.ContactEmail); p.Phone = Optional(request.Phone); p.Address = Optional(request.Address);
         p.UniversityName = null; p.Major = null; p.StudentCode = null;
         p.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);

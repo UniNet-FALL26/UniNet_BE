@@ -10,6 +10,8 @@ namespace UniNet.API.Controllers;
 public sealed class AuthController(AuthService auth) : ControllerBase
 {
     private Guid AccountId => Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? throw new AuthException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401));
+    [AllowAnonymous, HttpPost("register/admin")]
+    public Task<AuthResponse> RegisterAdmin(RegisterAdminRequest request, CancellationToken ct) => auth.RegisterAdmin(request, ct);
     [HttpPost("register/student")]
     public Task<AuthResponse> RegisterStudent(RegisterStudentRequest request, CancellationToken ct) => auth.RegisterStudent(request, ct);
     [HttpPost("register/partner")]

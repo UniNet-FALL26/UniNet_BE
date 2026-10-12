@@ -30,5 +30,11 @@ public sealed class UserProfile
     public List<ProjectInvitation> SentInvitations { get; set; } = [];
     public List<ProjectInvitation> ReceivedInvitations { get; set; } = [];
     public List<ProjectJoinRequest> JoinRequests { get; set; } = [];
+    public List<UserSkill> UserSkills { get; set; } = [];
     public CareerProfile? CareerProfile { get; set; }
+    public List<User1SavedUser2> SavedUsers { get; set; } = [];
+    public List<User1SavedUser2> SavedByUsers { get; set; } = [];
+    public List<Job> PostedJobs { get; set; } = [];
+    public List<StudentSavedJob> SavedJobs { get; set; } = [];
+    public List<JobApplication> JobApplications { get; set; } = [];
 }

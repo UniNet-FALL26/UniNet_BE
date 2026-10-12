@@ -7,6 +7,7 @@ namespace UniNet.Infrastructure.Data;
 
 public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) : DbContext(options)
 {
+    public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
@@ -20,7 +21,13 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
+    public DbSet<ProjectTask> ProjectTasks => Set<ProjectTask>();
+    public DbSet<ProjectTaskAssignment> ProjectTaskAssignments => Set<ProjectTaskAssignment>();
+    public DbSet<TaskReport> TaskReports => Set<TaskReport>();
+    public DbSet<TaskEvidence> TaskEvidence => Set<TaskEvidence>();
+    public DbSet<TaskReportReview> TaskReportReviews => Set<TaskReportReview>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
+
     public DbSet<ProjectLink> ProjectLinks => Set<ProjectLink>();
 
     // Community DbSets
@@ -30,12 +37,30 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<CommunityPostReaction> CommunityPostReactions => Set<CommunityPostReaction>();
     public DbSet<CommunityPostBookmark> CommunityPostBookmarks => Set<CommunityPostBookmark>();
     public DbSet<ContentReport> ContentReports => Set<ContentReport>();
+
+    public DbSet<UserSkill> UserSkills => Set<UserSkill>();
+    public DbSet<Job> Jobs => Set<Job>();
+    public DbSet<JobSkill> JobSkills => Set<JobSkill>();
+    public DbSet<User1SavedUser2> User1SavedUser2 => Set<User1SavedUser2>();
+    public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
+    public DbSet<JobApplication> JobApplications => Set<JobApplication>();
+
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<PortraitAsset>(e =>
+        {
+            e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);
+            e.Property(x => x.PublicId).HasMaxLength(255); e.HasIndex(x => x.PublicId).IsUnique();
+            e.Property(x => x.ImageUrl).HasMaxLength(2048); e.HasIndex(x => x.ImageUrl).IsUnique();
+            e.Property(x => x.State).IsConcurrencyToken(); e.HasIndex(x => new { x.State, x.CreatedAtUnix });
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
         model.Entity<Account>(e =>
         {
-            e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 2"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);
+            e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 4"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);
             e.Property(x => x.Email).HasMaxLength(255).IsRequired(); e.HasIndex(x => x.Email).IsUnique();
+            e.HasIndex(x => x.Role).HasDatabaseName("IX_Accounts_SingleAdmin")
+                .IsUnique().HasFilter("\"Role\" = 2");
             e.Property(x => x.PasswordHash).HasColumnType("text");
             e.Property(x => x.GoogleId).HasMaxLength(255); e.HasIndex(x => x.GoogleId).IsUnique().HasFilter("\"GoogleId\" IS NOT NULL");
             e.Property(x => x.GoogleEmail).HasMaxLength(255);
@@ -84,12 +109,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         });
         model.Entity<Skill>(e =>
         {
-            e.ToTable("Skills", t => t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 8")); e.HasKey(x => x.Id);
+            e.ToTable("Skills", t => t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 3")); e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(100).IsRequired();
-            e.Property(x => x.Slug).HasMaxLength(100).IsRequired();
             e.Property(x => x.Category).HasConversion<short>();
-            e.HasIndex(x => x.Slug).IsUnique();
-            e.HasIndex(x => new { x.Category, x.IsActive, x.DisplayOrder });
+            e.HasIndex(x => new { x.Category, x.IsActive });
         });
         model.Entity<RefreshToken>(e =>
         {
@@ -401,29 +424,159 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 x.Status
             });
         });
+        model.Entity<ProjectTask>(e =>
+        {
+            e.ToTable("ProjectTasks", t =>
+            {
+                t.HasCheckConstraint("CK_ProjectTasks_Status", "\"Status\" BETWEEN 0 AND 4");
+            });
+
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(255).IsRequired();
+            e.Property(x => x.Description).HasColumnType("text").IsRequired();
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.Deadline).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.Project)
+                .WithMany()
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.Creator)
+                .WithMany()
+                .HasForeignKey(x => x.CreatorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => x.ProjectId);
+            e.HasIndex(x => x.CreatorId);
+            e.HasIndex(x => x.Deadline);
+        });
+
+        model.Entity<ProjectTaskAssignment>(e =>
+        {
+            e.ToTable("ProjectTaskAssignments");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.AssignedAt).IsRequired();
+
+            e.HasOne(x => x.ProjectTask)
+                .WithMany(x => x.Assignments)
+                .HasForeignKey(x => x.ProjectTaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.ProjectTaskId, x.UserId }).IsUnique();
+            e.HasIndex(x => x.UserId);
+        });
+        model.Entity<TaskReport>(e =>
+        {
+            e.ToTable("TaskReports", t =>
+            {
+                t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 2");
+                t.HasCheckConstraint("CK_TaskReports_Version", "\"Version\" > 0");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Content).HasMaxLength(5000).IsRequired();
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.SubmittedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.ProjectTask)
+                .WithMany(x => x.Reports)
+                .HasForeignKey(x => x.ProjectTaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.SubmittedBy)
+                .WithMany()
+                .HasForeignKey(x => x.SubmittedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.ProjectTaskId, x.SubmittedById, x.Version }).IsUnique();
+            e.HasIndex(x => new { x.ProjectTaskId, x.SubmittedAt });
+        });
+        model.Entity<TaskEvidence>(e =>
+        {
+            e.ToTable("TaskEvidence");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FileUrl).HasMaxLength(2048).IsRequired();
+            e.Property(x => x.PublicId).HasMaxLength(255);
+            e.Property(x => x.ResourceType).HasMaxLength(10);
+            e.Property(x => x.FileName).HasMaxLength(255);
+            e.Property(x => x.Format).HasMaxLength(10);
+            e.Property(x => x.CreatedAt).IsRequired();
+
+            e.HasOne(x => x.TaskReport)
+                .WithMany(x => x.Evidence)
+                .HasForeignKey(x => x.TaskReportId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => x.TaskReportId);
+        });
+        model.Entity<TaskReportReview>(e =>
+        {
+            e.ToTable("TaskReportReviews", t =>
+                t.HasCheckConstraint("CK_TaskReportReviews_Decision", "\"Decision\" BETWEEN 0 AND 1"));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Decision).HasConversion<short>().IsRequired();
+            e.Property(x => x.Feedback).HasMaxLength(2000);
+            e.Property(x => x.ReviewedAt).IsRequired();
+
+            e.HasOne(x => x.TaskReport)
+                .WithMany(x => x.Reviews)
+                .HasForeignKey(x => x.TaskReportId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.Reviewer)
+                .WithMany()
+                .HasForeignKey(x => x.ReviewerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => x.TaskReportId).IsUnique();
+            e.HasIndex(x => x.ReviewerId);
+        });
         model.Entity<ProjectModeration>(e =>
         {
             e.ToTable("ProjectModerations", t =>
             {
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_Status",
-                    "\"Status\" BETWEEN 0 AND 2");
+                    "\"Status\" BETWEEN 0 AND 5");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_ContentResult",
-                    "\"ContentResult\" BETWEEN 0 AND 2");
+                    "\"ContentResult\" BETWEEN 0 AND 3");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_LinkResult",
-                    "\"LinkResult\" BETWEEN 0 AND 2");
+                    "\"LinkResult\" BETWEEN 0 AND 3");
+
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_Confidence",
+                    "\"Confidence\" IS NULL OR (\"Confidence\" >= 0 AND \"Confidence\" <= 1)");
+
+                t.HasCheckConstraint(
+                    "CK_ProjectModerations_AttemptNumber",
+                    "\"AttemptNumber\" > 0");
             });
 
+            // Primary Key
             e.HasKey(x => x.Id);
 
+            // Attempt number
+            e.Property(x => x.AttemptNumber)
+                .IsRequired();
+
+            // Status
             e.Property(x => x.Status)
                 .HasConversion<short>()
                 .IsRequired();
 
+            // AI screening results
             e.Property(x => x.ContentResult)
                 .HasConversion<short>()
                 .IsRequired();
@@ -432,69 +585,149 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasConversion<short>()
                 .IsRequired();
 
+            // AI confidence: 0.000 - 1.000
+            e.Property(x => x.Confidence)
+                .HasPrecision(4, 3);
+
+            // AI violation reason
             e.Property(x => x.ViolationReason)
                 .HasColumnType("text");
 
+            // Raw AI response
             e.Property(x => x.ResultJson)
                 .HasColumnType("jsonb");
 
+            // AI engine/model version
             e.Property(x => x.EngineVersion)
                 .HasMaxLength(100);
 
+            // Hash of project content at moderation time
+            e.Property(x => x.ContentHash)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            // AI processing timestamp
             e.Property(x => x.CheckedAt);
 
+            // AI retry count
+            e.Property(x => x.RetryCount)
+                .HasDefaultValue(0)
+                .IsRequired();
+
+            // Human Moderator review
+            e.Property(x => x.ReviewNote)
+                .HasColumnType("text");
+
+            e.Property(x => x.ReviewAt);
+
+            // Audit timestamps
             e.Property(x => x.CreatedAt)
                 .IsRequired();
 
             e.Property(x => x.UpdatedAt)
                 .IsRequired();
-            e.Property(x => x.ContentHash)
-                .HasMaxLength(64)          
-                .IsRequired();
 
-            e.Property(x => x.Confidence)
-                .HasPrecision(4, 3);      
-
-            e.Property(x => x.RetryCount)
-                .HasDefaultValue(0)
-                .IsRequired();
-
+            // Project 1 : N ProjectModeration
             e.HasOne(x => x.Project)
                 .WithMany(x => x.Moderations)
                 .HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            e.HasOne(x => x.ReviewedBy)              
+            // Moderator/UserProfile 1 : N ProjectModeration
+            e.HasOne(x => x.ReviewedBy)
                 .WithMany()
-                .HasForeignKey(x => x.ReviewedByUserId)   
+                .HasForeignKey(x => x.ReviewedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Each project has unique moderation attempt numbers
             e.HasIndex(x => new
             {
                 x.ProjectId,
-                x.CreatedAt,
-                x.ContentHash
-            });
-            model.Entity<ProjectLink>(e =>
+                x.AttemptNumber
+            })
+            .IsUnique();
+
+            // Useful for finding moderation history / latest attempt
+            e.HasIndex(x => new
             {
-                e.ToTable("ProjectLinks", t =>
-                {
-                    t.HasCheckConstraint("CK_ProjectLinks_CheckResult", "\"CheckResult\" BETWEEN 0 AND 3");
-                });
+                x.ProjectId,
+                x.CreatedAt
+            });
+        });
+        model.Entity<Job>(e =>
+        {
+            e.ToTable("Jobs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(255).IsRequired();
+            e.Property(x => x.WorkType).HasColumnType("smallint");
+            e.Property(x => x.MinSalaryVnd).HasPrecision(14, 0);
+            e.Property(x => x.MaxSalaryVnd).HasPrecision(14, 0);
+            e.Property(x => x.Location).HasMaxLength(255);
+            e.Property(x => x.Description).HasColumnType("text");
+            e.Property(x => x.RequiredJson).HasColumnType("jsonb");
+            e.Property(x => x.BenefitsJson).HasColumnType("jsonb");
+            e.Property(x => x.Status).HasColumnType("smallint");
+            e.HasOne(x => x.Partner).WithMany(x => x.PostedJobs).HasForeignKey(x => x.PartnerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.PartnerId);
+            e.HasIndex(x => new { x.Status, x.Deadline });
+        });
+        model.Entity<JobSkill>(e =>
+        {
+            e.ToTable("JobSkills");
+            e.HasKey(x => new { x.JobId, x.SkillId });
+            e.Property(x => x.RequirementType).HasColumnType("smallint");
+            e.HasOne(x => x.Job).WithMany(x => x.JobSkills).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Skill).WithMany(x => x.JobSkills).HasForeignKey(x => x.SkillId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.SkillId);
+        });
+        model.Entity<User1SavedUser2>(e =>
+        {
+            e.ToTable("User1SavedUser2");
+            e.HasKey(x => new { x.UserBookmarkId, x.UserId });
+            e.Property(x => x.Note).HasColumnType("text");
+            e.HasOne(x => x.UserBookmark).WithMany(x => x.SavedUsers).HasForeignKey(x => x.UserBookmarkId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User).WithMany(x => x.SavedByUsers).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.UserId);
+        });
+        model.Entity<StudentSavedJob>(e =>
+        {
+            e.ToTable("StudentSavedJobs");
+            e.HasKey(x => new { x.StudentUserId, x.JobId });
+            e.HasOne(x => x.Student).WithMany(x => x.SavedJobs).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Job).WithMany(x => x.SavedByStudents).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.JobId);
+        });
+        model.Entity<JobApplication>(e =>
+        {
+            e.ToTable("JobApplications");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CoverMessage).HasMaxLength(300);
+            e.Property(x => x.AiMatchScore).HasPrecision(5, 2);
+            e.Property(x => x.ProfileSnapshot).HasColumnType("jsonb");
+            e.Property(x => x.Status).HasColumnType("smallint");
+            e.HasOne(x => x.Job).WithMany(x => x.Applications).HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Student).WithMany(x => x.JobApplications).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.JobId, x.Status });
+            e.HasIndex(x => new { x.StudentUserId, x.AppliedAt });
+        });
+        model.Entity<UserSkill>(e =>
+        {
+            e.ToTable("UserSkills");
 
-                e.HasKey(x => x.Id);
+            // Primary key
+            e.HasKey(x => x.Id);
 
-                e.Property(x => x.Url).HasMaxLength(2000).IsRequired();
-                e.Property(x => x.NormalizedUrl).HasMaxLength(2000).IsRequired();
-                e.Property(x => x.ResolvedUrl).HasMaxLength(2000);
+            // Skill proficiency level
+            e.Property(x => x.Level)
+                .HasConversion<short>()
+                .IsRequired();
 
-                e.Property(x => x.CheckResult).HasConversion<short>().IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
+            // Audit timestamps
+            e.Property(x => x.CreatedAt)
+                .IsRequired();
 
-                e.HasOne(x => x.Project)
-                    .WithMany(x => x.Links)
-                    .HasForeignKey(x => x.ProjectId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
+            e.Property(x => x.UpdatedAt)
+                .IsRequired();
                 
                 e.HasIndex(x => new { x.ProjectId, x.NormalizedUrl }).IsUnique();
             });
@@ -637,6 +870,29 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                     .HasForeignKey(x => x.ReporterUserId)
                     .OnDelete(DeleteBehavior.Restrict);
             });
+
+            // User 1 : N UserSkills
+            e.HasOne(x => x.User)
+                .WithMany(x => x.UserSkills)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Skill 1 : N UserSkills
+            e.HasOne(x => x.Skill)
+                .WithMany(x => x.UserSkills)
+                .HasForeignKey(x => x.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Prevent duplicate skills for the same user
+            e.HasIndex(x => new
+            {
+                x.UserId,
+                x.SkillId
+            }).IsUnique();
+
+            // Support skill-based user recommendations
+            e.HasIndex(x => x.SkillId);
+
         });
     }
 }

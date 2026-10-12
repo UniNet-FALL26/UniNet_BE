@@ -11,7 +11,6 @@ namespace UniNet.Domain.Entities
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid CreatorId { get; set; }
-        public Guid BadgeId { get; set; }
         public string Title { get; set; } = null!;
         public string ProjectField { get; set; } = null!;
         public string Description { get; set; } = null!;
@@ -36,6 +35,6 @@ namespace UniNet.Domain.Entities
         public List<ProjectInvitation> Invitations { get; set; } = [];
 
         public List<ProjectModeration> Moderations { get; set; } = [];
-        public List<ProjectLink> Links { get; set; } = [];
+        
     }
 }

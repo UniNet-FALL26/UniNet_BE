@@ -27,12 +27,15 @@ namespace UniNet.Domain.Entities
 
         public DateTimeOffset? CheckedAt { get; set; }
 
-        public DateTimeOffset CreatedAt { get; set; }
+        public DateTimeOffset CreatedAt { get; set; } 
 
         public DateTimeOffset UpdatedAt { get; set; }
         public string ContentHash { get; set; } = null!;   
         public decimal? Confidence { get; set; }
-        public Guid? ReviewedByUserId { get; set; }        
+        public Guid? ReviewedByUserId { get; set; }  
+        public string? ReviewNote { get; set; }
+        public DateTimeOffset? ReviewAt { get; set; }
+        public int AttemptNumber { get; set; }
         public int RetryCount { get; set; }
 
         // Navigation property

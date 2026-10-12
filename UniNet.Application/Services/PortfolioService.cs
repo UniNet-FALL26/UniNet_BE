@@ -10,7 +10,7 @@ namespace UniNet.Application.Services;
 public sealed class PortfolioService(UniNetDbContext db)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private sealed record Basic(string? Location, string? Availability, string? ContactEmail, string? CvUrl, PortfolioArticle[]? Articles);
+    private sealed record Basic(string? Location, string? Availability, string? ContactEmail, string? CvUrl, PortfolioArticle[]? Articles, double? YearsOfExperience = null, string? Gpa = null);
     private static T? Decode<T>(string? value)
     {
         if (value is null) return default;
@@ -41,6 +41,8 @@ public sealed class PortfolioService(UniNetDbContext db)
     }
     public static void Validate(PortfolioContent p)
     {
+        if (p.YearsOfExperience is < 0 or > 80 || (p.YearsOfExperience.HasValue && !double.IsFinite(p.YearsOfExperience.Value))) throw new AuthException("INVALID_EXPERIENCE", "Số năm kinh nghiệm phải từ 0 đến 80.");
+        Text(p.Gpa, 20);
         Text(p.Headline, 255); Text(p.CareerObjective); Text(p.Location, 255); Text(p.Availability, 100); Url(p.CvUrl);
         if (!string.IsNullOrWhiteSpace(p.ContactEmail) && (!MailAddress.TryCreate(p.ContactEmail, out var email) || email.Address != p.ContactEmail || p.ContactEmail.Length > 255))
             throw new AuthException("INVALID_PORTFOLIO_EMAIL", "Email liên hệ không hợp lệ.");
@@ -60,7 +62,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         var b = Decode<Basic>(c?.BasicInfoJson);
         return new(new(p.Id, p.FullName, p.AvatarUrl, p.CoverUrl, p.Bio, p.UniversityName, p.Major, p.OrganizationName, p.IsVerified, p.Nickname), new()
         {
-            Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = Decode<ProfileAppearance>(c?.AppearanceJson) ?? new(),
+            Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = NormalizeAppearance(Decode<ProfileAppearance>(c?.AppearanceJson) ?? new()), YearsOfExperience = b?.YearsOfExperience, Gpa = b?.Gpa,
             Activities = Decode<PortfolioActivity[]>(c?.ActivitiesJson) ?? [], Languages = Decode<PortfolioLanguage[]>(c?.LanguagesJson) ?? [], Location = b?.Location, Availability = b?.Availability,
             ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl, IsPublic = c?.IsPublic ?? false,
             Skills = ResolveSkills(c?.SkillsJson, catalog), Projects = Decode<PortfolioProject[]>(c?.ProjectsJson) ?? [],
@@ -70,29 +72,51 @@ public sealed class PortfolioService(UniNetDbContext db)
         }, owner, catalog);
     }
     private async Task<UserProfile> Own(Guid accountId, CancellationToken ct) =>
-        await db.UserProfiles.Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.AccountId == accountId && x.Account.Status == AccountStatus.Active, ct) ?? throw Missing();
+        await db.UserProfiles.Include(x => x.Account).Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.AccountId == accountId && x.Account.Status == AccountStatus.Active, ct) ?? throw Missing();
     public async Task<PortfolioResponse> Me(Guid accountId, CancellationToken ct) => Map(await Own(accountId, ct), true, await Catalog(ct));
     public async Task<PortfolioResponse> Read(Guid profileId, Guid? viewerId, CancellationToken ct)
     {
-        var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Status == AccountStatus.Active && (x.AccountId == viewerId || (x.CareerProfile != null && x.CareerProfile.IsPublic)), ct) ?? throw Missing();
-        return Map(p, p.AccountId == viewerId, await Catalog(ct));
+        var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Role == AccountRole.Student && x.Account.Status == AccountStatus.Active && (x.AccountId == viewerId || (x.CareerProfile != null && x.CareerProfile.IsPublic)), ct) ?? throw Missing();
+        var response = Map(p, p.AccountId == viewerId, await Catalog(ct));
+        return response.IsOwner ? response : ForVisitor(response);
     }
-    public async Task<PortfolioResponse> Save(Guid accountId, PortfolioContent request, CancellationToken ct)
+    public Task<PortfolioResponse> SaveEditor(Guid accountId, PortfolioEditorRequest request, CancellationToken ct)
+    {
+        if (request.Profile is null || request.Portfolio is null) throw new AuthException("INVALID_PORTFOLIO", "Thông tin hồ sơ không hợp lệ.");
+        Text(request.Profile.FullName, 255, true); Text(request.Profile.Nickname, 100); Text(request.Profile.Bio); Url(request.Profile.AvatarUrl); Url(request.Profile.CoverUrl);
+        if (request.Profile.Nickname is not null && string.IsNullOrWhiteSpace(request.Profile.Nickname)) throw new AuthException("INVALID_NICKNAME", "Biệt danh không được để trống.");
+        return Save(accountId, request.Portfolio, ct, request.Profile);
+    }
+    public async Task<PortfolioResponse> Save(Guid accountId, PortfolioContent request, CancellationToken ct, PortfolioPresentationRequest? presentation = null)
     {
         Validate(request);
+        if (presentation is not null) ValidateAppearance(request.Appearance);
         var catalog = await Catalog(ct);
         var skills = ReferenceSkills(request.Skills, catalog);
         var p = await Own(accountId, ct);
+        foreach (var url in request.Projects.Select(x => x.CoverUrl).Concat(request.Articles.Select(x => x.CoverUrl)).Concat(request.Certificates.Select(x => x.LogoUrl)))
+            await PortraitAssetPolicy.RetainReference(db, accountId, url, null, ct);
+        if (presentation is not null)
+        {
+            RequireStudent(p);
+            await PortraitAssetPolicy.Retain(db, accountId, presentation.AvatarUrl, p.AvatarUrl, ct);
+            await PortraitAssetPolicy.RetainReference(db, accountId, presentation.CoverUrl, p.CoverUrl, ct);
+            if (p.FullName != presentation.FullName.Trim()) p.IsVerified = false;
+            p.FullName = presentation.FullName.Trim();
+            if (presentation.Nickname is not null) p.Nickname = presentation.Nickname.Trim();
+            p.AvatarUrl = presentation.AvatarUrl?.Trim(); p.CoverUrl = presentation.CoverUrl?.Trim(); p.Bio = presentation.Bio?.Trim(); p.UpdatedAt = DateTimeOffset.UtcNow;
+        }
         if (p.CareerProfile is null)
         {
             p.CareerProfile = new CareerProfile { UserId = p.Id };
             db.CareerProfiles.Add(p.CareerProfile);
         }
         var c = p.CareerProfile;
+        if (presentation is not null) ApplyAppearance(c, request.Appearance);
         c.Headline = request.Headline?.Trim(); c.CareerObjective = request.CareerObjective?.Trim(); c.IsPublic = request.IsPublic;
         // Preserve unrelated existing basic metadata and extracurricular activities.
         var basic = Decode<JsonObject>(c.BasicInfoJson) ?? new JsonObject();
-        var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles), Json)!.AsObject();
+        var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles, request.YearsOfExperience, request.Gpa), Json)!.AsObject();
         foreach (var property in changes) basic[property.Key] = property.Value?.DeepClone();
         c.BasicInfoJson = basic.ToJsonString(Json);
         c.SkillsJson = JsonSerializer.Serialize(skills, Json); c.ProjectsJson = JsonSerializer.Serialize(request.Projects, Json);
@@ -105,7 +129,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         return Map(p, true, catalog);
     }
 
-    public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.DisplayOrder).ThenBy(s => s.Name).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.Slug, s.IconUrl, s.Category.ToString())).ToArrayAsync(ct);
+    public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.IconUrl, s.Category == SkillCategory.ToolsAndOther ? "Tools & Other" : s.Category.ToString())).ToArrayAsync(ct);
     private static PortfolioSkill[] ResolveSkills(string? json, PortfolioSkillCatalog[] catalog)
     {
         var items = Decode<PortfolioSkill[]>(json) ?? [];
@@ -122,8 +146,15 @@ public sealed class PortfolioService(UniNetDbContext db)
     public static void ValidateAppearance(ProfileAppearance appearance)
     {
         var p = appearance?.Profile;
-        var keys = new ProfileAppearanceSettings().SectionOrder;
-        if (p is null || p.Template != "developer-modern" || p.Theme is not ("blue" or "orange") || p.Font is not ("Inter" or "System") || p.SectionOrder is null || p.HiddenSections is null || p.SectionOrder.Length > keys.Length || p.HiddenSections.Length > keys.Length || p.SectionOrder.Concat(p.HiddenSections).Any(k => !keys.Contains(k)) || p.SectionOrder.Distinct().Count() != p.SectionOrder.Length || p.HiddenSections.Distinct().Count() != p.HiddenSections.Length)
+        var keys = new ProfileAppearanceSettings().SectionOrder.Concat(["contact", "hero", "projects"]).ToArray();
+        var validTemplateTheme = p is not null && (p.Template switch
+        {
+            "developer-modern" => p.Theme is "blue" or "amber" or "orange",
+            "developer-showcase" => p.Theme is "mint" or "orange",
+            "developer-landscape" => p.Theme is "blue" or "pink" or "mint",
+            _ => false
+        });
+        if (p is null || !validTemplateTheme || p.Font is not ("Inter" or "System") || p.SectionOrder is null || p.HiddenSections is null || p.SectionOrder.Length > keys.Length || p.HiddenSections.Length > keys.Length || p.SectionOrder.Concat(p.HiddenSections).Any(k => !keys.Contains(k)) || p.SectionOrder.Distinct().Count() != p.SectionOrder.Length || p.HiddenSections.Distinct().Count() != p.HiddenSections.Length)
             throw new AuthException("INVALID_APPEARANCE", "Mẫu hoặc màu hồ sơ không hợp lệ.");
     }
     public async Task<PortfolioResponse> SaveAppearance(Guid accountId, ProfileAppearance appearance, CancellationToken ct)
@@ -131,11 +162,65 @@ public sealed class PortfolioService(UniNetDbContext db)
         ValidateAppearance(appearance);
         var p = await Own(accountId, ct);
         if (p.CareerProfile is null) { p.CareerProfile = new CareerProfile { UserId = p.Id }; db.CareerProfiles.Add(p.CareerProfile); }
-        var root = Decode<JsonObject>(p.CareerProfile.AppearanceJson) ?? new JsonObject();
-        root["profile"] = JsonSerializer.SerializeToNode(appearance.Profile, Json);
-        p.CareerProfile.AppearanceJson = root.ToJsonString(Json);
+        ApplyAppearance(p.CareerProfile, appearance);
         p.CareerProfile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return Map(p, true, await Catalog(ct));
+    }
+
+    private static ProfileAppearance NormalizeAppearance(ProfileAppearance appearance)
+    {
+        var profile = appearance.Profile ?? new();
+        return appearance with { Profile = profile with { Theme = profile.Template == "developer-modern" && profile.Theme == "orange" ? "amber" : profile.Theme } };
+    }
+
+    private static void ApplyAppearance(CareerProfile career, ProfileAppearance appearance)
+    {
+        var root = Decode<JsonObject>(career.AppearanceJson) ?? new JsonObject();
+        var existing = root["profile"] as JsonObject ?? new JsonObject();
+        var next = JsonSerializer.SerializeToNode(NormalizeAppearance(appearance).Profile, Json)!.AsObject();
+        // Display has its own endpoint; a stale editor must not overwrite a newer device preference.
+        foreach (var property in next)
+            if (property.Key != "showPortfolio") existing[property.Key] = property.Value?.DeepClone();
+        root["profile"] = existing.DeepClone();
+        career.AppearanceJson = root.ToJsonString(Json);
+    }
+
+    private static void RequireStudent(UserProfile profile)
+    {
+        if (profile.Account.Role != AccountRole.Student) throw new AuthException("STUDENT_PROFILE_REQUIRED", "Chức năng này chỉ dành cho hồ sơ sinh viên.", 403);
+    }
+
+    public async Task<PortfolioResponse> SaveDisplay(Guid accountId, bool showPortfolio, CancellationToken ct)
+    {
+        var p = await Own(accountId, ct); RequireStudent(p);
+        if (p.CareerProfile is null) { p.CareerProfile = new CareerProfile { UserId = p.Id }; db.CareerProfiles.Add(p.CareerProfile); }
+        var root = Decode<JsonObject>(p.CareerProfile.AppearanceJson) ?? new JsonObject();
+        var profile = root["profile"] as JsonObject ?? JsonSerializer.SerializeToNode(new ProfileAppearanceSettings(), Json)!.AsObject();
+        profile["showPortfolio"] = showPortfolio; root["profile"] = profile.DeepClone();
+        p.CareerProfile.AppearanceJson = root.ToJsonString(Json); p.CareerProfile.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return Map(p, true, await Catalog(ct));
+    }
+
+    private static PortfolioResponse ForVisitor(PortfolioResponse response)
+    {
+        var content = response.Portfolio;
+        var hidden = (content.Appearance.Profile.HiddenSections ?? []).ToHashSet(StringComparer.Ordinal);
+        var identity = response.Profile;
+        if (content.Appearance.Profile.ShowPortfolio == false)
+            return response with { Profile = identity with { Bio = null }, Portfolio = new() { Appearance = content.Appearance, IsPublic = content.IsPublic }, SkillCatalog = null };
+        if (hidden.Contains("hero")) { identity = identity with { Bio = null, CoverUrl = null }; content = content with { Headline = null, CareerObjective = null, Location = null, Availability = null }; }
+        if (hidden.Contains("contact")) content = content with { ContactEmail = null, CvUrl = null, Location = null, Availability = null, SocialLinks = [] };
+        if (hidden.Contains("skills")) content = content with { Skills = [] };
+        if (hidden.Contains("projects")) content = content with { Projects = [] };
+        else content = content with { Projects = content.Projects.Where(project => !hidden.Contains(project.Featured ? "featured-projects" : "other-projects")).ToArray() };
+        if (hidden.Contains("journey")) content = content with { Education = [], Experience = [] };
+        if (hidden.Contains("certificates")) content = content with { Certificates = [] };
+        if (hidden.Contains("activities")) content = content with { Activities = [] };
+        if (hidden.Contains("languages")) content = content with { Languages = [] };
+        if (hidden.Contains("articles")) content = content with { Articles = [] };
+        if (hidden.Contains("stats") || hidden.Contains("journey")) content = content with { YearsOfExperience = null, Gpa = null };
+        return response with { Profile = identity, Portfolio = content, SkillCatalog = null };
     }
 }

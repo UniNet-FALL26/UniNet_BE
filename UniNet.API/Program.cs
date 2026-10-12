@@ -7,6 +7,7 @@ using UniNet.Application.Services;
 using UniNet.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
 var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
 var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is required.");
@@ -14,12 +15,28 @@ if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("J
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection).EnableSensitiveDataLogging());
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
+builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
-builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
+builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddScoped<ICommunityService, CommunityService>();
+builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
+builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
+builder.Services.AddHttpClient<UniNet.API.Services.IPortraitProcessor, UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromMinutes(3))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<UniNet.Application.Interfaces.ICloudImageStorage, UniNet.API.Services.CloudinaryImageStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>();
+builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
+builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddEndpointsApiExplorer();
@@ -32,7 +49,7 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "bearer",
         BearerFormat = "JWT",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "Nhập JWT token. Ví dụ: Bearer {token}"
+        Description = "Enter access token:"
     });
 
     options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
@@ -83,6 +100,30 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = authError.Status;
         await context.Response.WriteAsJsonAsync(new { code = authError.Code, message = authError.Message });
+        return;
+    }
+    if (error is ProjectJoinRequestException joinRequestError)
+    {
+        context.Response.StatusCode = joinRequestError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = joinRequestError.Code, message = joinRequestError.Message });
+        return;
+    }
+    if (error is ProjectInvitationException invitationError)
+    {
+        context.Response.StatusCode = invitationError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = invitationError.Code, message = invitationError.Message });
+        return;
+    }
+    if (error is ProjectMemberException memberError)
+    {
+        context.Response.StatusCode = memberError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = memberError.Code, message = memberError.Message });
+        return;
+    }
+    if (error is UniNet.Application.Common.PartnerException partnerError)
+    {
+        context.Response.StatusCode = partnerError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = partnerError.Code, message = partnerError.Message });
         return;
     }
     if (error is ProjectException projectError)

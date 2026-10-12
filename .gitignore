@@ -4,6 +4,8 @@
 ## Get latest from `dotnet new gitignore`
 
 # dotenv files
+__pycache__/
+App_Data/profile-images/
 .env
 
 # User-specific files
@@ -480,3 +482,4 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+.github/instructions/backend.instructions.md

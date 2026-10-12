@@ -10,12 +10,22 @@ namespace UniNet.Tests;
 public sealed class DatabaseDesignTests
 {
     [Fact]
-    public void PostgreSqlModelMatchesSixTableDesign()
+    public void SkillsUseExactlyFourCategories()
+    {
+        Assert.Equal(new[] { "Frontend", "Backend", "Design", "ToolsAndOther" }, Enum.GetNames<SkillCategory>());
+        using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_test;Username=postgres").Options);
+        var skill = db.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(Skill))!;
+        Assert.Equal("\"Category\" BETWEEN 0 AND 3", skill.GetCheckConstraints().Single().Sql);
+    }
+    [Fact]
+    public void PostgreSqlModelMatchesAccountProfileDesign()
     {
         using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
             .UseNpgsql("Host=localhost;Database=model_test;Username=postgres").Options);
         var entities = db.GetService<IDesignTimeModel>().Model.GetEntityTypes().ToDictionary(x => x.GetTableName()!);
-        Assert.Equal(new[] { "Accounts", "CareerProfiles", "RefreshTokens", "Skills", "UserVerifications", "Users" }, entities.Keys.Order(StringComparer.Ordinal).ToArray());
+        foreach (var table in new[] { "Accounts", "CareerProfiles", "RefreshTokens", "Skills", "UserVerifications", "Users" })
+            Assert.Contains(table, entities.Keys);
         var user = entities["Users"];
         Assert.False(user.FindProperty("FullName")!.IsNullable);
         Assert.Equal(255, user.FindProperty("FullName")!.GetMaxLength());
@@ -35,6 +45,20 @@ public sealed class DatabaseDesignTests
         Assert.Equal("jsonb", verification.FindProperty("DocumentUrls")!.GetColumnType());
         Assert.False(verification.GetForeignKeys().Single(x => x.Properties.Single().Name == "UserId").IsUnique);
         Assert.Equal(DeleteBehavior.Restrict, verification.GetForeignKeys().Single(x => x.Properties.Single().Name == "ReviewedBy").DeleteBehavior);
-        Assert.True(entities["Skills"].GetIndexes().Single(x => x.Properties.Count == 1 && x.Properties[0].Name == "Slug").IsUnique);
+    }
+
+    [Fact]
+    public void SkillCatalogHasOnlyRequiredColumnsAndKeepsItsIdentity()
+    {
+        using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_test;Username=postgres").Options);
+        var skill = db.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(Skill))!;
+        Assert.Equal(new[] { "Category", "CreatedAt", "IconUrl", "Id", "IsActive", "Name", "UpdatedAt" },
+            skill.GetProperties().Select(x => x.Name).Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal("Id", skill.FindPrimaryKey()!.Properties.Single().Name);
+        Assert.Equal(100, skill.FindProperty("Name")!.GetMaxLength());
+        Assert.False(skill.FindProperty("Name")!.IsNullable);
+        Assert.Equal("smallint", skill.FindProperty("Category")!.GetColumnType());
+        Assert.Equal(new[] { "Category", "IsActive" }, skill.GetIndexes().Single().Properties.Select(x => x.Name).ToArray());
     }
 }
