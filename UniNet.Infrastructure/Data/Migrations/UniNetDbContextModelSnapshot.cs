@@ -150,6 +150,209 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("CareerProfiles", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("AuthorActorType")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("AuthorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CommentCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<int>("FavoriteCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("MediaUrlsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("Status", "IsDeleted", "CreatedAt");
+
+                    b.ToTable("CommunityPosts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CommunityPosts_AuthorActorType", "\"AuthorActorType\" BETWEEN 0 AND 1");
+
+                            t.HasCheckConstraint("CK_CommunityPosts_Status", "\"Status\" BETWEEN 0 AND 3");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostBookmark", b =>
+                {
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("PostId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("CommunityPostBookmarks", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AuthorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<Guid?>("ParentCommentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReplyToUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("ParentCommentId");
+
+                    b.HasIndex("PostId");
+
+                    b.HasIndex("ReplyToUserId");
+
+                    b.ToTable("CommunityPostComments", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostMedia", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FileUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<short>("MediaType")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PostId");
+
+                    b.ToTable("CommunityPostMedia", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CommunityPostMedia_MediaType", "\"MediaType\" BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostReaction", b =>
+                {
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("PostId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("CommunityPostReactions", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.ContentReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ReporterUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PostId");
+
+                    b.HasIndex("ReporterUserId");
+
+                    b.ToTable("ContentReports", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContentReports_Status", "\"Status\" BETWEEN 0 AND 2");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -762,6 +965,118 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostBookmark", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Community.CommunityPost", "Post")
+                        .WithMany("Bookmarks")
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Post");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostComment", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Community.CommunityPostComment", "ParentComment")
+                        .WithMany("Replies")
+                        .HasForeignKey("ParentCommentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("UniNet.Domain.Entities.Community.CommunityPost", "Post")
+                        .WithMany("Comments")
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "ReplyToUser")
+                        .WithMany()
+                        .HasForeignKey("ReplyToUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("ParentComment");
+
+                    b.Navigation("Post");
+
+                    b.Navigation("ReplyToUser");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostMedia", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Community.CommunityPost", "Post")
+                        .WithMany("Media")
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Post");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostReaction", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Community.CommunityPost", "Post")
+                        .WithMany("Reactions")
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Post");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.ContentReport", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Community.CommunityPost", "Post")
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "ReporterUser")
+                        .WithMany()
+                        .HasForeignKey("ReporterUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Post");
+
+                    b.Navigation("ReporterUser");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "Creator")
@@ -942,6 +1257,22 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Profile");
 
                     b.Navigation("RefreshTokens");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
+                {
+                    b.Navigation("Bookmarks");
+
+                    b.Navigation("Comments");
+
+                    b.Navigation("Media");
+
+                    b.Navigation("Reactions");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPostComment", b =>
+                {
+                    b.Navigation("Replies");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>

@@ -11,12 +11,13 @@ var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
 var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is required.");
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
-builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
+builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection).EnableSensitiveDataLogging());
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
+builder.Services.AddScoped<ICommunityService, CommunityService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];

@@ -8,7 +8,7 @@ public sealed class UniNetDbContextFactory : IDesignTimeDbContextFactory<UniNetD
     public UniNetDbContext CreateDbContext(string[] args)
     {
         var connection = Environment.GetEnvironmentVariable("ConnectionStrings__UniNet")
-            ?? "Host=localhost;Database=uninet;Username=postgres";
+            ?? "Host=localhost;Database=Uninet;Username=postgres;Password=123456";
         return new(new DbContextOptionsBuilder<UniNetDbContext>().UseNpgsql(connection).Options);
     }
 }
