@@ -25,6 +25,17 @@ public sealed class PackagesController(IPackageService packages) : ControllerBas
     public Task<PackageResponse> GetPackage(Guid packageId, CancellationToken ct)
         => packages.GetPackageAsync(AccountId, packageId, ct);
 
+    [HttpGet("admin"), Authorize(Roles = "Admin")]
+    public Task<PackagesResponse> ListAllPackages([FromQuery] PackageType? type = null,
+        [FromQuery] TargetRole? role = null, [FromQuery] bool? isActive = null,
+        [FromQuery] string? keyword = null, [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20, CancellationToken ct = default)
+        => packages.ListAllPackagesAsync(AccountId, type, role, isActive, keyword, page, pageSize, ct);
+
+    [HttpPatch("{packageId:guid}/status"), Authorize(Roles = "Admin")]
+    public Task<PackageResponse> TogglePackageStatus(Guid packageId, CancellationToken ct)
+        => packages.TogglePackageStatusAsync(AccountId, packageId, ct);
+
     [HttpPost, Authorize(Roles = "Admin")]
     public async Task<ActionResult<PackageResponse>> CreatePackage(SavePackageRequest request, CancellationToken ct)
     {

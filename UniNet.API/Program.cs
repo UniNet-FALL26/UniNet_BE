@@ -12,7 +12,7 @@ var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
 var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is required.");
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
-builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection).EnableSensitiveDataLogging());
+builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PartnerVerificationService>();
@@ -27,7 +27,6 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, Un
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
-builder.Services.AddScoped<ICommunityService, CommunityService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();

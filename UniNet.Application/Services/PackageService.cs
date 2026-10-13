@@ -17,12 +17,26 @@ public sealed class PackageService(UniNetDbContext db) : IPackageService
         bool? isActive, string? keyword, int page, int pageSize, CancellationToken ct)
     {
         await EnsureAccessAsync(accountId, false, ct);
+        return await ListPackagesCoreAsync(type, role, isActive, keyword, page, pageSize, false, ct);
+    }
+
+    public async Task<PackagesResponse> ListAllPackagesAsync(Guid accountId, PackageType? type, TargetRole? role,
+        bool? isActive, string? keyword, int page, int pageSize, CancellationToken ct)
+    {
+        await EnsureAccessAsync(accountId, true, ct);
+        return await ListPackagesCoreAsync(type, role, isActive, keyword, page, pageSize, true, ct);
+    }
+
+    private async Task<PackagesResponse> ListPackagesCoreAsync(PackageType? type, TargetRole? role,
+        bool? isActive, string? keyword, int page, int pageSize, bool includeInactive, CancellationToken ct)
+    {
         Require(page >= 1, "INVALID_PAGE", "Page must be at least 1.");
         Require(pageSize is >= 1 and <= 100, "INVALID_PAGE_SIZE", "Page size must be between 1 and 100.");
         Require(type is null || Enum.IsDefined(type.Value), "INVALID_PACKAGE_TYPE", "Package type is invalid.");
         Require(role is null || Enum.IsDefined(role.Value), "INVALID_TARGET_ROLE", "Target role is invalid.");
         Require(keyword is null || keyword.Length <= 255, "INVALID_KEYWORD", "Keyword must be at most 255 characters.");
         var query = db.Packages.AsNoTracking();
+        if (!includeInactive) query = query.Where(x => x.IsActive);
         if (type.HasValue) query = query.Where(x => x.Type == type.Value);
         if (role.HasValue) query = query.Where(x => x.Role == role.Value);
         if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
@@ -74,13 +88,19 @@ public sealed class PackageService(UniNetDbContext db) : IPackageService
     {
         await EnsureAccessAsync(accountId, true, ct);
         var package = await db.Packages.SingleOrDefaultAsync(x => x.Id == packageId, ct) ?? throw NotFound();
-        if (await db.Transactions.AnyAsync(x => x.PackageId == packageId, ct))
-            throw HasTransactions();
-        db.Packages.Remove(package);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException error) when (error.InnerException is PostgresException
-            { SqlState: PostgresErrorCodes.ForeignKeyViolation, ConstraintName: "FK_Transactions_Packages_PackageId" })
-        { throw HasTransactions(); }
+        package.IsActive = false;
+        package.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<PackageResponse> TogglePackageStatusAsync(Guid accountId, Guid packageId, CancellationToken ct)
+    {
+        await EnsureAccessAsync(accountId, true, ct);
+        var package = await db.Packages.SingleOrDefaultAsync(x => x.Id == packageId, ct) ?? throw NotFound();
+        package.IsActive = !package.IsActive;
+        package.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return package.ToResponse();
     }
 
     private async Task EnsureAccessAsync(Guid accountId, bool adminOnly, CancellationToken ct)
@@ -134,7 +154,6 @@ public sealed class PackageService(UniNetDbContext db) : IPackageService
 
     private static PackageException NotFound() => new("PACKAGE_NOT_FOUND", "Package was not found.", 404);
     private static PackageException DuplicateCode() => new("PACKAGE_CODE_EXISTS", "Package code already exists.", 409);
-    private static PackageException HasTransactions() => new("PACKAGE_HAS_TRANSACTIONS", "A package with transactions cannot be deleted. Deactivate it instead.", 409);
     private static void Require(bool condition, string code, string message, int status = 400)
     {
         if (!condition) throw new PackageException(code, message, status);
