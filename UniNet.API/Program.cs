@@ -17,6 +17,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
@@ -97,6 +98,12 @@ app.UseSwaggerUI();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (error is UniNet.Application.Common.PackageException packageError)
+    {
+        context.Response.StatusCode = packageError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = packageError.Code, message = packageError.Message });
+        return;
+    }
     if (error is AuthException authError)
     {
         context.Response.StatusCode = authError.Status;
