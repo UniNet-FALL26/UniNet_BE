@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
-using UniNet.Domain.Entities.Community;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -27,17 +26,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<TaskEvidence> TaskEvidence => Set<TaskEvidence>();
     public DbSet<TaskReportReview> TaskReportReviews => Set<TaskReportReview>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
-
-    public DbSet<ProjectLink> ProjectLinks => Set<ProjectLink>();
-
-    // Community DbSets
-    public DbSet<CommunityPost> CommunityPosts => Set<CommunityPost>();
-    public DbSet<CommunityPostMedia> CommunityPostMedia => Set<CommunityPostMedia>();
-    public DbSet<CommunityPostComment> CommunityPostComments => Set<CommunityPostComment>();
-    public DbSet<CommunityPostReaction> CommunityPostReactions => Set<CommunityPostReaction>();
-    public DbSet<CommunityPostBookmark> CommunityPostBookmarks => Set<CommunityPostBookmark>();
-    public DbSet<ContentReport> ContentReports => Set<ContentReport>();
-
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
@@ -212,7 +200,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         });
         model.Entity<ProjectRoleRequirement>(e =>
         {
-            e.ToTable("ProjectRoleRequirements", t=>
+            e.ToTable("ProjectRoleRequirements", t =>
             {
                 t.HasCheckConstraint(
                     "CK_ProjectRoleRequirements_Quantity",
@@ -903,148 +891,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             e.Property(x => x.UpdatedAt)
                 .IsRequired();
-                
-                e.HasIndex(x => new { x.ProjectId, x.NormalizedUrl }).IsUnique();
-            });
-            // Community
-            model.Entity<CommunityPost>(e =>
-            {
-                e.ToTable("CommunityPosts", t =>
-                {
-                    t.HasCheckConstraint("CK_CommunityPosts_AuthorActorType", "\"AuthorActorType\" BETWEEN 0 AND 1");
-                    t.HasCheckConstraint("CK_CommunityPosts_Status", "\"Status\" BETWEEN 0 AND 3");
-                });
-                e.HasKey(x => x.Id);
-
-                e.Property(x => x.Description).HasColumnType("text");
-                e.Property(x => x.MediaUrlsJson).HasColumnType("jsonb");
-                e.Property(x => x.FavoriteCount).HasDefaultValue(0).IsRequired();
-                e.Property(x => x.CommentCount).HasDefaultValue(0).IsRequired();
-
-                e.Property(x => x.AuthorActorType).HasConversion<short>().IsRequired();
-                e.Property(x => x.Status).HasConversion<short>().IsRequired();
-                e.Property(x => x.IsDeleted).HasDefaultValue(false).IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
-                e.Property(x => x.UpdatedAt).IsRequired();
-
-                // Author Relation
-                e.HasOne(x => x.AuthorUser)
-                    .WithMany()
-                    .HasForeignKey(x => x.AuthorUserId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasIndex(x => x.AuthorUserId);
-                e.HasIndex(x => new { x.Status, x.IsDeleted, x.CreatedAt });
-            });
-
-            model.Entity<CommunityPostMedia>(e =>
-            {
-                e.ToTable("CommunityPostMedia", t =>
-                {
-                    t.HasCheckConstraint("CK_CommunityPostMedia_MediaType", "\"MediaType\" BETWEEN 0 AND 1");
-                });
-                e.HasKey(x => x.Id);
-
-                e.Property(x => x.MediaType).HasConversion<short>().IsRequired();
-                e.Property(x => x.FileUrl).HasColumnType("text").IsRequired();
-                e.Property(x => x.DisplayOrder).HasDefaultValue(0).IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
-
-                e.HasOne(x => x.Post)
-                    .WithMany(x => x.Media) // Assuming ICollection<CommunityPostMedia> in CommunityPost
-                    .HasForeignKey(x => x.PostId)
-                    .OnDelete(DeleteBehavior.Cascade);
-            });
-
-            model.Entity<CommunityPostComment>(e =>
-            {
-                e.ToTable("CommunityPostComments");
-                e.HasKey(x => x.Id);
-
-                e.Property(x => x.Content).HasColumnType("text").IsRequired();
-                e.Property(x => x.IsDeleted).HasDefaultValue(false).IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
-
-                // Relations
-                e.HasOne(x => x.Post)
-                    .WithMany(x => x.Comments)
-                    .HasForeignKey(x => x.PostId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasOne(x => x.ParentComment)
-                    .WithMany(x => x.Replies)
-                    .HasForeignKey(x => x.ParentCommentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasOne(x => x.AuthorUser)
-                    .WithMany()
-                    .HasForeignKey(x => x.AuthorUserId)
-                    .OnDelete(DeleteBehavior.Restrict);
-
-                e.HasOne(x => x.ReplyToUser)
-                    .WithMany()
-                    .HasForeignKey(x => x.ReplyToUserId)
-                    .OnDelete(DeleteBehavior.Restrict);
-            });
-
-            model.Entity<CommunityPostReaction>(e =>
-            {
-                e.ToTable("CommunityPostReactions");
-                // Composite Primary Key
-                e.HasKey(x => new { x.PostId, x.UserId });
-                e.Property(x => x.CreatedAt).IsRequired();
-
-                e.HasOne(x => x.Post)
-                    .WithMany(x => x.Reactions)
-                    .HasForeignKey(x => x.PostId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasOne(x => x.User)
-                    .WithMany()
-                    .HasForeignKey(x => x.UserId)
-                    .OnDelete(DeleteBehavior.Restrict);
-            });
-
-            model.Entity<CommunityPostBookmark>(e =>
-            {
-                e.ToTable("CommunityPostBookmarks");
-                // Composite Primary Key
-                e.HasKey(x => new { x.PostId, x.UserId });
-                e.Property(x => x.CreatedAt).IsRequired();
-
-                e.HasOne(x => x.Post)
-                    .WithMany(x => x.Bookmarks)
-                    .HasForeignKey(x => x.PostId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasOne(x => x.User)
-                    .WithMany()
-                    .HasForeignKey(x => x.UserId)
-                    .OnDelete(DeleteBehavior.Restrict);
-            });
-
-            model.Entity<ContentReport>(e =>
-            {
-                e.ToTable("ContentReports", t =>
-                {
-                    t.HasCheckConstraint("CK_ContentReports_Status", "\"Status\" BETWEEN 0 AND 2");
-                });
-                e.HasKey(x => x.Id);
-
-                e.Property(x => x.Reason).HasColumnType("text").IsRequired();
-                e.Property(x => x.Status).HasConversion<short>().IsRequired();
-                e.Property(x => x.CreatedAt).IsRequired();
-
-                e.HasOne(x => x.Post)
-                    .WithMany()
-                    .HasForeignKey(x => x.PostId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasOne(x => x.ReporterUser)
-                    .WithMany()
-                    .HasForeignKey(x => x.ReporterUserId)
-                    .OnDelete(DeleteBehavior.Restrict);
-            });
 
             // User 1 : N UserSkills
             e.HasOne(x => x.User)
@@ -1067,7 +913,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             // Support skill-based user recommendations
             e.HasIndex(x => x.SkillId);
-
         });
     }
 }
