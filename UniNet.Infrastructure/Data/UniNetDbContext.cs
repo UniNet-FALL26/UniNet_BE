@@ -836,6 +836,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => new { x.UserId, x.Status });
             e.HasIndex(x => x.ProviderOrderCode);
             e.HasIndex(x => x.ProviderPaymentLinkId);
+            e.HasIndex(x => new { x.PaymentMethod, x.ProviderOrderCode }).IsUnique()
+                .HasFilter("\"PaymentMethod\" = 'PayOS' AND \"ProviderOrderCode\" IS NOT NULL");
+            e.HasIndex(x => new { x.PaymentMethod, x.ProviderPaymentLinkId }).IsUnique()
+                .HasFilter("\"PaymentMethod\" = 'PayOS' AND \"ProviderPaymentLinkId\" IS NOT NULL");
             e.HasIndex(x => new { x.Status, x.ExpiredAt });
         });
         model.Entity<VerificationTransaction>(e =>
