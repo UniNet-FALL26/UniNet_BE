@@ -46,6 +46,18 @@ builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
 builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("UniNetDashboard", policy =>
+    {
+        policy
+            .WithOrigins(
+                "https://uninet-dashboard-nine.vercel.app"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -168,6 +180,7 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 }));
 app.UseHttpsRedirection();
 app.UseCors("MobileWeb");
+app.UseCors("UniNetDashboard");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
