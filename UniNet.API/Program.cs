@@ -25,6 +25,10 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, 
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
+builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
+    client.Timeout = TimeSpan.FromSeconds(30))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
@@ -97,6 +101,12 @@ app.UseSwaggerUI();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (error is TransactionException transactionError)
+    {
+        context.Response.StatusCode = transactionError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = transactionError.Code, message = transactionError.Message });
+        return;
+    }
     if (error is UniNet.Application.Common.PackageException packageError)
     {
         context.Response.StatusCode = packageError.Status;

@@ -213,6 +213,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         RequireMutable(verification);
         Require(verification.EvidenceSubmissions.Count > 0, "EVIDENCE_REQUIRED", "Submit evidence before scheduling.", 409);
         Require(verification.VerificationTransactions.Any(v => v.Transaction.Status == PaymentStatus.Success &&
+            v.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
             v.Transaction.PackageId == verification.PackageId && v.Transaction.UserId == verification.RequestByUserId &&
             !v.Transaction.RefundTransactions.Any(r => r.Status is PaymentStatus.Pending or PaymentStatus.Success)), "PAYMENT_REQUIRED",
             "A confirmed successful verification payment is required before booking a meeting.", 409);
