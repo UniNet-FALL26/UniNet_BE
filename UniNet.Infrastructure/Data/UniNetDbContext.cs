@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using System.Reflection.Emit;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
+using UniNet.Domain.Entities.Community;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -40,7 +42,12 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<RefundTransaction> RefundTransactions => Set<RefundTransaction>();
     public DbSet<VerificationTransaction> VerificationTransactions => Set<VerificationTransaction>();
-
+    public DbSet<CommunityPost> CommunityPosts => Set<CommunityPost>();
+    public DbSet<CommunityPostMedia> CommunityPostMedia => Set<CommunityPostMedia>();
+    public DbSet<CommunityPostComment> CommunityPostComments => Set<CommunityPostComment>();
+    public DbSet<CommunityPostReaction> CommunityPostReactions => Set<CommunityPostReaction>();
+    public DbSet<CommunityPostBookmark> CommunityPostBookmarks => Set<CommunityPostBookmark>();
+    public DbSet<ContentReport> ContentReports => Set<ContentReport>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<PortraitAsset>(e =>
@@ -917,6 +924,119 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             // Support skill-based user recommendations
             e.HasIndex(x => x.SkillId);
+        });
+
+        // 1. CommunityPost
+        model.Entity<CommunityPost>(entity =>
+        {
+            entity.ToTable("CommunityPosts");
+            entity.HasKey(e => e.Id);
+
+            // Ép ki?u list string thành JSONB
+            entity.Property(e => e.MediaUrlsJson).HasColumnType("jsonb");
+
+            // Ràng bu?c Check Constraints
+            entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPosts_AuthorActorType", "\"AuthorActorType\" BETWEEN 0 AND 1"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPosts_Status", "\"Status\" BETWEEN 0 AND 3"));
+
+            entity.HasOne(e => e.AuthorUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.AuthorUserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 2. CommunityPostMedia
+        model.Entity<CommunityPostMedia>(entity =>
+        {
+            entity.ToTable("CommunityPostMedia");
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPostMedia_MediaType", "\"MediaType\" BETWEEN 0 AND 1"));
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Media)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 3. CommunityPostComment
+        model.Entity<CommunityPostComment>(entity =>
+        {
+            entity.ToTable("CommunityPostComments");
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Comments)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.AuthorUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.AuthorUserId)
+                  .OnDelete(DeleteBehavior.Restrict); // Dùng Restrict ð? tránh l?i multiple cascade paths
+
+            entity.HasOne(e => e.ParentComment)
+                  .WithMany(c => c.Replies)
+                  .HasForeignKey(e => e.ParentCommentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ReplyToUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ReplyToUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 4. CommunityPostReaction (Khóa chính kép / Composite Key)
+        model.Entity<CommunityPostReaction>(entity =>
+        {
+            entity.ToTable("CommunityPostReactions");
+            entity.HasKey(e => new { e.PostId, e.UserId });
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Reactions)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 5. CommunityPostBookmark (Khóa chính kép / Composite Key)
+        model.Entity<CommunityPostBookmark>(entity =>
+        {
+            entity.ToTable("CommunityPostBookmarks");
+            entity.HasKey(e => new { e.PostId, e.UserId });
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Bookmarks)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 6. ContentReport
+        model.Entity<ContentReport>(entity =>
+        {
+            entity.ToTable("ContentReports");
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable(t => t.HasCheckConstraint("CK_ContentReports_Status", "\"Status\" BETWEEN 0 AND 2"));
+
+            entity.HasOne(e => e.Post)
+                  .WithMany()
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ReporterUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ReporterUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

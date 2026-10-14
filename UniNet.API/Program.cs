@@ -32,6 +32,7 @@ builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, P
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
+builder.Services.AddScoped<ICommunityService,CommunityService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
