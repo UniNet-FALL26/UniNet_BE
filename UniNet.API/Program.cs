@@ -25,6 +25,7 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, 
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IAssignmentService, AssignmentService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
     client.Timeout = TimeSpan.FromSeconds(30))
@@ -123,6 +124,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = joinRequestError.Status;
         await context.Response.WriteAsJsonAsync(new { code = joinRequestError.Code, message = joinRequestError.Message });
+        return;
+    }
+    if (error is AssignmentException assignmentError)
+    {
+        context.Response.StatusCode = assignmentError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = assignmentError.Code, message = assignmentError.Message });
         return;
     }
     if (error is ProjectVerificationException verificationError)
