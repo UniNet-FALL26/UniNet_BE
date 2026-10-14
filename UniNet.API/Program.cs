@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using UniNet.Application;
+using UniNet.Application.Interfaces;
 using UniNet.Application.Services;
 using UniNet.Infrastructure.Data;
 
@@ -27,6 +28,7 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, Un
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
+builder.Services.AddScoped<ICommunityService, CommunityService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
