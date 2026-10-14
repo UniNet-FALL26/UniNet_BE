@@ -88,7 +88,7 @@ public sealed class ProjectsController(IProjectService projects, AuthService aut
     }
 
     /// <summary>
-    /// Xem chi tiết thông tin project
+    /// Lấy dự án theo trạng thái mà Student đã tạo hoặc đang tham gia.
     /// </summary>
     [Authorize(Roles = "Student"), HttpGet("status/{status}")]
     public async Task<IActionResult> GetProjectsByStatus(

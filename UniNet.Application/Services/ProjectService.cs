@@ -314,7 +314,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
         var query = db.Projects.AsNoTracking()
-            .Where(p => p.Creator.AccountId == userId && p.Status == status);
+            .Where(p => p.Status == status && (p.Creator.AccountId == userId ||
+                p.Members.Any(m => m.User.AccountId == userId && m.Status == ProjectMemberStatus.Active)));
         var total = await query.CountAsync(ct);
         Require(total > 0, "PROJECT_NOT_FOUND", "Project not found.", 404);
         var projects = await query.Include(p => p.Creator)
@@ -445,7 +446,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.ExpectedOutput,
             project.Visibility,
@@ -472,7 +473,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
             project.Status,
@@ -501,7 +502,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
             project.RecruitmentStatus,
