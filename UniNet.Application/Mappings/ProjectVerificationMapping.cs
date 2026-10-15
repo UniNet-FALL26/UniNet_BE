@@ -24,8 +24,13 @@ public static class ProjectVerificationMapping
             JsonSerializer.Deserialize<List<string>>(verification.AiAdditionalEvidenceJson) ?? []);
     }
 
-    public static VerificationReportResponse ToReportResponse(VerificationReport report) => new(
-        report.Id, report.VerificationId, report.Summary, report.Findings, report.Recommendations, report.SubmittetAt);
+    public static VerificationReportResponse ToReportResponse(VerificationReport report)
+    {
+        var latest = report.Versions.OrderByDescending(v => v.Version).FirstOrDefault();
+        return latest == null
+            ? new(report.Id, report.VerificationId, report.Summary, report.Findings, report.Recommendations, report.SubmittetAt)
+            : new(latest.Id, report.VerificationId, latest.Summary, latest.Findings, latest.Recommendations, latest.SubmittedAt);
+    }
 
     public static VerificationFinalResultResponse? ToFinalResponse(ProjectVerification verification)
     {

@@ -15,6 +15,7 @@ namespace UniNet.Domain.Entities
         public Guid AdminId { get; set; }
         public VerificationAssignmentStatus Status { get; set; }
         public DateTimeOffset AssignedAt { get; set; }
+        public DateTimeOffset? CompletedAt { get; set; }
         public DateTimeOffset? ReportDueAt { get; set; }
         public DateTimeOffset? AssignmentDueAt { get; set; }
         public DateTimeOffset? ReminderSentAt { get; set; }
