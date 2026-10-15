@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
@@ -303,7 +304,7 @@ public sealed class AdvertisementService(
 
     private static AdvertisementException NotFound() => new("CAMPAIGN_NOT_FOUND", "Advertisement campaign was not found.", 404);
 
-    private static void Require(bool condition, string code, string message, int statusCode = 400)
+    private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int statusCode = 400)
     {
         if (!condition) throw new AdvertisementException(code, message, statusCode);
     }

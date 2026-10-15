@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using UniNet.Application.Interfaces;
@@ -14,7 +15,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 {
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static void Require(bool condition, string code, string message, int status = 400)
+    private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)
     {
         if (!condition) throw new ProjectException(code, message, status);
     }
