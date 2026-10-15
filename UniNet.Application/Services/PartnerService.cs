@@ -93,7 +93,7 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         var profile = await GetPartnerProfileAsync(accountId, ct);
         ValidateJob(request);
         if (request.Status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
-        var skills = await LoadSkillsAsync(request.Skills, ct);
+        var skills = await LoadSkillsAsync(request.Skills, request.Status == PartnerJobStatus.Published, ct);
         var now = DateTimeOffset.UtcNow;
         var job = new Job
         {
@@ -123,7 +123,7 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
-        var skills = await LoadSkillsAsync(request.Skills, ct);
+        var skills = await LoadSkillsAsync(request.Skills, request.Status == PartnerJobStatus.Published, ct);
         var requestedSkills = skills.ToDictionary(x => x.skill.Id);
         foreach (var existing in job.JobSkills.ToList())
         {
@@ -211,16 +211,36 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             "PARTNER_VERIFICATION_REQUIRED", "Hồ sơ đối tác cần được admin xác minh trước khi đăng tuyển công khai.", 403);
     }
     private async Task<List<(Skill skill, JobSkillRequirementType requirementType)>> LoadSkillsAsync(
-        IReadOnlyList<JobSkillInput>? inputs, CancellationToken ct)
+        IReadOnlyList<JobSkillInput>? inputs, bool createMissing, CancellationToken ct)
     {
         var requested = inputs ?? [];
         Require(requested.All(x => x is not null && Enum.IsDefined(x.RequirementType)), "INVALID_SKILL_REQUIREMENT", "Skill entries and requirement types must be valid.");
-        Require(requested.Select(x => x!.SkillId).Distinct().Count() == requested.Count,
+        Require(requested.All(x => x!.SkillId.HasValue != !string.IsNullOrWhiteSpace(x.Name)), "INVALID_SKILL", "Each skill must have either a catalog ID or a name.");
+        Require(requested.Select(x => x!.SkillId.HasValue ? $"id:{x.SkillId}" : $"name:{x.Name!.Trim()}")
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() == requested.Count,
             "DUPLICATE_SKILL", "A skill can only be added once to a job.");
-        var ids = requested.Select(x => x!.SkillId).ToArray();
-        var skills = await db.Skills.Where(x => ids.Contains(x.Id) && x.IsActive).ToDictionaryAsync(x => x.Id, ct);
-        Require(skills.Count == ids.Length, "SKILL_NOT_FOUND", "One or more selected skills are unavailable.", 404);
-        return requested.Select(x => (skills[x!.SkillId], x.RequirementType)).ToList();
+        var idInputs = requested.Where(x => x!.SkillId.HasValue).ToList();
+        var ids = idInputs.Select(x => x!.SkillId!.Value).ToArray();
+        var skillsById = await db.Skills.Where(x => ids.Contains(x.Id) && x.IsActive).ToDictionaryAsync(x => x.Id, ct);
+        Require(skillsById.Count == ids.Length, "SKILL_NOT_FOUND", "One or more selected skills are unavailable.", 404);
+        var resolved = idInputs.Select(x => (skill: skillsById[x!.SkillId!.Value], requirementType: x.RequirementType)).ToList();
+
+        foreach (var input in requested.Where(x => !x!.SkillId.HasValue))
+        {
+            if (!createMissing) continue;
+            var name = input!.Name!.Trim();
+            var normalized = name.ToLowerInvariant();
+            var skill = await db.Skills.FirstOrDefaultAsync(x => x.Name.ToLower() == normalized, ct);
+            if (skill is null)
+            {
+                skill = new Skill { Id = Guid.NewGuid(), Name = name, IconUrl = null, Category = null, IsActive = true };
+                db.Skills.Add(skill);
+            }
+            resolved.Add((skill, input.RequirementType));
+        }
+        Require(resolved.Select(x => x.skill.Id).Distinct().Count() == resolved.Count,
+            "DUPLICATE_SKILL", "A skill can only be added once to a job.");
+        return resolved;
     }
 
     private async Task<Dictionary<Guid, int>> GetApplicantCountsAsync(IEnumerable<Guid> jobIds, CancellationToken ct)
@@ -239,7 +259,11 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             requirements.Responsibilities, requirements.RequiredQualifications, requirements.PreferredQualifications,
             requirements.ProjectAreas,
             job.JobSkills.OrderBy(x => x.RequirementType).ThenBy(x => x.Skill.Name)
-                .Select(x => new JobSkillResponse(x.SkillId, x.Skill.Name, (short)x.Skill.Category, (JobSkillRequirementType)x.RequirementType)).ToList(),
+                .Select(x => new JobSkillResponse(x.SkillId, x.Skill.Name, x.Skill.Category is { } category ? (short)category : null, (JobSkillRequirementType)x.RequirementType))
+                .Concat(job.Status == (short)PartnerJobStatus.Draft
+                    ? (requirements.PendingSkills ?? []).Select(skill => new JobSkillResponse(null, skill.Name, null, skill.RequirementType))
+                    : [])
+                .ToList(),
             DeserializeBenefits(job.BenefitsJson), applicantCount, job.CreatedAt, job.UpdatedAt);
     }
 
@@ -248,7 +272,10 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
 
     private static string SerializeRequirements(SavePartnerJobRequest request) => JsonSerializer.Serialize(new JobRequirementsDocument(
         CleanLines(request.Responsibilities), CleanLines(request.RequiredQualifications), CleanLines(request.PreferredQualifications),
-        CleanLines(request.ProjectAreas)), JsonOptions);
+        CleanLines(request.ProjectAreas), request.Status == PartnerJobStatus.Draft
+            ? (request.Skills ?? []).Where(x => x.SkillId is null && !string.IsNullOrWhiteSpace(x.Name))
+                .Select(x => new PendingJobSkill(x.Name!.Trim(), x.RequirementType)).DistinctBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList()
+            : []), JsonOptions);
 
     private static JobRequirementsDocument DeserializeRequirements(string? json)
     {
@@ -297,6 +324,9 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         Require((request.Skills?.Count ?? 0) <= 100, "TOO_MANY_SKILLS", "A job can have at most 100 skills.");
         Require((request.Benefits?.Count ?? 0) <= 30, "TOO_MANY_BENEFITS", "A job can have at most 30 benefits.");
         Require((request.Skills ?? []).All(x => x is not null), "INVALID_SKILL", "Skill entries cannot be null.");
+        Require((request.Skills ?? []).All(x => x!.SkillId.HasValue != !string.IsNullOrWhiteSpace(x.Name) &&
+                (x.Name is null || x.Name.Trim().Length <= 100)),
+            "INVALID_SKILL", "Each skill must have either a catalog ID or a name of at most 100 characters.");
         Require((request.Benefits ?? []).All(x => x is not null), "INVALID_BENEFIT", "Benefit entries cannot be null.");
         foreach (var benefit in request.Benefits ?? [])
         {
@@ -335,8 +365,11 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         IReadOnlyList<string> Responsibilities,
         IReadOnlyList<string> RequiredQualifications,
         IReadOnlyList<string> PreferredQualifications,
-        IReadOnlyList<string> ProjectAreas)
+        IReadOnlyList<string> ProjectAreas,
+        IReadOnlyList<PendingJobSkill>? PendingSkills = null)
     {
-        public static JobRequirementsDocument Empty { get; } = new([], [], [], []);
+        public static JobRequirementsDocument Empty { get; } = new([], [], [], [], []);
     }
+
+    private sealed record PendingJobSkill(string Name, JobSkillRequirementType RequirementType);
 }

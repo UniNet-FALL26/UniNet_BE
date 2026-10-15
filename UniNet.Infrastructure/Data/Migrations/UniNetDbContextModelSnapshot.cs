@@ -1533,6 +1533,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
+            modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1680,6 +1684,28 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.Property<Guid>("UserBookmarkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserBookmarkId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("User1SavedUser2", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
                 {
                     b.Property<Guid>("TransactionId")
@@ -1790,7 +1816,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<short>("Category")
+                    b.Property<short?>("Category")
                         .HasColumnType("smallint");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1816,7 +1842,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.ToTable("Skills", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 3");
+                            t.HasCheckConstraint("CK_Skills_Category", "\"Category\" IS NULL OR \"Category\" BETWEEN 0 AND 3");
                         });
                 });
 
