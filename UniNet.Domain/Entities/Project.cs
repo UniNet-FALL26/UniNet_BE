@@ -35,6 +35,6 @@ namespace UniNet.Domain.Entities
         public List<ProjectInvitation> Invitations { get; set; } = [];
 
         public List<ProjectModeration> Moderations { get; set; } = [];
-        
+        public List<ProjectVerification> Verifications { get; set; } = [];
     }
 }

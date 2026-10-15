@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using UniNet.Application;
+using UniNet.Application.Interfaces;
 using UniNet.Application.Services;
 using UniNet.Infrastructure.Data;
 
@@ -17,14 +18,24 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IAssignmentService, AssignmentService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IReportService, ReportService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
+builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
+    client.Timeout = TimeSpan.FromSeconds(30))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<ProjectModerationService>();
 builder.Services.AddScoped<ProfileDevelopmentSeed>();
+builder.Services.AddScoped<ICommunityService,CommunityService>();
+builder.Services.AddScoped<IAdvertisementService, AdvertisementService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
@@ -38,6 +49,18 @@ builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
 builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("UniNetDashboard", policy =>
+    {
+        policy
+            .WithOrigins(
+                "https://uninet-dashboard-nine.vercel.app"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -95,6 +118,18 @@ app.UseSwaggerUI();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (error is TransactionException transactionError)
+    {
+        context.Response.StatusCode = transactionError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = transactionError.Code, message = transactionError.Message });
+        return;
+    }
+    if (error is UniNet.Application.Common.PackageException packageError)
+    {
+        context.Response.StatusCode = packageError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = packageError.Code, message = packageError.Message });
+        return;
+    }
     if (error is AuthException authError)
     {
         context.Response.StatusCode = authError.Status;
@@ -105,6 +140,24 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = joinRequestError.Status;
         await context.Response.WriteAsJsonAsync(new { code = joinRequestError.Code, message = joinRequestError.Message });
+        return;
+    }
+    if (error is AssignmentException assignmentError)
+    {
+        context.Response.StatusCode = assignmentError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = assignmentError.Code, message = assignmentError.Message });
+        return;
+    }
+    if (error is ReportException reportError)
+    {
+        context.Response.StatusCode = reportError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = reportError.Code, message = reportError.Message });
+        return;
+    }
+    if (error is ProjectVerificationException verificationError)
+    {
+        context.Response.StatusCode = verificationError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = verificationError.Code, message = verificationError.Message });
         return;
     }
     if (error is ProjectInvitationException invitationError)
@@ -136,6 +189,7 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 }));
 app.UseHttpsRedirection();
 app.UseCors("MobileWeb");
+app.UseCors("UniNetDashboard");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));

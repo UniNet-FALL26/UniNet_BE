@@ -6,7 +6,7 @@ using UniNet.Application.Services;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Admin"), Route("api/admin/accounts")]
+[ApiController, Authorize(Roles = "Admin"), Route("api/staff/accounts")]
 public sealed class AdminAccountsController(AuthService auth) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var accountId)

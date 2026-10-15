@@ -24,7 +24,9 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             ?? throw new ProjectInvitationException("INVITEE_NOT_FOUND", "Invitee profile not found.", 404);
         RequireActiveStudent(invitee);
         Require(invitee.Id != project.CreatorId, "CANNOT_INVITE_SELF", "You cannot invite yourself to your own project.", 409);
-        await RequireRecruitingAsync(project, ct);
+        await ProjectRoleCapacity.CancelUnavailableAsync(db, project, ct);
+        await db.SaveChangesAsync(ct);
+        await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == invitee.Id &&
             m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
         Require(!await db.ProjectInvitations.AnyAsync(i => i.ProjectId == projectId && i.InviteeId == invitee.Id &&
@@ -85,7 +87,7 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         {
             Require(actor.Id != invitation.Project.CreatorId,
                 "CANNOT_JOIN_OWN_PROJECT", "You cannot join your own project through an invitation.", 409);
-            await RequireRecruitingAsync(invitation.Project, ct);
+            await RequireRecruitingAsync(invitation.Project, invitation.Role, ct);
             var member = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == invitation.ProjectId &&
                 m.UserId == actor.Id, ct);
             Require(member?.Status != ProjectMemberStatus.Active,
@@ -158,7 +160,7 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
     private static void RequireCreator(Project project, Guid profileId) => Require(project.CreatorId == profileId,
         "FORBIDDEN", "Only the project creator can send, view sent invitations, or cancel invitations.", 403);
 
-    private async Task RequireRecruitingAsync(Project project, CancellationToken ct)
+    private async Task RequireRecruitingAsync(Project project, string role, CancellationToken ct)
     {
         Require(project.Status == ProjectStatus.Active,
             "INVALID_PROJECT_STATE", "Project must be Active.", 409);
@@ -166,6 +168,9 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             "RECRUITMENT_CLOSED", "Project is no longer accepting members.", 409);
         Require(await MemberCountAsync(project, ct) < project.MemberTarget,
             "PROJECT_FULL", "Project has reached its member limit.", 409);
+        var roleError = await ProjectRoleCapacity.CheckAsync(db, project, role, ct);
+        if (roleError is { } error)
+            throw new ProjectInvitationException(error.Code, error.Message, 409);
     }
 
     private async Task<int> MemberCountAsync(Project project, CancellationToken ct) => 1 +
@@ -179,6 +184,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             // Match join requests so concurrent acceptances cannot overfill the project.
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             var invitation = await action();
+            await db.SaveChangesAsync(ct);
+            await ProjectRoleCapacity.CancelUnavailableAsync(db, invitation.Project, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return ProjectInvitationMapping.ToResponse(invitation);
