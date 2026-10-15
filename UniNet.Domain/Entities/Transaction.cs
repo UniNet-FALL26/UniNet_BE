@@ -29,6 +29,7 @@ namespace UniNet.Domain.Entities
         public UserProfile User { get; set; } = null!;
         public Package Package { get; set; } = null!;
         public VerificationTransaction? VerificationTransaction { get; set; }
+        public AdvertisementTransaction? AdvertisementTransaction { get; set; }
         public List<RefundTransaction> RefundTransactions { get; set; } = [];
     }
 }

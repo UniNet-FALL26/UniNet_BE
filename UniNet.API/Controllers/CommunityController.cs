@@ -11,7 +11,7 @@ using System.IdentityModel.Tokens.Jwt;
 namespace UniNet.API.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/community")]
 [Authorize]
 public class CommunityController : ControllerBase
 {

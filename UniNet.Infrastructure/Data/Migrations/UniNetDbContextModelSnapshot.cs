@@ -155,6 +155,94 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("CareerProfiles", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementCampaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BudgetCap")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<long>("ClickCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("CompanyUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DestinationUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ExpiredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("ImpressionCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MediaUrl")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("PackageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyUserId");
+
+                    b.HasIndex("PackageId");
+
+                    b.ToTable("AdvertisementCampaigns", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique();
+
+                    b.ToTable("AdvertisementTransactions", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1884,6 +1972,44 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementCampaign", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "CompanyUser")
+                        .WithMany()
+                        .HasForeignKey("CompanyUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Package", "Package")
+                        .WithMany()
+                        .HasForeignKey("PackageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CompanyUser");
+
+                    b.Navigation("Package");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementTransaction", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.AdvertisementCampaign", "Campaign")
+                        .WithMany("AdvertisementTransactions")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Transaction", "Transaction")
+                        .WithOne("AdvertisementTransaction")
+                        .HasForeignKey("UniNet.Domain.Entities.AdvertisementTransaction", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+
+                    b.Navigation("Transaction");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "AuthorUser")
@@ -2553,6 +2679,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("RefreshTokens");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementCampaign", b =>
+                {
+                    b.Navigation("AdvertisementTransactions");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
                 {
                     b.Navigation("Bookmarks");
@@ -2625,6 +2756,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.Transaction", b =>
                 {
+                    b.Navigation("AdvertisementTransaction");
+
                     b.Navigation("RefundTransactions");
 
                     b.Navigation("VerificationTransaction");

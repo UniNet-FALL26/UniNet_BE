@@ -50,6 +50,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<CommunityPostReaction> CommunityPostReactions => Set<CommunityPostReaction>();
     public DbSet<CommunityPostBookmark> CommunityPostBookmarks => Set<CommunityPostBookmark>();
     public DbSet<ContentReport> ContentReports => Set<ContentReport>();
+    public DbSet<AdvertisementCampaign> AdvertisementCampaigns => Set<AdvertisementCampaign>();
+    public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<PortraitAsset>(e =>
@@ -1068,6 +1070,40 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .WithMany()
                   .HasForeignKey(e => e.ReporterUserId)
                   .OnDelete(DeleteBehavior.Restrict);
+        });
+        // 1. AdvertisementCampaign
+        model.Entity<AdvertisementCampaign>(entity =>
+        {
+            entity.ToTable("AdvertisementCampaigns");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.BudgetCap).HasColumnType("numeric(18,2)");
+
+            entity.HasOne(e => e.CompanyUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.CompanyUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Package)
+                  .WithMany()
+                  .HasForeignKey(e => e.PackageId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 2. AdvertisementTransaction (Mapping 1-1 v?i Transaction)
+        model.Entity<AdvertisementTransaction>(entity =>
+        {
+            entity.ToTable("AdvertisementTransactions");
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Transaction)
+                  .WithOne(t => t.AdvertisementTransaction)
+                  .HasForeignKey<AdvertisementTransaction>(e => e.TransactionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Campaign)
+                  .WithMany(c => c.AdvertisementTransactions)
+                  .HasForeignKey(e => e.CampaignId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

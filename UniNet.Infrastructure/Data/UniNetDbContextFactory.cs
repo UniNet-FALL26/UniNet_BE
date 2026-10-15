@@ -9,7 +9,7 @@ public sealed class UniNetDbContextFactory : IDesignTimeDbContextFactory<UniNetD
     {
         var connection = Environment.GetEnvironmentVariable("ConnectionStrings__UniNet");
         if (string.IsNullOrWhiteSpace(connection)) connection = ReadLocalConnection();
-        connection ??= "Host=localhost;Database=uninet;Username=postgres";
+        connection ??= "Host=localhost;Database=Uninet;Username=postgres;Password=123456";
         return new(new DbContextOptionsBuilder<UniNetDbContext>().UseNpgsql(connection).Options);
     }
 
