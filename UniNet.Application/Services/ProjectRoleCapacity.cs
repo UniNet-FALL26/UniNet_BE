@@ -7,6 +7,36 @@ namespace UniNet.Application.Services;
 
 internal static class ProjectRoleCapacity
 {
+    // Call inside the membership transaction, after saving the new active member.
+    // Historical decisions remain unchanged; only outstanding applications expire their opportunity.
+    public static async Task CancelUnavailableAsync(UniNetDbContext db, Project project, CancellationToken ct)
+    {
+        var requests = await db.ProjectJoinRequests.Where(r => r.ProjectId == project.Id &&
+            r.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
+        var invitations = await db.ProjectInvitations.Where(i => i.ProjectId == project.Id &&
+            i.Status == ProjectInvitationStatus.Sent).ToListAsync(ct);
+        var members = await db.ProjectMembers.Where(m => m.ProjectId == project.Id &&
+            m.Status == ProjectMemberStatus.Active).Select(m => m.UserId).ToListAsync(ct);
+        var full = 1 + members.Count(id => id != project.CreatorId) >= project.MemberTarget;
+        var unavailable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var role in requests.Select(r => r.Role).Concat(invitations.Select(i => i.Role))
+                     .Select(r => r.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
+            if (full || await CheckAsync(db, project, role, ct) != null)
+                unavailable.Add(role);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var request in requests.Where(r => unavailable.Contains(r.Role.Trim()) || members.Contains(r.UserId)))
+        {
+            request.Status = ProjectJoinRequestStatus.Cancelled;
+            request.UpdatedAt = now;
+        }
+        foreach (var invitation in invitations.Where(i => unavailable.Contains(i.Role.Trim()) || members.Contains(i.InviteeId)))
+        {
+            invitation.Status = ProjectInvitationStatus.Cancelled;
+            invitation.UpdatedAt = now;
+        }
+    }
+
     public static async Task<(string Code, string Message)?> CheckAsync(
         UniNetDbContext db, Project project, string role, CancellationToken ct)
     {
