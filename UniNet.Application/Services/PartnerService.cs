@@ -304,8 +304,8 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         ValidateStatus(request.Status, allowExpired: false);
         Require(request.Deadline > DateTimeOffset.UtcNow || request.Status == PartnerJobStatus.Draft,
             "INVALID_DEADLINE", "A published job must have a future deadline.");
-        Require(request.StartAt is null || request.StartAt <= request.Deadline,
-            "INVALID_DATE_RANGE", "Start date must be on or before the application deadline.");
+        Require(request.StartAt is null || request.StartAt < request.Deadline,
+            "INVALID_DATE_RANGE", "Start date must be before the application deadline.");
         Require(request.MinSalaryVnd is null or >= 1_000_000m && request.MaxSalaryVnd is null or >= 1_000_000m,
             "INVALID_SALARY", "Each provided salary must be at least 1,000,000 VND.");
         const decimal maxSalary = 99_999_999_999_999m;

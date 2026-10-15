@@ -1533,10 +1533,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
-            modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1705,7 +1701,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("User1SavedUser2", (string)null);
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
                 {
                     b.Property<Guid>("TransactionId")
