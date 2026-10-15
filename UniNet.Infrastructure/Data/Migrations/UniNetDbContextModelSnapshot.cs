@@ -707,26 +707,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("StudentSavedJobs", (string)null);
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
-                {
-                    b.Property<Guid>("UserBookmarkId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("SavedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserBookmarkId", "UserId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("User1SavedUser2", (string)null);
-                });
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.Property<Guid>("Id")
@@ -846,6 +826,27 @@ namespace UniNet.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_TaskReportReviews_Decision", "\"Decision\" BETWEEN 0 AND 1");
                         });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.Property<Guid>("UserBookmarkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserBookmarkId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("User1SavedUser2", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -968,7 +969,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<short>("Category")
+                    b.Property<short?>("Category")
                         .HasColumnType("smallint");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -994,7 +995,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.ToTable("Skills", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 3");
+                            t.HasCheckConstraint("CK_Skills_Category", "\"Category\" IS NULL OR \"Category\" BETWEEN 0 AND 3");
                         });
                 });
 
@@ -1380,24 +1381,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Student");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
-                {
-                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
-                        .WithMany("SavedUsers")
-                        .HasForeignKey("UserBookmarkId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.UserProfile", "User")
-                        .WithMany("SavedByUsers")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-
-                    b.Navigation("UserBookmark");
-                });
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.TaskReport", "TaskReport")
@@ -1445,6 +1428,25 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Reviewer");
 
                     b.Navigation("TaskReport");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
+                        .WithMany("SavedUsers")
+                        .HasForeignKey("UserBookmarkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany("SavedByUsers")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+
+                    b.Navigation("UserBookmark");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>

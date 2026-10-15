@@ -414,7 +414,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
@@ -479,7 +479,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category.ToString(), ps.Skill.IconUrl, null)).ToList()
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList()
         );
     }
 
@@ -489,7 +489,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))

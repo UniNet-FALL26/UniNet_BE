@@ -18,7 +18,7 @@ public static class ProjectMapping
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
@@ -70,7 +70,7 @@ public static class ProjectMapping
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category.ToString(), ps.Skill.IconUrl, null)).ToList()
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList()
         );
     }
 
@@ -80,7 +80,7 @@ public static class ProjectMapping
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
