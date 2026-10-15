@@ -11,7 +11,7 @@ public record AssignmentResponse(Guid Id, Guid ProjectVerificationId, Guid Assig
     DateTimeOffset? AssignmentDueAt, DateTimeOffset? ReportDueAt, DateTimeOffset? ReplacedAt,
     string? ReplacementReason, Guid? ReplacedById, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     DateTimeOffset? ScheduledStartAt, DateTimeOffset? ScheduledEndAt,
-    DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt);
+    DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt, DateTimeOffset? CompletedAt = null);
 public record AssignmentDetailResponse(AssignmentResponse Assignment, VerificationProjectResponse Project,
     List<VerificationEvidenceSubmissionResponse> EvidenceSubmissions, VerificationReportResponse? Report);
 public record AssignmentsResponse(int Page, int PageSize, int TotalItems, int TotalPages,

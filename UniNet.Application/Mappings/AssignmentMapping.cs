@@ -9,7 +9,7 @@ public static class AssignmentMapping
         a.AssignmentDueAt, a.ReportDueAt, a.ReplacedAt, a.ReplacementReason, a.ReplacedBy?.Id,
         a.CreatedAt, a.UpdatedAt, a.ProjectVerification.ScheduledStartAt,
         a.ProjectVerification.ScheduledEndAt, a.ProjectVerification.MeetingStartAt,
-        a.ProjectVerification.MeetingEndAt);
+        a.ProjectVerification.MeetingEndAt, a.CompletedAt);
 
     public static AssignmentDetailResponse ToDetailResponse(VerificationAssignment a) => new(ToResponse(a),
         new(a.ProjectVerification.Project.Id, a.ProjectVerification.Project.Title,
@@ -17,6 +17,5 @@ public static class AssignmentMapping
             a.ProjectVerification.Project.Status, a.ProjectVerification.Project.CreatorId),
         a.ProjectVerification.EvidenceSubmissions.OrderBy(e => e.Version)
             .Select(ProjectVerificationMapping.ToEvidenceResponse).ToList(),
-        a.Report == null ? null : new(a.Report.Id, a.Id, a.Report.Summary, a.Report.Findings,
-            a.Report.Recommendations, a.Report.SubmittetAt));
+        a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report));
 }

@@ -38,6 +38,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectVerificationEvidence> ProjectVerificationEvidence => Set<ProjectVerificationEvidence>();
     public DbSet<VerificationAssignment> VerificationAssignments => Set<VerificationAssignment>();
     public DbSet<VerificationReport> VerificationReports => Set<VerificationReport>();
+    public DbSet<VerificationReportVersion> VerificationReportVersions => Set<VerificationReportVersion>();
+    public DbSet<ReportAuditLog> ReportAuditLogs => Set<ReportAuditLog>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<RefundTransaction> RefundTransactions => Set<RefundTransaction>();
@@ -792,7 +794,36 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             e.HasOne(x => x.VerificationAssignment).WithOne(x => x.Report)
                 .HasForeignKey<VerificationReport>(x => x.VerificationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.Outcome).HasConversion<short?>();
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.VerificationId).IsUnique();
+        });
+        model.Entity<VerificationReportVersion>(e =>
+        {
+            e.ToTable("VerificationReportVersions", t =>
+            {
+                t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
+                t.HasCheckConstraint("CK_ReportVersions_Outcome", "\"Outcome\" IN (1, 2)");
+            });
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.ReportId, x.Version }).IsUnique();
+            e.Property(x => x.Summary).HasColumnType("text").IsRequired();
+            e.Property(x => x.Findings).HasColumnType("text").IsRequired();
+            e.Property(x => x.Recommendations).HasColumnType("text").IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(2000).IsRequired();
+            e.Property(x => x.Outcome).HasConversion<short>();
+            e.HasOne(x => x.Report).WithMany(x => x.Versions).HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<ReportAuditLog>(e =>
+        {
+            e.ToTable("ReportAuditLogs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Action).HasMaxLength(50).IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(2000);
+            e.HasIndex(x => new { x.ReportId, x.Version }).IsUnique();
+            e.HasOne<VerificationReport>().WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<Package>(e =>
         {

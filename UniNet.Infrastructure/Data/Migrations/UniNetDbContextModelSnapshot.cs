@@ -1114,6 +1114,43 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ReportAuditLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("ReportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ReportId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("ReportAuditLogs", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.StudentSavedJob", b =>
                 {
                     b.Property<Guid>("StudentUserId")
@@ -1405,6 +1442,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("AssignmentDueAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1467,8 +1507,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("Findings")
                         .HasColumnType("text");
 
+                    b.Property<short?>("Outcome")
+                        .HasColumnType("smallint");
+
                     b.Property<string>("Recommendations")
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("SubmittetAt")
                         .HasColumnType("timestamp with time zone");
@@ -1485,10 +1531,65 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("SubmittedByUserId");
+
                     b.HasIndex("VerificationId")
                         .IsUnique();
 
                     b.ToTable("VerificationReports", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificationReportVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Findings")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<short>("Outcome")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Recommendations")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ReportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubmittedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubmittedByUserId");
+
+                    b.HasIndex("ReportId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("VerificationReportVersions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ReportVersions_Outcome", "\"Outcome\" IN (1, 2)");
+
+                            t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
+                        });
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
@@ -2170,6 +2271,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Transaction");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ReportAuditLog", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.VerificationReport", null)
+                        .WithMany()
+                        .HasForeignKey("ReportId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.StudentSavedJob", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.Job", "Job")
@@ -2331,6 +2447,11 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationReport", b =>
                 {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("SubmittedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UniNet.Domain.Entities.VerificationAssignment", "VerificationAssignment")
                         .WithOne("Report")
                         .HasForeignKey("UniNet.Domain.Entities.VerificationReport", "VerificationId")
@@ -2338,6 +2459,23 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("VerificationAssignment");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificationReportVersion", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.VerificationReport", "Report")
+                        .WithMany("Versions")
+                        .HasForeignKey("ReportId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("SubmittedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Report");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
@@ -2495,6 +2633,11 @@ namespace UniNet.Infrastructure.Data.Migrations
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationAssignment", b =>
                 {
                     b.Navigation("Report");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificationReport", b =>
+                {
+                    b.Navigation("Versions");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Skill", b =>

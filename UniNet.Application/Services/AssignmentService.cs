@@ -19,7 +19,7 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
         var assignment = await AssignmentQuery().AsNoTracking()
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceSubmissions)
-            .Include(a => a.Report).AsSplitQuery()
+            .Include(a => a.Report).ThenInclude(r => r!.Versions).AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == assignmentId &&
                 (user.Account.Role == AccountRole.Admin || a.AssignedToUserId == user.Id), ct)
             ?? throw NotFound();
@@ -124,6 +124,7 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
                 Require(verification.MeetingEndAt.HasValue && assignment.Report != null,
                     "ASSIGNMENT_INCOMPLETE", "End the meeting and submit a report before completing the assignment.", 409);
                 assignment.Status = VerificationAssignmentStatus.Completed;
+                assignment.CompletedAt = now;
                 break;
             default:
                 throw new AssignmentException("INVALID_ASSIGNMENT_ACTION", "Invalid assignment action.");
