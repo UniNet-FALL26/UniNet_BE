@@ -19,6 +19,8 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         Require(project.CreatorId != student.Id, "CANNOT_JOIN_OWN_PROJECT", "You cannot send a request to join your own project.", 403);
         Require(!string.IsNullOrWhiteSpace(request.Role) && request.Role.Trim().Length <= 150,
             "INVALID_ROLE", "Role must be between 1 and 150 characters.");
+        await ProjectRoleCapacity.CancelUnavailableAsync(db, project, ct);
+        await db.SaveChangesAsync(ct);
         await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == student.Id &&
             m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
@@ -188,6 +190,8 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
             // Serialize writes to prevent duplicate pending requests and overfilling a project.
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             var request = await action();
+            await db.SaveChangesAsync(ct);
+            await ProjectRoleCapacity.CancelUnavailableAsync(db, request.Project, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return ProjectJoinRequestMapping.ToResponse(request);
