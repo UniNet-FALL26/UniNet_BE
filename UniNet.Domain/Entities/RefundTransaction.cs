@@ -19,6 +19,10 @@ namespace UniNet.Domain.Entities
         public string? FailureReason { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }
+        // Once dispatched, workers only query the same refund; they never submit a second request.
+        public DateTimeOffset? DispatchStartedAt { get; set; }
+        public DateTimeOffset? NextReconciliationAt { get; set; }
+        public int ReconciliationAttempts { get; set; }
         public DateTimeOffset CompletedAt { get; set; }
         public Transaction Transaction { get; set; } = null!;
     }

@@ -1035,8 +1035,20 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<int>("AiAttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AiAttemptEvidenceVersion")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("AiEvidenceVersion")
                         .HasColumnType("integer");
+
+                    b.Property<string>("AiLastError")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("AiNextRetryAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("AiReviewedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1165,8 +1177,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("DispatchStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("FailureReason")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("NextReconciliationAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("PaymentProvider")
                         .IsRequired()
@@ -1176,6 +1194,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("ReconciliationAttempts")
+                        .HasColumnType("integer");
 
                     b.Property<string>("RefundRef")
                         .HasMaxLength(255)
@@ -1622,6 +1643,43 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificationNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("RecipientUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VerificationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VerificationId");
+
+                    b.HasIndex("EventKey", "RecipientUserId")
+                        .IsUnique();
+
+                    b.HasIndex("RecipientUserId", "CreatedAt");
+
+                    b.ToTable("VerificationNotification");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationReport", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1717,27 +1775,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
                         });
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
-                {
-                    b.Property<Guid>("UserBookmarkId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("SavedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserBookmarkId", "UserId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("User1SavedUser2", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
@@ -2649,6 +2686,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("ProjectVerification");
 
                     b.Navigation("ReplacedBy");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificationNotification", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", null)
+                        .WithMany()
+                        .HasForeignKey("VerificationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationReport", b =>

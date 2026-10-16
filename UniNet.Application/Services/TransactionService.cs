@@ -145,6 +145,33 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
         return new(true, result.Status == PaymentStatus.Success);
     }
 
+    // Only the backend worker calls this; no user-triggered refund or reconciliation authorization is bypassed by a route.
+    public async Task ReconcilePendingInBackgroundAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now.AddMinutes(-5);
+        var pending = await db.Transactions.AsNoTracking().Where(t => t.Status == PaymentStatus.Pending &&
+            t.VerificationTransaction != null && t.PaymentMethod == provider.Name && t.ProviderOrderCode != null &&
+            t.UpdatedAt <= cutoff).OrderBy(t => t.UpdatedAt).Select(t => new { t.Id, t.ProviderOrderCode }).Take(50).ToListAsync(ct);
+        foreach (var payment in pending)
+        {
+            db.ChangeTracker.Clear();
+            try
+            {
+                var result = await provider.GetPaymentStatusAsync(payment.ProviderOrderCode!, ct);
+                await ApplyAsync(payment.Id, result, ct);
+            }
+            catch (PaymentProviderException ex) { await RecordProviderProblemAsync(payment.Id, ex, creating: false); }
+            catch (TransactionException ex) when (ex.Code != "PAYMENT_CONFLICT")
+            {
+                logger.LogError("Payment reconciliation needs review: {TransactionId} / {Code}", payment.Id, ex.Code);
+                db.ChangeTracker.Clear();
+                await db.Transactions.Where(t => t.Id == payment.Id && t.Status == PaymentStatus.Pending)
+                    .ExecuteUpdateAsync(s => s.SetProperty(t => t.UpdatedAt, now)
+                        .SetProperty(t => t.FailureReason, ex.Code), ct);
+            }
+        }
+    }
+
     private Task<TransactionResponse> ApplyAsync(Guid transactionId, ProviderPaymentResult result, CancellationToken ct) =>
         AtomicAsync(async () =>
         {

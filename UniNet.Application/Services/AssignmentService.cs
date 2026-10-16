@@ -119,6 +119,7 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
                     "INVALID_MEETING_STATE", "Start the meeting before ending it.", 409);
                 Require(now >= verification.MeetingStartAt.Value, "CLOCK_CONFLICT", "Server time precedes meeting start.", 409);
                 verification.MeetingEndAt = now;
+                assignment.ReportDueAt = now.AddHours(48);
                 break;
             case AssignmentAction.Complete:
                 Require(verification.MeetingEndAt.HasValue && assignment.Report != null,

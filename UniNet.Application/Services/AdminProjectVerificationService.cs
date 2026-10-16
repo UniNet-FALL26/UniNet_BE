@@ -96,7 +96,8 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
             throw Error("INVALID_REFUND_AMOUNT", "Refund must be a positive whole VND amount within the unreserved payment balance.", 409);
         var now = DateTimeOffset.UtcNow;
         var refund = new RefundTransaction { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = request.Amount,
-            Status = PaymentStatus.Pending, PaymentProvider = "Manual", Reason = request.Reason.Trim(), CreatedAt = now, UpdatedAt = now };
+            Status = PaymentStatus.Pending, PaymentProvider = payment.PaymentMethod ?? "Manual", Reason = request.Reason.Trim(), CreatedAt = now, UpdatedAt = now };
+        payment.UpdatedAt = now;
         db.RefundTransactions.Add(refund);
         db.Set<VerificationAdminAction>().Add(new() { Id = Guid.NewGuid(), VerificationId = id, ActorUserId = actor,
             Decision = "RefundRequested", Reason = refund.Reason, RefundId = refund.Id, CreatedAt = now });

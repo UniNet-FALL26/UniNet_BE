@@ -13,6 +13,24 @@ namespace UniNet.Application.Services;
 public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation,
     IConfiguration configuration) : IProjectService
 {
+    public async Task<ProjectStatusResponse> UpdateStatusAsync(Guid accountId, UpdateProjectStatusRequest request, CancellationToken ct)
+    {
+        Require(request.Status == ProjectStatus.Completed, "INVALID_STATUS_TRANSITION", "Only Active to Completed is allowed.");
+        var actor = await db.UserProfiles.AsNoTracking().Include(p => p.Account)
+            .SingleOrDefaultAsync(p => p.AccountId == accountId, ct);
+        Require(actor != null && actor.Account.Role == AccountRole.Student && actor.Account.Status == AccountStatus.Active,
+            "FORBIDDEN", "An active Student account is required.", 403);
+        var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(p => p.Id == request.ProjectId, ct)
+            ?? throw NotFound();
+        Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can complete it.", 403);
+        var now = DateTimeOffset.UtcNow;
+        var updated = await db.Projects.Where(p => p.Id == request.ProjectId && p.CreatorId == actor.Id && p.Status == ProjectStatus.Active)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, ProjectStatus.Completed)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
+        return new(request.ProjectId, ProjectStatus.Completed, now);
+    }
+
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)

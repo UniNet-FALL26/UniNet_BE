@@ -4,6 +4,7 @@ namespace UniNet.Application.Interfaces;
 
 public interface IProjectService
 {
+    Task<ProjectStatusResponse> UpdateStatusAsync(Guid accountId, UpdateProjectStatusRequest request, CancellationToken ct);
     Task<ProjectDetailResponse> CreateProjectAsync(Guid userId, CreateProjectRequest request, CancellationToken ct);
     Task<ProjectDetailResponse> GetProjectDetailsAsync(Guid projectId, Guid? userId, CancellationToken ct);
     Task<ProjectDetailResponse> UpdateProjectAsync(Guid projectId, Guid userId, UpdateProjectRequest request, CancellationToken ct);
