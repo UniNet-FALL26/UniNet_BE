@@ -36,7 +36,7 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
                     new { type = "image", mime_type = "image/png", data = Convert.ToBase64String(encoded.ToArray()) }
                 },
                 response_format = new { type = "text", mime_type = "application/json", schema },
-                generation_config = new { thinking_level = "minimal", max_output_tokens = 8192 }
+                generation_config = new { thinking_level = "low", max_output_tokens = 8192 }
             })
         };
         request.Headers.Add("x-goog-api-key", key);

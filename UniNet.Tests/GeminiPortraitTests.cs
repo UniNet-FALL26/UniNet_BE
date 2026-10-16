@@ -21,6 +21,7 @@ public class GeminiPortraitTests
     {
         public int Calls;
         public Action<byte[]>? InspectImage;
+        public Action<JsonElement>? InspectRequest;
         public string? RawResponse;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -29,6 +30,7 @@ public class GeminiPortraitTests
             Assert.Equal("fixture-key", request.Headers.GetValues("x-goog-api-key").Single());
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
             Assert.False(body.RootElement.GetProperty("store").GetBoolean());
+            InspectRequest?.Invoke(body.RootElement);
             Assert.Equal("image/png", body.RootElement.GetProperty("input")[1].GetProperty("mime_type").GetString());
             InspectImage?.Invoke(Convert.FromBase64String(body.RootElement.GetProperty("input")[1].GetProperty("data").GetString()!));
             return new(status) { Content = new StringContent(RawResponse ?? JsonSerializer.Serialize(new { status = "completed", steps = new[] { new { type = "model_output", content = new[] { new { type = "text", text = contour } } } } })) };
@@ -36,6 +38,16 @@ public class GeminiPortraitTests
     }
     private static GeminiPortraitProcessor Processor(Handler handler, string? key = "fixture-key") => new(new HttpClient(handler),
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?> { ["Gemini:ApiKey"] = key }).Build());
+
+    [Fact] public async Task UsesSupportedThinkingLevelForGemini38Flash()
+    {
+        var handler = new Handler { InspectRequest = body => {
+            Assert.Equal("gemini-3.8-flash", body.GetProperty("model").GetString());
+            Assert.Equal("low", body.GetProperty("generation_config").GetProperty("thinking_level").GetString());
+        } };
+        await Processor(handler).Process(Source(), default);
+        Assert.Equal(1, handler.Calls);
+    }
 
     [Fact] public async Task PreservesAllRgbAndExistingAlphaWhileRemovingBackground()
     {
