@@ -17,6 +17,86 @@ namespace UniNet.Tests;
 public sealed class ProjectVerificationTests
 {
     [Fact]
+    public async Task AdminVerificationRequiresActiveAdminAndValidFilters()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var service = new AdminProjectVerificationService(f.Db);
+        await Error("FORBIDDEN", () => service.ListAsync(f.Owner.Id));
+        f.Other.Role = AccountRole.Admin;
+        await f.Db.SaveChangesAsync();
+        await Error("INVALID_DATE_RANGE", () => service.ListAsync(f.Other.Id,
+            from: DateTimeOffset.UtcNow, to: DateTimeOffset.UtcNow.AddDays(-1)));
+        f.Other.Status = AccountStatus.Suspended;
+        await f.Db.SaveChangesAsync();
+        await Error("FORBIDDEN", () => service.GetDetailAsync(Guid.NewGuid(), f.Other.Id));
+    }
+
+    [Fact]
+    public async Task AdminListsPendingAndOverdueAndReadsEvidence()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Other.Role = AccountRole.Admin;
+        await f.Db.SaveChangesAsync();
+        var id = (await f.CreateVerificationAsync(true)).Verification.Id;
+        var service = new AdminProjectVerificationService(f.Db);
+        Assert.Equal(id, Assert.Single((await service.ListAsync(f.Other.Id, pendingAssignment: true)).Verifications).Id);
+        Assert.Empty((await service.ListAsync(f.Other.Id, overdue: true)).Verifications);
+        var verification = await f.Db.ProjectVerifications.SingleAsync();
+        verification.ScheduledEndAt = DateTimeOffset.UtcNow.AddHours(-1);
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(id, Assert.Single((await service.ListAsync(f.Other.Id, overdue: true)).Verifications).Id);
+        Assert.Single((await service.GetDetailAsync(id, f.Other.Id)).Detail.EvidenceSubmissions);
+        await Error("REPORT_REQUIRED", () => service.ReviewAsync(id, f.Other.Id, new(VerificationReviewDecision.Uphold, "Reviewed")));
+    }
+
+    [Fact]
+    public async Task AdminRefundReservesBalanceAndRecordsActorWithoutChangingVerification()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Other.Role = AccountRole.Admin;
+        await f.Db.SaveChangesAsync();
+        var id = (await f.CreateVerificationAsync()).Verification.Id;
+        await f.PayAsync(id, f.Owner);
+        var payment = await f.Db.Transactions.SingleAsync();
+        var service = new AdminProjectVerificationService(f.Db);
+        await Error("PAYMENT_NOT_FOUND", () => service.CreateRefundAsync(id, f.Other.Id, new(Guid.NewGuid(), 1, "Authorized")));
+        var refund = await service.CreateRefundAsync(id, f.Other.Id, new(payment.Id, payment.Amount, "Authorized service refund"));
+        Assert.Equal(PaymentStatus.Pending, refund.Status);
+        Assert.Null(refund.CompletedAt);
+        await Error("INVALID_REFUND_AMOUNT", () => service.CreateRefundAsync(id, f.Other.Id, new(payment.Id, 1, "Duplicate")));
+        var detail = await service.GetDetailAsync(id, f.Other.Id);
+        Assert.Equal(f.Other.Profile!.Id, Assert.Single(detail.Actions).ActorUserId);
+        Assert.Equal(ProjectVerificationStatus.Pending, detail.Detail.Verification.Status);
+        Assert.Single(await service.GetRefundsAsync(id, f.Other.Id));
+    }
+
+    [Fact]
+    public async Task AdminReviewRecordsDecisionWithoutEditingReportOrRefunding()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Other.Role = AccountRole.Admin;
+        await f.Db.SaveChangesAsync();
+        var id = (await f.CreateVerificationAsync(true)).Verification.Id;
+        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var now = DateTimeOffset.UtcNow;
+        f.Db.VerificationAssignments.Add(new()
+        {
+            Id = Guid.NewGuid(), ProjectVerificationId = id, AssignedToUserId = staff.Id,
+            AdminId = f.Other.Profile!.Id, Status = VerificationAssignmentStatus.Completed,
+            AssignedAt = now, CreatedAt = now, UpdatedAt = now,
+            Report = new() { Id = Guid.NewGuid(), Summary = "Failed assessment", Outcome = ProjectVerificationStatus.Failed,
+                SubmittetAt = now, CreatedAt = now, UpdatedAt = now }
+        });
+        await f.Db.SaveChangesAsync();
+        var service = new AdminProjectVerificationService(f.Db);
+        var result = await service.ReviewAsync(id, f.Other.Id, new(VerificationReviewDecision.ReassessmentRequired, "Evidence was overlooked"));
+        Assert.Equal("ReassessmentRequired", result.Decision);
+        Assert.Equal(f.Other.Profile.Id, result.ActorUserId);
+        Assert.Equal("Failed assessment", Assert.Single(await service.GetReportsAsync(id, f.Other.Id)).Summary);
+        Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
+    }
+
+    [Fact]
     public async Task CreationRecordsPendingWithoutFinalizerOrChangingProjectOrCreatingPayment()
     {
         await using var f = await Fixture.CreateAsync();
