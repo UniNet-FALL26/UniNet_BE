@@ -1,7 +1,7 @@
 # Local portrait fallback
 
 ## Objective
-Return a real transparent portrait preview when Gemini is unavailable, preserving the existing authenticated process/confirm/save API. No extra remote provider, API key or Python service. Keep source RGB, original dimensions/orientation and existing alpha.
+Return a real transparent portrait preview when Gemini is unavailable, preserving the existing authenticated process/confirm/save API. No extra remote provider, API key or Python service. Keep source RGB, original dimensions/orientation and existing alpha in the confirmed image. Display previews are capped at a 1024px longest side; the full processed PNG remains private until confirmation.
 
 ## Plan / acceptance
 1. Package the 4.7 MB U2NETP ONNX model from rembg's pinned release; verify upstream checksum, retain Apache-2.0 license and model provenance. Add the CPU ONNX Runtime package to the existing .NET 8 API.

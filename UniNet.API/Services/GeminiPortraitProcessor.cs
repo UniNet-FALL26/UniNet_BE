@@ -102,6 +102,8 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
         if (codec.GetPixels(decoded.Info, decoded.GetPixels()) != SKCodecResult.Success) throw BadImage();
         // Apply EXIF orientation by rearranging pixels, without premultiplication or resampling.
         var orientation = (int)codec.EncodedOrigin;
+        // Ordinary images need no permutation buffers. Keep unpremultiplied pixels intact.
+        if (orientation is 0 or 1) return decoded.Copy() ?? throw BadImage();
         var swap = orientation >= 5;
         var output = new SKBitmap(new SKImageInfo(swap ? decoded.Height : decoded.Width, swap ? decoded.Width : decoded.Height,
             SKColorType.Rgba8888, SKAlphaType.Unpremul));
