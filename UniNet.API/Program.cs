@@ -15,6 +15,15 @@ var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationExceptio
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<TransactionService>();
+builder.Services.AddScoped<VerificationNotifications>();
+builder.Services.AddScoped<VerificationDeadlineTasks>();
+builder.Services.AddScoped<VerificationRefundTasks>();
+builder.Services.AddScoped<VerificationAiTasks>();
+builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
+builder.Services.AddHttpClient<IVerificationAiReviewer, GeminiVerificationAiReviewer>(client => client.Timeout = TimeSpan.FromSeconds(35))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PartnerVerificationService>();

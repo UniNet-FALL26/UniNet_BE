@@ -93,25 +93,27 @@ public sealed class GeminiModerationService : IAIModerationService
                     }
                 }
 
-                return CreateErrorResult($"API returned {(int)response.StatusCode} ({response.StatusCode}): {responseJson}");
+                return CreateErrorResult($"API returned {(int)response.StatusCode} ({response.StatusCode}): {responseJson}",
+                    (int)response.StatusCode is 408 or 429 || (int)response.StatusCode >= 500);
             }
             catch (OperationCanceledException)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (attempt < MaxRetries - 1)
                 {
                     await Task.Delay(1000 * (attempt + 1), cancellationToken);
                     continue;
                 }
-                return CreateErrorResult("Request timeout");
+                return CreateErrorResult("Request timeout", true);
             }
-            catch (HttpRequestException ex)
+            catch (HttpRequestException)
             {
                 if (attempt < MaxRetries - 1)
                 {
                     await Task.Delay(1000 * (attempt + 1), cancellationToken);
                     continue;
                 }
-                return CreateErrorResult($"HTTP error: {ex.Message}");
+                return CreateErrorResult("AI provider connection failed", true);
             }
             finally
             {
@@ -287,7 +289,7 @@ public sealed class GeminiModerationService : IAIModerationService
         }
     }
 
-    private static AiModerationResult CreateErrorResult(string reason)
+    private static AiModerationResult CreateErrorResult(string reason, bool transient = false)
     {
         return new(
             ContentResult: "error",
@@ -297,7 +299,7 @@ public sealed class GeminiModerationService : IAIModerationService
             IsPotentiallyDuplicate: false,
             Confidence: 0m,
             Reason: reason,
-            Flags: new List<string> { "API_ERROR" }
+            Flags: new List<string> { transient ? "TRANSIENT_ERROR" : "API_ERROR" }
         );
     }
 

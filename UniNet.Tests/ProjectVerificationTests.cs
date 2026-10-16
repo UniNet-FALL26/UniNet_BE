@@ -14,7 +14,7 @@ using Xunit;
 
 namespace UniNet.Tests;
 
-public sealed class ProjectVerificationTests
+public sealed partial class ProjectVerificationTests
 {
     [Fact]
     public async Task AdminVerificationRequiresActiveAdminAndValidFilters()

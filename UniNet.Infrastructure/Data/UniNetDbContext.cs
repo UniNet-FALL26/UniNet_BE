@@ -55,6 +55,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.ApplyConfiguration(new VerificationAdminActionConfiguration());
+        model.ApplyConfiguration(new VerificationNotificationConfiguration());
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);

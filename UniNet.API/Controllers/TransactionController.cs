@@ -26,14 +26,10 @@ public sealed class TransactionController(ITransactionService transactions) : Co
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
         => transactions.GetHistoryAsync(verificationId, AccountId, page, pageSize, ct);
 
-    /// <summary>Đọc trạng thái đã lưu; dùng reconcile để đối soát với PayOS.</summary>
+    /// <summary>Đọc trạng thái đã lưu; background worker tự đối soát với PayOS.</summary>
     [HttpGet("{transactionId:guid}")]
     public Task<TransactionResponse> Get(Guid verificationId, Guid transactionId, CancellationToken ct)
         => transactions.GetAsync(verificationId, transactionId, AccountId, ct);
-
-    [HttpPost("~/api/payments/{transactionId:guid}/reconcile")]
-    public Task<TransactionResponse> Reconcile(Guid transactionId, CancellationToken ct)
-        => transactions.ReconcileAsync(transactionId, AccountId, ct);
 
     /// <summary>PayOS webhook được xác thực bằng checksum signature, không dùng JWT.</summary>
     [AllowAnonymous, HttpPost("~/api/webhooks/payos"), RequestSizeLimit(65536)]

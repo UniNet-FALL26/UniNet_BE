@@ -33,6 +33,10 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? CancelledAt { get; set; }
         public DateTimeOffset? AiReviewedAt { get; set; }
         public int? AiEvidenceVersion { get; set; }
+        public int? AiAttemptEvidenceVersion { get; set; }
+        public int AiAttemptCount { get; set; }
+        public DateTimeOffset? AiNextRetryAt { get; set; }
+        public string? AiLastError { get; set; }
         public string AiAdditionalEvidenceJson { get; set; } = "[]";
         public List<ProjectVerificationEvidence> EvidenceSubmissions { get; set; } = [];
         public List<VerificationAssignment> Assignments { get; set; } = [];
