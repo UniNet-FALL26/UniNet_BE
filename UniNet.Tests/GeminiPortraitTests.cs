@@ -78,6 +78,16 @@ public class GeminiPortraitTests
     }
     [Fact] public async Task QuotaHasRetryableError()
         => Assert.Equal(429, (await Assert.ThrowsAsync<AuthException>(() => Processor(new(status: HttpStatusCode.TooManyRequests)).Process(Source(), default))).Status);
+    [Fact] public async Task ProviderOverloadIsReportedAsBusyWithoutAutomaticRetries()
+    {
+        var handler = new Handler(status: HttpStatusCode.ServiceUnavailable);
+        var error = await Assert.ThrowsAsync<AuthException>(() => Processor(handler).Process(Source(), default));
+        Assert.Equal(503, error.Status);
+        Assert.Equal("PORTRAIT_PROVIDER_BUSY", error.Code);
+        Assert.Contains("tạm thời quá tải", error.Message);
+        Assert.DoesNotContain("cấu hình", error.Message);
+        Assert.Equal(1, handler.Calls);
+    }
     [Fact] public async Task CancellationPropagates()
     {
         using var cts = new CancellationTokenSource(); cts.Cancel();

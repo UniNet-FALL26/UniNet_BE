@@ -47,6 +47,8 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
         try
         {
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                throw new AuthException("PORTRAIT_PROVIDER_BUSY", "Dịch vụ tách nền đang tạm thời quá tải. Vui lòng thử lại sau ít phút. Ảnh của bạn chưa được lưu vào hồ sơ.", 503);
             if (!response.IsSuccessStatusCode)
                 throw new AuthException("PORTRAIT_PROCESSING_FAILED", response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
                     ? "Gemini đã hết hạn mức tạm thời. Vui lòng thử lại sau."

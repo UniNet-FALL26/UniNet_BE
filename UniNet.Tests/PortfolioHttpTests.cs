@@ -26,6 +26,11 @@ namespace UniNet.Tests;
 // Real HTTP controllers, JWT authorization and persistent SQLite; never uses a real account/database.
 public sealed class PortfolioHttpTests
 {
+    private sealed class BusyPortraitProcessor : IPortraitProcessor
+    {
+        public Task<byte[]> Process(byte[] source, CancellationToken ct)
+            => throw new AuthException("PORTRAIT_PROVIDER_BUSY", "Dịch vụ tách nền đang tạm thời quá tải.", 503);
+    }
     private sealed class PortraitFixture : IPortraitProcessor, IPortraitCloudStorage
     {
         public static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==");
@@ -250,6 +255,25 @@ public sealed class PortfolioHttpTests
         Assert.Equal(HttpStatusCode.NotFound, (await visitor.GetAsync($"api/profile/portfolio/{server.ProfileId}")).StatusCode);
     }
 
+    [Fact]
+    public async Task BusyPortraitProviderReturns503WithoutChangingProfileAndAllowsRetry()
+    {
+        await using var server = await TestApi.Start(new BusyPortraitProcessor());
+        using var owner = server.Client(server.OwnerId, "Student");
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var upload = new MultipartFormDataContent();
+            upload.Add(new ByteArrayContent(PortraitFixture.Png), "file", "portrait.png");
+            var response = await owner.PostAsync("api/ai-images/remove-background", upload);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Contains("PORTRAIT_PROVIDER_BUSY", await response.Content.ReadAsStringAsync());
+        }
+        var profile = await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me");
+        Assert.Null(profile!.Profile.AvatarUrl);
+        await using var scope = server.Scope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<UniNetDbContext>().PortraitAssets.ToArrayAsync());
+    }
+
     private sealed class TestApi(WebApplication app, string databasePath, Guid ownerId, Guid profileId, Guid companyId) : IAsyncDisposable
     {
         private const string Key = "isolated-portfolio-http-key-01234567890123456789";
@@ -267,7 +291,7 @@ public sealed class PortfolioHttpTests
             }
             return client;
         }
-        public static async Task<TestApi> Start()
+        public static async Task<TestApi> Start(IPortraitProcessor? portraitProcessor = null)
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"uninet-portfolio-{Guid.NewGuid():N}.sqlite");
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -276,6 +300,7 @@ public sealed class PortfolioHttpTests
             builder.Configuration["Cloudinary:CloudName"] = "fixture";
             builder.Services.AddScoped<PortfolioService>(); builder.Services.AddScoped<ProfileService>(); builder.Services.AddScoped<AuthService>();
             builder.Services.AddSingleton<IPortraitProcessor, PortraitFixture>(); builder.Services.AddSingleton<IPortraitCloudStorage, PortraitFixture>(); builder.Services.AddSingleton<PortraitSessions>();
+            if (portraitProcessor is not null) builder.Services.AddSingleton(portraitProcessor);
             builder.Services.AddSingleton<ICloudImageStorage, ImageFixture>();
             builder.Services.AddControllers().AddApplicationPart(typeof(ProfileController).Assembly);
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options => {
