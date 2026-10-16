@@ -274,6 +274,33 @@ public sealed class PortfolioHttpTests
         Assert.Empty(await scope.ServiceProvider.GetRequiredService<UniNetDbContext>().PortraitAssets.ToArrayAsync());
     }
 
+    [Fact]
+    public async Task LocalFallbackProvidesRealCutoutThroughPreviewConfirmAndExplicitSave()
+    {
+        using var local = new OnnxPortraitProcessor();
+        await using var server = await TestApi.Start(new FallbackPortraitProcessor(new BusyPortraitProcessor(), local, true));
+        using var owner = server.Client(server.OwnerId, "Student");
+        using var upload = new MultipartFormDataContent();
+        upload.Add(new ByteArrayContent(PortraitSample.Opaque()), "file", "portrait.png");
+        var processed = await owner.PostAsync("api/ai-images/remove-background", upload); processed.EnsureSuccessStatusCode();
+        using var preview = System.Text.Json.JsonDocument.Parse(await processed.Content.ReadAsStringAsync());
+        var data = preview.RootElement.GetProperty("data");
+        var png = Convert.FromBase64String(data.GetProperty("previewUrl").GetString()!.Split(',')[1]);
+        using var image = SkiaSharp.SKBitmap.Decode(png);
+        Assert.Equal(512, image.Width); Assert.Equal(0, image.GetPixel(0, 0).Alpha);
+        Assert.True(data.GetProperty("hasTransparentBackground").GetBoolean());
+        var baseline = (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!;
+        Assert.Null(baseline.Profile.AvatarUrl);
+        var confirmed = await owner.PostAsJsonAsync("api/ai-images/confirm", new { sessionId = data.GetProperty("sessionId").GetString() });
+        confirmed.EnsureSuccessStatusCode();
+        using var result = System.Text.Json.JsonDocument.Parse(await confirmed.Content.ReadAsStringAsync());
+        var url = result.RootElement.GetProperty("data").GetProperty("imageUrl").GetString();
+        Assert.Null((await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!.Profile.AvatarUrl);
+        var saved = await owner.PutAsJsonAsync("api/profile/portfolio/editor/me", new PortfolioEditorRequest(new("HTTP Owner", "Owner", url, null, null), baseline.Portfolio));
+        saved.EnsureSuccessStatusCode();
+        Assert.Equal(url, (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!.Profile.AvatarUrl);
+    }
+
     private sealed class TestApi(WebApplication app, string databasePath, Guid ownerId, Guid profileId, Guid companyId) : IAsyncDisposable
     {
         private const string Key = "isolated-portfolio-http-key-01234567890123456789";

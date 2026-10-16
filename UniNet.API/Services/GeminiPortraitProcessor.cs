@@ -91,7 +91,7 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
         { throw new AuthException("PORTRAIT_PROCESSING_FAILED", "Không kết nối được Gemini. Vui lòng thử lại.", 503); }
     }
 
-    private static SKBitmap Decode(byte[] source)
+    internal static SKBitmap Decode(byte[] source)
     {
         if (source.Length == 0 || source.Length > ProfileImageStorage.MaxBytes || ProfileImageStorage.Extension(source) is null) throw BadImage();
         using var data = SKData.CreateCopy(source);

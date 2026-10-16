@@ -50,8 +50,14 @@ builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationServic
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
-builder.Services.AddHttpClient<UniNet.API.Services.IPortraitProcessor, UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromMinutes(3))
+builder.Services.AddHttpClient<UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromSeconds(30))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<UniNet.API.Services.OnnxPortraitProcessor>();
+builder.Services.AddTransient<UniNet.API.Services.IPortraitProcessor>(services => new UniNet.API.Services.FallbackPortraitProcessor(
+    services.GetRequiredService<UniNet.API.Services.GeminiPortraitProcessor>(),
+    services.GetRequiredService<UniNet.API.Services.OnnxPortraitProcessor>(),
+    builder.Configuration.GetValue("Portrait:LocalFallbackEnabled", true),
+    services.GetRequiredService<ILogger<UniNet.API.Services.FallbackPortraitProcessor>>()));
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.ICloudImageStorage, UniNet.API.Services.CloudinaryImageStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>();
