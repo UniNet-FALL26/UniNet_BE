@@ -9,6 +9,7 @@ using UniNet.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
+_ = UniNet.API.Services.UploadFileReader.GetMaxVideoBytes(builder.Configuration);
 var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
 var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is required.");
@@ -37,6 +38,7 @@ builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
@@ -57,8 +59,14 @@ builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationServic
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
-builder.Services.AddHttpClient<UniNet.API.Services.IPortraitProcessor, UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromMinutes(3))
+builder.Services.AddHttpClient<UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromSeconds(30))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<UniNet.API.Services.OnnxPortraitProcessor>();
+builder.Services.AddTransient<UniNet.API.Services.IPortraitProcessor>(services => new UniNet.API.Services.FallbackPortraitProcessor(
+    services.GetRequiredService<UniNet.API.Services.GeminiPortraitProcessor>(),
+    services.GetRequiredService<UniNet.API.Services.OnnxPortraitProcessor>(),
+    builder.Configuration.GetValue("Portrait:LocalFallbackEnabled", true),
+    services.GetRequiredService<ILogger<UniNet.API.Services.FallbackPortraitProcessor>>()));
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.ICloudImageStorage, UniNet.API.Services.CloudinaryImageStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>();
@@ -135,6 +143,17 @@ app.UseSwaggerUI();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (error?.GetBaseException() is Npgsql.PostgresException
+        { SqlState: Npgsql.PostgresErrorCodes.SerializationFailure or Npgsql.PostgresErrorCodes.DeadlockDetected })
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            code = "CONCURRENT_MODIFICATION",
+            message = "A concurrent database update prevented this operation. Retry the request."
+        });
+        return;
+    }
     if (error is TransactionException transactionError)
     {
         context.Response.StatusCode = transactionError.Status;

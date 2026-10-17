@@ -8,18 +8,20 @@ Triển khai ngày 17/10/2026 theo `project-verification-gap-plan.md`. Tài li�
 - Gemini dùng lại provider `GeminiVerificationAiReviewer` và transport hiện có, với contract content riêng. Completeness check vẫn giữ contract và tác vụ cũ.
 - Google Safe Browsing v4 tra URL trên các danh sách được cấu hình; không dùng suy đoán của Gemini thay cho kết quả tra cứu.
 - Giữ hành vi sửa/xóa task/report hiện có: mỗi thay đổi nguồn tạo snapshot mới, giữ nguyên snapshot cũ. Chưa bổ sung khóa theo thanh toán/phân công.
-- Lấy report có Version lớn nhất của từng SubmittedById trong từng task, bao gồm mọi trạng thái report và task Cancelled. Không tự đặt điều kiện tất cả task phải Completed.
+- Sau merge `main` vào `dev`, lấy report có Version lớn nhất của từng ReportGroupId trong từng task. Theo xác nhận ngày 17/10/2026, giữ mọi trạng thái, bao gồm Draft/Withdrawn, report soft-delete và task Cancelled, để kiểm duyệt và truy vết. Không tự đặt điều kiện tất cả task phải Completed.
 - Giữ `ProjectModerationService` và luồng kiểm duyệt khi tạo dự án. Không thêm API cấp 1, không đổi điều kiện cấp 2, đặt lịch, thanh toán, phân công, họp hoặc quyền report.
 
 ## Dữ liệu và giao dịch
 
 `ProjectEvidenceModerations` lưu phiên bản lượt kiểm duyệt, SHA-256 nguồn, snapshot bất biến, hash/snapshot chính sách, trạng thái, lease, lịch retry và kết quả tổng hợp. `EvidenceModerationAttempts` giữ từng lần xử lý và kết quả chi tiết.
 
-Snapshot có ProjectId, ProjectTaskId/status, TaskReportId/Version/SubmittedById/Content/status/SubmittedAt và TaskEvidenceId/URL/metadata. Sắp xếp ổn định trước khi hash. Không đưa khóa API hoặc timestamp xử lý vào hash. Version tăng khi nguồn hoặc chính sách thay đổi; refresh lặp lại cùng nguồn/chính sách không tạo bản mới.
+Snapshot có ProjectId, ProjectTaskId/status, TaskReportId/Version/SubmittedById/Content/status/SubmittedAt và TaskEvidenceId/URL/metadata. Sau merge bổ sung ReportGroupId, ParentReportId và metadata soft-delete; các trường mới có giá trị mặc định để vẫn đọc được snapshot cũ. Sắp xếp ổn định trước khi hash. Không đưa khóa API hoặc timestamp xử lý vào hash. Version tăng khi nguồn hoặc chính sách thay đổi; refresh lặp lại cùng nguồn/chính sách không tạo bản mới.
 
 `PATCH /api/projects/status` chuyển Active → Completed và tạo lượt Pending trong cùng transaction Serializable. Không gọi provider trong transaction này và không cần package. Yêu cầu hoàn tất lặp lại vẫn trả 409 theo hành vi cũ, không tạo lượt trùng.
 
 Các thao tác ghi của `ProjectTaskService` lưu dữ liệu nguồn và refresh snapshot trong cùng transaction. Revision vẫn cần trạng thái RevisionRequested theo quy tắc cũ. Xóa task không xóa lịch sử snapshot: lượt cũ có SupersededAt, lượt mới ghi lại tập dữ liệu còn tồn tại. FK snapshot không trỏ trực tiếp đến task/report/evidence nên việc xóa nguồn không cascade vào lịch sử.
+
+Sau merge, giữ transaction/khóa input theo contribution cycle từ `main`; refresh evidence được gọi trước khi commit transaction đang có, không mở transaction lồng nhau. Các đường tạo/sửa/nộp/rút/xóa nháp và revision đều refresh nguồn. Completed đồng thời ghi CompletedAt, contribution cycle/participants và snapshot cấp 1; lỗi ở bất kỳ phần nào rollback toàn bộ.
 
 Unique index bảo đảm một lượt hiện hành trên mỗi project và một Version trên mỗi project. Các cột nguồn/chính sách bất biến có EF AfterSaveBehavior.Throw; không có API sửa/xóa snapshot. Lỗi tranh chấp được trả 409 khi ghi nguồn, worker kiểm tra lại ở vòng sau.
 

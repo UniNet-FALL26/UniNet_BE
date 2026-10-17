@@ -79,7 +79,7 @@ public sealed class EvidenceModerationPostgresTests
             ProjectField = "IT", MemberTarget = 1, Status = ProjectStatus.Active };
         db.Accounts.Add(owner); db.Projects.Add(project);
         db.TaskReports.Add(new() { ProjectTask = new() { Project = project, Creator = owner.Profile!, Title = "Task",
-            Description = "Work", Deadline = DateTimeOffset.UtcNow }, SubmittedBy = owner.Profile!, Version = 1,
+            Description = "Work", Deadline = DateTimeOffset.UtcNow }, SubmittedBy = owner.Profile!, ReportGroupId = Guid.NewGuid(), Version = 1,
             Content = "Completed work", Evidence = [new() { FileUrl = "https://example.com/proof" }] });
         await db.SaveChangesAsync(); return (owner.Id, project.Id);
     }

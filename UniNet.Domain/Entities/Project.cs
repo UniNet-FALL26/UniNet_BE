@@ -22,6 +22,7 @@ namespace UniNet.Domain.Entities
         public RecruitmentStatus RecruitmentStatus { get; set; }
         public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
         public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset? CompletedAt { get; set; }
         public UserProfile Creator { get; set; } = null!;
 
         public List<ProjectRoleRequirement> RoleRequirements { get; set; } = [];
@@ -36,5 +37,6 @@ namespace UniNet.Domain.Entities
 
         public List<ProjectModeration> Moderations { get; set; } = [];
         public List<ProjectVerification> Verifications { get; set; } = [];
+        public ContributionCycle? ContributionCycle { get; set; }
     }
 }

@@ -21,15 +21,18 @@ public sealed class EvidenceModerationSource(UniNetDbContext db, IConfiguration 
 
     public async Task<EvidenceSourceSnapshot> CaptureAsync(Guid projectId, CancellationToken ct)
     {
-        // Keep cancelled tasks and latest reports in every review state. There is no soft-delete flag.
+        // Keep every report group and state, including drafts and soft-deleted reports for audit.
         var tasks = await db.ProjectTasks.AsNoTracking().Include(t => t.Reports).ThenInclude(r => r.Evidence)
             .Where(t => t.ProjectId == projectId).AsSplitQuery().ToListAsync(ct);
         return new(projectId, tasks.OrderBy(t => t.Id).Select(t => new EvidenceTaskSnapshot(t.Id, t.Status,
-            t.Reports.GroupBy(r => r.SubmittedById).Select(g => g.OrderByDescending(r => r.Version).First())
-                .OrderBy(r => r.SubmittedById).Select(r => new EvidenceReportSnapshot(r.Id, r.Version,
+            t.Reports.GroupBy(r => r.ReportGroupId == Guid.Empty ? r.Id : r.ReportGroupId)
+                .Select(g => g.OrderByDescending(r => r.Version).ThenBy(r => r.Id).First())
+                .OrderBy(r => r.SubmittedById).ThenBy(r => r.ReportGroupId).ThenBy(r => r.Id)
+                .Select(r => new EvidenceReportSnapshot(r.Id, r.Version,
                     r.SubmittedById, r.Content, r.Status, r.SubmittedAt,
                     r.Evidence.OrderBy(e => e.Id).Select(e => new EvidenceFileSnapshot(e.Id, e.FileUrl,
-                        e.PublicId, e.ResourceType, e.FileName, e.Format)).ToList())).ToList())).ToList());
+                        e.PublicId, e.ResourceType, e.FileName, e.Format)).ToList(),
+                    r.ReportGroupId, r.ParentReportId, r.IsDeleted, r.DeletedAt, r.DeletedById)).ToList())).ToList());
     }
 
     public EvidencePolicySnapshot CapturePolicy()

@@ -5,7 +5,9 @@ namespace UniNet.Application.DTOs.Projects;
 public sealed record EvidenceFileSnapshot(Guid TaskEvidenceId, string FileUrl, string? PublicId,
     string? ResourceType, string? FileName, string? Format);
 public sealed record EvidenceReportSnapshot(Guid TaskReportId, int Version, Guid SubmittedById,
-    string Content, TaskReportStatus Status, DateTimeOffset SubmittedAt, List<EvidenceFileSnapshot> Evidence);
+    string Content, TaskReportStatus Status, DateTimeOffset SubmittedAt, List<EvidenceFileSnapshot> Evidence,
+    Guid? ReportGroupId = null, Guid? ParentReportId = null, bool IsDeleted = false,
+    DateTimeOffset? DeletedAt = null, Guid? DeletedById = null);
 public sealed record EvidenceTaskSnapshot(Guid ProjectTaskId, ProjectTaskStatus Status, List<EvidenceReportSnapshot> Reports);
 public sealed record EvidenceSourceSnapshot(Guid ProjectId, List<EvidenceTaskSnapshot> Tasks);
 

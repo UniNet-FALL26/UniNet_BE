@@ -59,7 +59,7 @@ public sealed partial class ProjectVerificationTests
         var task = new ProjectTask { ProjectId = f.Project.Id, CreatorId = f.Owner.Profile!.Id,
             Title = "Task", Description = "Task work", Status = ProjectTaskStatus.Cancelled, Deadline = DateTimeOffset.UtcNow.AddDays(1) };
         task.Assignments.Add(new() { UserId = f.Owner.Profile!.Id });
-        var report = new TaskReport { ProjectTask = task, SubmittedById = f.Owner.Profile.Id, Version = 1,
+        var report = new TaskReport { ProjectTask = task, SubmittedById = f.Owner.Profile.Id, ReportGroupId = Guid.NewGuid(), Version = 1,
             Content = text, Status = TaskReportStatus.Submitted };
         if (file) report.Evidence.Add(new() { FileUrl = "https://example.com/proof.pdf", FileName = "proof.pdf", Format = "pdf" });
         f.Db.TaskReports.Add(report);
@@ -75,15 +75,16 @@ public sealed partial class ProjectVerificationTests
         new(f.Db, f.Configuration, new(content, urls), new(f.Db));
 
     [Fact]
-    public async Task CompletionSnapshotsLatestReportPerStudentIncludingUnapprovedAndCancelledTasks()
+    public async Task CompletionSnapshotsLatestReportPerGroupIncludingUnapprovedAndCancelledTasks()
     {
         await using var f = await Fixture.CreateAsync();
         var old = await SeedEvidenceAsync(f);
         var revised = new TaskReport { ProjectTaskId = old.ProjectTaskId, SubmittedById = old.SubmittedById,
+            ReportGroupId = old.ReportGroupId, ParentReportId = old.Id,
             Version = 2, Content = "Latest content", Status = TaskReportStatus.RevisionRequested,
             Evidence = [new() { FileUrl = "https://example.com/latest" }] };
         var another = new TaskReport { ProjectTaskId = old.ProjectTaskId, SubmittedById = f.Other.Profile!.Id,
-            Version = 1, Content = "Other student's submission", Status = TaskReportStatus.Approved,
+            ReportGroupId = Guid.NewGuid(), Version = 1, Content = "Other student's submission", Status = TaskReportStatus.Approved,
             Evidence = [new() { FileUrl = "https://example.com/other" }] };
         f.Db.TaskReports.AddRange(revised, another); await f.Db.SaveChangesAsync();
         await CompleteAsync(f);
@@ -115,6 +116,8 @@ public sealed partial class ProjectVerificationTests
         f.Db.ChangeTracker.Clear();
         Assert.Equal(ProjectStatus.Active, (await f.Db.Projects.SingleAsync()).Status);
         Assert.Empty(await f.Db.ProjectEvidenceModerations.ToListAsync());
+        Assert.Empty(await f.Db.ContributionCycles.ToListAsync());
+        Assert.Null((await f.Db.Projects.SingleAsync()).CompletedAt);
     }
 
     [Fact]
@@ -282,6 +285,7 @@ public sealed partial class ProjectVerificationTests
         var content = new ContentChecker { DuringCall = async () =>
         {
             f.Db.TaskReports.Add(new() { ProjectTaskId = report.ProjectTaskId, SubmittedById = report.SubmittedById,
+                ReportGroupId = report.ReportGroupId, ParentReportId = report.Id,
                 Version = 2, Content = "Changed", Evidence = [new() { FileUrl = "https://example.com/new" }] });
             await f.Db.SaveChangesAsync();
         } };
@@ -327,5 +331,31 @@ public sealed partial class ProjectVerificationTests
         var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
         f.Db.Entry(m).Property(x => x.SnapshotJson).CurrentValue = "{}";
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task MergeKeepsEveryReportGroupIncludingDraftWithdrawnAndSoftDeletedEvidence()
+    {
+        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f);
+        foreach (var state in new[] { TaskReportStatus.Draft, TaskReportStatus.Withdrawn, TaskReportStatus.Approved })
+        {
+            var deleted = state == TaskReportStatus.Approved;
+            f.Db.TaskReports.Add(new() { ProjectTaskId = report.ProjectTaskId, SubmittedById = report.SubmittedById,
+                ReportGroupId = Guid.NewGuid(), Version = 1, Content = state.ToString(), Status = state,
+                IsDeleted = deleted, DeletedAt = deleted ? DateTimeOffset.UtcNow : null,
+                DeletedById = deleted ? report.SubmittedById : null,
+                Evidence = [new() { FileUrl = $"https://example.com/{state}" }] });
+        }
+        await f.Db.SaveChangesAsync(); await CompleteAsync(f);
+        var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
+        var dto = EvidenceModerationMapping.ToResponse(m);
+        var reports = dto.Source.Tasks.Single().Reports;
+        Assert.Equal(4, reports.Count); Assert.Equal(4, reports.Select(r => r.ReportGroupId).Distinct().Count());
+        Assert.Contains(reports, r => r.IsDeleted && r.DeletedById == report.SubmittedById && r.DeletedAt != null);
+        var content = new ContentChecker(); var urls = new UrlChecker();
+        await EvidenceWorker(f, content, urls).RunAsync(DateTimeOffset.UtcNow, default);
+        Assert.Equal(4, content.Calls); Assert.Equal(4, urls.Seen.Count);
+        Assert.Equal(m.CreatedAt, (await f.Db.ContributionCycles.SingleAsync()).OpenedAt);
+        Assert.NotNull((await f.Db.Projects.AsNoTracking().SingleAsync()).CompletedAt);
     }
 }

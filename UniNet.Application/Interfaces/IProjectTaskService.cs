@@ -11,6 +11,11 @@ public interface IProjectTaskService
     Task<TaskReportListResponse> GetTaskReportsAsync(Guid projectId, Guid taskId, Guid accountId, int page = 1, int pageSize = 10, CancellationToken ct = default);
     Task<TaskReportResponse> GetTaskReportAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, CancellationToken ct = default);
     Task<TaskReportResponse> SubmitTaskReportAsync(Guid projectId, Guid taskId, Guid accountId, SubmitTaskReportRequest request, CancellationToken ct = default);
+    Task<TaskReportResponse> CreateTaskReportDraftAsync(Guid projectId, Guid taskId, Guid accountId, SubmitTaskReportRequest request, CancellationToken ct = default);
+    Task<TaskReportResponse> UpdateTaskReportDraftAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, SubmitTaskReportRequest request, CancellationToken ct = default);
+    Task<TaskReportResponse> SubmitTaskReportDraftAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, CancellationToken ct = default);
+    Task<TaskReportResponse> WithdrawTaskReportAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, CancellationToken ct = default);
+    Task DeleteTaskReportDraftAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, CancellationToken ct = default);
     Task<TaskReportResponse> ReviseTaskReportAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, SubmitTaskReportRequest request, CancellationToken ct = default);
     Task<TaskReportResponse> ReviewTaskReportAsync(Guid projectId, Guid taskId, Guid reportId, Guid accountId, ReviewTaskReportRequest request, CancellationToken ct = default);
 }

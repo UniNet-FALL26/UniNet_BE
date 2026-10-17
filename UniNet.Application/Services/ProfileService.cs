@@ -58,6 +58,8 @@ public sealed class ProfileService(UniNetDbContext db)
         Max(request.Website, 2048, "Website"); Max(request.Address, 2000, "Địa chỉ");
         var account = await Load(accountId, AccountRole.Partner, ct);
         var p = account.Profile!;
+        await PortraitAssetPolicy.RetainReference(db, accountId, request.AvatarUrl, p.AvatarUrl, ct);
+        await PortraitAssetPolicy.RetainReference(db, accountId, request.CoverUrl, p.CoverUrl, ct);
         var organizationName = request.OrganizationName.Trim();
         var changed = p.FullName != organizationName || p.OrganizationName != organizationName || p.PartnerType != request.PartnerType ||
             p.Industry != Optional(request.Industry) || p.Website != Optional(request.Website) || p.ContactEmail != Optional(request.ContactEmail) ||

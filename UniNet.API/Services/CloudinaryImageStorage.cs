@@ -19,6 +19,9 @@ public sealed class CloudinaryImageStorage(
         ("image", "png") => "image/png",
         ("image", "jpg") => "image/jpeg",
         ("image", "webp") => "image/webp",
+        ("video", "mp4") => "video/mp4",
+        ("video", "webm") => "video/webm",
+        ("video", "mov") => "video/quicktime",
         ("raw", "pdf") => "application/pdf",
         ("raw", "docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ("raw", "xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -74,7 +77,7 @@ public sealed class CloudinaryImageStorage(
 
     public async Task<ImageUploadResult> Upload(ImageUploadRequest request, CancellationToken ct)
     {
-        if (request.ResourceType is not ("image" or "raw"))
+        if (request.ResourceType is not ("image" or "raw" or "video"))
             throw new ArgumentException("Unsupported Cloudinary resource type.", nameof(request));
         _ = ContentType(request.Format, request.ResourceType);
         if (request.ResourceType == "raw" &&
@@ -89,7 +92,7 @@ public sealed class CloudinaryImageStorage(
         if (separator > 0) parameters["asset_folder"] = request.PublicId[..separator];
         using var result = await Send("upload", request.ResourceType, parameters, request.Bytes, request.Format, ct);
         var root = result.RootElement;
-        var expectedSuffix = request.ResourceType == "image"
+        var expectedSuffix = request.ResourceType is "image" or "video"
             ? $"/{request.PublicId}.{request.Format}"
             : $"/{request.PublicId}";
         var publicIdMatches = String(root, "public_id") == request.PublicId;
