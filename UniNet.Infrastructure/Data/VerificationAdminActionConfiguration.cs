@@ -30,8 +30,9 @@ public sealed class VerificationNotificationConfiguration : IEntityTypeConfigura
         e.HasIndex(n => new { n.RecipientUserId, n.CreatedAt });
         e.HasOne<ProjectVerification>().WithMany().HasForeignKey(n => n.VerificationId).OnDelete(DeleteBehavior.Restrict);
         e.HasOne<ProjectEvidenceModeration>().WithMany().HasForeignKey(n => n.EvidenceModerationId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<UserVerification>().WithMany().HasForeignKey(n => n.UserVerificationId).OnDelete(DeleteBehavior.Restrict);
         e.ToTable("VerificationNotification", t => t.HasCheckConstraint("CK_VerificationNotification_Target",
-            "(\"VerificationId\" IS NOT NULL AND \"EvidenceModerationId\" IS NULL) OR (\"VerificationId\" IS NULL AND \"EvidenceModerationId\" IS NOT NULL)"));
+            "(CASE WHEN \"VerificationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"EvidenceModerationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"UserVerificationId\" IS NOT NULL THEN 1 ELSE 0 END) = 1"));
         e.HasOne<UserProfile>().WithMany().HasForeignKey(n => n.RecipientUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

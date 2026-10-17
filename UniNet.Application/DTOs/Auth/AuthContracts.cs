@@ -16,5 +16,8 @@ public record ProfileResponse(Guid Id, string FullName, string Nickname, string?
 {
     public string DisplayName => Nickname;
 }
-public record AccountResponse(Guid Id, string Email, AccountRole Role, AccountStatus Status, bool EmailVerified, ProfileResponse? Profile, bool ProfileComplete);
+public record AccountResponse(Guid Id, string Email, AccountRole Role, AccountStatus Status, bool EmailVerified, ProfileResponse? Profile, bool ProfileComplete)
+{
+    public DateTimeOffset CreatedAt { get; init; }
+}
 public record AuthResponse(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt, AccountResponse Account, bool RequiresProfileCompletion);

@@ -2030,12 +2030,17 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("RecipientUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("UserVerificationId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("VerificationId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
                     b.HasIndex("EvidenceModerationId");
+
+                    b.HasIndex("UserVerificationId");
 
                     b.HasIndex("VerificationId");
 
@@ -2046,7 +2051,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.ToTable("VerificationNotification", null, t =>
                         {
-                            t.HasCheckConstraint("CK_VerificationNotification_Target", "(\"VerificationId\" IS NOT NULL AND \"EvidenceModerationId\" IS NULL) OR (\"VerificationId\" IS NULL AND \"EvidenceModerationId\" IS NOT NULL)");
+                            t.HasCheckConstraint("CK_VerificationNotification_Target", "(CASE WHEN \"VerificationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"EvidenceModerationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"UserVerificationId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
                         });
                 });
 
@@ -3267,6 +3272,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasForeignKey("RecipientUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserVerification", null)
+                        .WithMany()
+                        .HasForeignKey("UserVerificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("UniNet.Domain.Entities.ProjectVerification", null)
                         .WithMany()
