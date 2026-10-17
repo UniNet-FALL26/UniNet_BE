@@ -17,7 +17,7 @@ public sealed record PartnerDashboardResponse(
     int RejectedApplications,
     IReadOnlyList<PartnerJobResponse> OpenJobs);
 
-public sealed record JobSkillInput(Guid SkillId, JobSkillRequirementType RequirementType);
+public sealed record JobSkillInput(Guid? SkillId, JobSkillRequirementType RequirementType, string? Name = null);
 public sealed record JobBenefitInput(string Title, string Description);
 
 public sealed record SavePartnerJobRequest(
@@ -60,7 +60,7 @@ public sealed record PartnerJobResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed record JobSkillResponse(Guid SkillId, string Name, short Category, JobSkillRequirementType RequirementType);
+public sealed record JobSkillResponse(Guid? SkillId, string Name, short? Category, JobSkillRequirementType RequirementType);
 
 public sealed record PartnerJobsResponse(
     int Page,

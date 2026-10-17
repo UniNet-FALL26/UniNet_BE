@@ -26,6 +26,11 @@ namespace UniNet.Tests;
 // Real HTTP controllers, JWT authorization and persistent SQLite; never uses a real account/database.
 public sealed class PortfolioHttpTests
 {
+    private sealed class BusyPortraitProcessor : IPortraitProcessor
+    {
+        public Task<byte[]> Process(byte[] source, CancellationToken ct)
+            => throw new AuthException("PORTRAIT_PROVIDER_BUSY", "Dịch vụ tách nền đang tạm thời quá tải.", 503);
+    }
     private sealed class PortraitFixture : IPortraitProcessor, IPortraitCloudStorage
     {
         public static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==");
@@ -189,7 +194,7 @@ public sealed class PortfolioHttpTests
         var confirmed = await owner.PostAsJsonAsync("api/ai-images/confirm", new { sessionId = id }); confirmed.EnsureSuccessStatusCode();
         using var result = System.Text.Json.JsonDocument.Parse(await confirmed.Content.ReadAsStringAsync());
         var url = result.RootElement.GetProperty("data").GetProperty("imageUrl").GetString();
-        var forgedCompany = await company.PutAsJsonAsync("api/profile/partner", new PartnerProfileRequest("Company", PartnerType.Company, url, null, null, null, null, null, null, null));
+        var forgedCompany = await company.PutAsJsonAsync("api/profile/partner", new PartnerProfileRequest(OrganizationName: "Company", PartnerType: PartnerType.Company, AvatarUrl: url, CoverUrl: null, Bio: null, Industry: null, Website: null, ContactEmail: null, Phone: null, Address: null));
         Assert.Equal(HttpStatusCode.BadRequest, forgedCompany.StatusCode);
         Assert.Contains("INVALID_PORTRAIT_ASSET", await forgedCompany.Content.ReadAsStringAsync());
         var baseline = (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!; Assert.Null(baseline.Profile.AvatarUrl);
@@ -250,6 +255,52 @@ public sealed class PortfolioHttpTests
         Assert.Equal(HttpStatusCode.NotFound, (await visitor.GetAsync($"api/profile/portfolio/{server.ProfileId}")).StatusCode);
     }
 
+    [Fact]
+    public async Task BusyPortraitProviderReturns503WithoutChangingProfileAndAllowsRetry()
+    {
+        await using var server = await TestApi.Start(new BusyPortraitProcessor());
+        using var owner = server.Client(server.OwnerId, "Student");
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var upload = new MultipartFormDataContent();
+            upload.Add(new ByteArrayContent(PortraitFixture.Png), "file", "portrait.png");
+            var response = await owner.PostAsync("api/ai-images/remove-background", upload);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Contains("PORTRAIT_PROVIDER_BUSY", await response.Content.ReadAsStringAsync());
+        }
+        var profile = await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me");
+        Assert.Null(profile!.Profile.AvatarUrl);
+        await using var scope = server.Scope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<UniNetDbContext>().PortraitAssets.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task LocalFallbackProvidesRealCutoutThroughPreviewConfirmAndExplicitSave()
+    {
+        using var local = new OnnxPortraitProcessor();
+        await using var server = await TestApi.Start(new FallbackPortraitProcessor(new BusyPortraitProcessor(), local, true));
+        using var owner = server.Client(server.OwnerId, "Student");
+        using var upload = new MultipartFormDataContent();
+        upload.Add(new ByteArrayContent(PortraitSample.Opaque()), "file", "portrait.png");
+        var processed = await owner.PostAsync("api/ai-images/remove-background", upload); processed.EnsureSuccessStatusCode();
+        using var preview = System.Text.Json.JsonDocument.Parse(await processed.Content.ReadAsStringAsync());
+        var data = preview.RootElement.GetProperty("data");
+        var png = Convert.FromBase64String(data.GetProperty("previewUrl").GetString()!.Split(',')[1]);
+        using var image = SkiaSharp.SKBitmap.Decode(png);
+        Assert.Equal(512, image.Width); Assert.Equal(0, image.GetPixel(0, 0).Alpha);
+        Assert.True(data.GetProperty("hasTransparentBackground").GetBoolean());
+        var baseline = (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!;
+        Assert.Null(baseline.Profile.AvatarUrl);
+        var confirmed = await owner.PostAsJsonAsync("api/ai-images/confirm", new { sessionId = data.GetProperty("sessionId").GetString() });
+        confirmed.EnsureSuccessStatusCode();
+        using var result = System.Text.Json.JsonDocument.Parse(await confirmed.Content.ReadAsStringAsync());
+        var url = result.RootElement.GetProperty("data").GetProperty("imageUrl").GetString();
+        Assert.Null((await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!.Profile.AvatarUrl);
+        var saved = await owner.PutAsJsonAsync("api/profile/portfolio/editor/me", new PortfolioEditorRequest(new("HTTP Owner", "Owner", url, null, null), baseline.Portfolio));
+        saved.EnsureSuccessStatusCode();
+        Assert.Equal(url, (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!.Profile.AvatarUrl);
+    }
+
     private sealed class TestApi(WebApplication app, string databasePath, Guid ownerId, Guid profileId, Guid companyId) : IAsyncDisposable
     {
         private const string Key = "isolated-portfolio-http-key-01234567890123456789";
@@ -267,7 +318,7 @@ public sealed class PortfolioHttpTests
             }
             return client;
         }
-        public static async Task<TestApi> Start()
+        public static async Task<TestApi> Start(IPortraitProcessor? portraitProcessor = null)
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"uninet-portfolio-{Guid.NewGuid():N}.sqlite");
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -276,6 +327,7 @@ public sealed class PortfolioHttpTests
             builder.Configuration["Cloudinary:CloudName"] = "fixture";
             builder.Services.AddScoped<PortfolioService>(); builder.Services.AddScoped<ProfileService>(); builder.Services.AddScoped<AuthService>();
             builder.Services.AddSingleton<IPortraitProcessor, PortraitFixture>(); builder.Services.AddSingleton<IPortraitCloudStorage, PortraitFixture>(); builder.Services.AddSingleton<PortraitSessions>();
+            if (portraitProcessor is not null) builder.Services.AddSingleton(portraitProcessor);
             builder.Services.AddSingleton<ICloudImageStorage, ImageFixture>();
             builder.Services.AddControllers().AddApplicationPart(typeof(ProfileController).Assembly);
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options => {

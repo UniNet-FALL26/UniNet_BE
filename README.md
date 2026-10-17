@@ -30,3 +30,5 @@ dotnet run --project UniNet.API
 Swagger is available at `/swagger` in Development. The frontend `EXPO_PUBLIC_API_URL` must end with `/api`, for example `http://localhost:5000/api`. On an Android emulator, use the host address reachable from that emulator.
 
 Roles, account statuses, and partner types are defined in `UniNet.Domain/Enums`. The database migration is in `UniNet.Infrastructure/Data/Migrations`. See `docs/handoffs/authentication.md` for the API contract and validation notes.
+
+Project verification payment endpoints, PayOS configuration, webhook setup and migration notes are documented in [verification payments](docs/handoffs/verification-payments.md).

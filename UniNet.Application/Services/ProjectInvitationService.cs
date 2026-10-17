@@ -24,6 +24,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             ?? throw new ProjectInvitationException("INVITEE_NOT_FOUND", "Invitee profile not found.", 404);
         RequireActiveStudent(invitee);
         Require(invitee.Id != project.CreatorId, "CANNOT_INVITE_SELF", "You cannot invite yourself to your own project.", 409);
+        await ProjectRoleCapacity.CancelUnavailableAsync(db, project, ct);
+        await db.SaveChangesAsync(ct);
         await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == invitee.Id &&
             m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
@@ -182,6 +184,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             // Match join requests so concurrent acceptances cannot overfill the project.
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             var invitation = await action();
+            await db.SaveChangesAsync(ct);
+            await ProjectRoleCapacity.CancelUnavailableAsync(db, invitation.Project, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return ProjectInvitationMapping.ToResponse(invitation);

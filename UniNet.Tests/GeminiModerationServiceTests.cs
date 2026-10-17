@@ -56,6 +56,7 @@ public sealed class GeminiModerationServiceTests
         using var client = new HttpClient(handler);
         var result = await CreateService(client, null).AnalyzeProjectAsync(Input());
         Assert.Equal(expectedAttempts, attempts);
+        Assert.Equal((int)status == 429 || (int)status >= 500, result.Flags.Contains("TRANSIENT_ERROR"));
         Assert.Equal("error", result.ContentResult);
         Assert.Contains($"{(int)status} ({status})", result.Reason);
         Assert.Contains($"{{\"error\":{{\"message\":\"Failure {expectedAttempts}\"}}}}", result.Reason);

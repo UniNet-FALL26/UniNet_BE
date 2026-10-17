@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using UniNet.Application.Interfaces;
@@ -12,9 +13,27 @@ namespace UniNet.Application.Services;
 public sealed class ProjectService(UniNetDbContext db, ProjectModerationService moderation,
     IConfiguration configuration) : IProjectService
 {
+    public async Task<ProjectStatusResponse> UpdateStatusAsync(Guid accountId, UpdateProjectStatusRequest request, CancellationToken ct)
+    {
+        Require(request.Status == ProjectStatus.Completed, "INVALID_STATUS_TRANSITION", "Only Active to Completed is allowed.");
+        var actor = await db.UserProfiles.AsNoTracking().Include(p => p.Account)
+            .SingleOrDefaultAsync(p => p.AccountId == accountId, ct);
+        Require(actor != null && actor.Account.Role == AccountRole.Student && actor.Account.Status == AccountStatus.Active,
+            "FORBIDDEN", "An active Student account is required.", 403);
+        var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(p => p.Id == request.ProjectId, ct)
+            ?? throw NotFound();
+        Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can complete it.", 403);
+        var now = DateTimeOffset.UtcNow;
+        var updated = await db.Projects.Where(p => p.Id == request.ProjectId && p.CreatorId == actor.Id && p.Status == ProjectStatus.Active)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, ProjectStatus.Completed)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+        Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
+        return new(request.ProjectId, ProjectStatus.Completed, now);
+    }
+
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static void Require(bool condition, string code, string message, int status = 400)
+    private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)
     {
         if (!condition) throw new ProjectException(code, message, status);
     }
@@ -314,7 +333,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
         var query = db.Projects.AsNoTracking()
-            .Where(p => p.Creator.AccountId == userId && p.Status == status);
+            .Where(p => p.Status == status && (p.Creator.AccountId == userId ||
+                p.Members.Any(m => m.User.AccountId == userId && m.Status == ProjectMemberStatus.Active)));
         var total = await query.CountAsync(ct);
         Require(total > 0, "PROJECT_NOT_FOUND", "Project not found.", 404);
         var projects = await query.Include(p => p.Creator)
@@ -414,7 +434,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
@@ -445,7 +465,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.ExpectedOutput,
             project.Visibility,
@@ -472,14 +492,14 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
             project.Status,
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category.ToString(), ps.Skill.IconUrl, null)).ToList()
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList()
         );
     }
 
@@ -489,7 +509,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
@@ -501,7 +521,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
             project.RecruitmentStatus,

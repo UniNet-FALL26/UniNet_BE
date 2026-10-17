@@ -36,7 +36,7 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
                     new { type = "image", mime_type = "image/png", data = Convert.ToBase64String(encoded.ToArray()) }
                 },
                 response_format = new { type = "text", mime_type = "application/json", schema },
-                generation_config = new { thinking_level = "minimal", max_output_tokens = 8192 }
+                generation_config = new { thinking_level = "low", max_output_tokens = 8192 }
             })
         };
         request.Headers.Add("x-goog-api-key", key);
@@ -47,6 +47,8 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
         try
         {
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                throw new AuthException("PORTRAIT_PROVIDER_BUSY", "Dịch vụ tách nền đang tạm thời quá tải. Vui lòng thử lại sau ít phút. Ảnh của bạn chưa được lưu vào hồ sơ.", 503);
             if (!response.IsSuccessStatusCode)
                 throw new AuthException("PORTRAIT_PROCESSING_FAILED", response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
                     ? "Gemini đã hết hạn mức tạm thời. Vui lòng thử lại sau."
@@ -89,7 +91,7 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
         { throw new AuthException("PORTRAIT_PROCESSING_FAILED", "Không kết nối được Gemini. Vui lòng thử lại.", 503); }
     }
 
-    private static SKBitmap Decode(byte[] source)
+    internal static SKBitmap Decode(byte[] source)
     {
         if (source.Length == 0 || source.Length > ProfileImageStorage.MaxBytes || ProfileImageStorage.Extension(source) is null) throw BadImage();
         using var data = SKData.CreateCopy(source);
@@ -100,6 +102,8 @@ public sealed class GeminiPortraitProcessor(HttpClient http, IConfiguration conf
         if (codec.GetPixels(decoded.Info, decoded.GetPixels()) != SKCodecResult.Success) throw BadImage();
         // Apply EXIF orientation by rearranging pixels, without premultiplication or resampling.
         var orientation = (int)codec.EncodedOrigin;
+        // Ordinary images need no permutation buffers. Keep unpremultiplied pixels intact.
+        if (orientation is 0 or 1) return decoded.Copy() ?? throw BadImage();
         var swap = orientation >= 5;
         var output = new SKBitmap(new SKImageInfo(swap ? decoded.Height : decoded.Width, swap ? decoded.Width : decoded.Height,
             SKColorType.Rgba8888, SKAlphaType.Unpremul));

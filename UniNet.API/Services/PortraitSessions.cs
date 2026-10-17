@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
+using SkiaSharp;
 using UniNet.Application;
 using UniNet.Domain;
 using UniNet.Infrastructure.Data;
@@ -44,10 +45,27 @@ public sealed class PortraitSessions(IPortraitProcessor processor)
             var png = await processor.Process(bytes, ct);
             if (png.Length > 20 * 1024 * 1024) throw new AuthException("PORTRAIT_TOO_LARGE", "Ảnh xử lý quá lớn. Vui lòng chọn ảnh nhỏ hơn.");
             ct.ThrowIfCancellationRequested();
+            var preview = PreviewImage(png, ct);
             var id = Guid.NewGuid(); var session = new Session(owner, png); sessions[id] = session;
-            return new(id.ToString(), "data:image/png;base64," + Convert.ToBase64String(png), true, session.Expires);
+            return new(id.ToString(), "data:image/png;base64," + Convert.ToBase64String(preview), true, session.Expires);
         }
         finally { processGate.Release(); }
+    }
+    private static byte[] PreviewImage(byte[] png, CancellationToken ct)
+    {
+        var info = SKBitmap.DecodeBounds(png);
+        if (info.Width <= 0 || info.Height <= 0) throw new AuthException("INVALID_PORTRAIT_RESULT", "Không đọc được ảnh xem trước. Vui lòng thử lại.", 502);
+        var longestSide = Math.Max(info.Width, info.Height);
+        if (longestSide <= 1024) return png;
+        using var image = SKBitmap.Decode(png);
+        if (image is null) throw new AuthException("INVALID_PORTRAIT_RESULT", "Không đọc được ảnh xem trước. Vui lòng thử lại.", 502);
+        var scale = 1024d / longestSide;
+        using var resized = image.Resize(new SKImageInfo(Math.Max(1, (int)(image.Width * scale)), Math.Max(1, (int)(image.Height * scale))), new SKSamplingOptions(SKFilterMode.Linear));
+        if (resized is null) throw new AuthException("INVALID_PORTRAIT_RESULT", "Không tạo được ảnh xem trước. Vui lòng thử lại.", 502);
+        ct.ThrowIfCancellationRequested();
+        using var encoded = resized.Encode(SKEncodedImageFormat.Png, 100);
+        ct.ThrowIfCancellationRequested();
+        return encoded.ToArray();
     }
     public void Release(Guid owner, Guid id)
     {

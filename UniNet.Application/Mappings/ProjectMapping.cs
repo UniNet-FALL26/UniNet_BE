@@ -18,7 +18,7 @@ public static class ProjectMapping
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
@@ -37,7 +37,7 @@ public static class ProjectMapping
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.ExpectedOutput,
             project.Visibility,
@@ -63,14 +63,14 @@ public static class ProjectMapping
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
             project.Status,
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category.ToString(), ps.Skill.IconUrl, null)).ToList()
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList()
         );
     }
 
@@ -80,7 +80,7 @@ public static class ProjectMapping
             .Select(ps => new ProjectSkillInfo(
                 ps.SkillId,
                 ps.Skill.Name,
-                ps.Skill.Category.ToString(),
+                ps.Skill.Category?.ToString() ?? string.Empty,
                 ps.Skill.IconUrl,
                 null
             ))
@@ -92,7 +92,7 @@ public static class ProjectMapping
             project.ProjectField,
             project.Description,
             project.MemberTarget,
-            project.Members.Count(m => m.Status == ProjectMemberStatus.Active),
+            1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
             project.RecruitmentStatus,

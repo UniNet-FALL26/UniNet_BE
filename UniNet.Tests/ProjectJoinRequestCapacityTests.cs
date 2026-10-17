@@ -13,6 +13,67 @@ namespace UniNet.Tests;
 public sealed class ProjectJoinRequestCapacityTests
 {
     [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 2)]
+    public async Task AcceptanceCancelsCompetingApplicationsOnlyWhenPositionIsFull(bool viaInvitation, int quantity)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        Account Student(string name) => new() { Email = $"{name}@test.com", Role = AccountRole.Student,
+            Profile = new UserProfile { FullName = name, Nickname = name } };
+        var owner = Student("Owner");
+        var selected = Student("Selected");
+        var applicant = Student("Applicant");
+        db.Accounts.AddRange(owner, selected, applicant);
+        var project = new Project { Creator = owner.Profile!, Title = "Project", ProjectField = "IT",
+            Description = "Test", MemberTarget = 5, Status = ProjectStatus.Active,
+            Visibility = ProjectVisibility.Public, RecruitmentStatus = RecruitmentStatus.Open,
+            RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(1),
+            RoleRequirements = [new() { Id = Guid.NewGuid(), Role = "Developer", Quantity = quantity, Requirements = "Code" },
+                new() { Id = Guid.NewGuid(), Role = "Tester", Quantity = 1, Requirements = "Test" }] };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+        var joins = new ProjectJoinRequestService(db);
+        var invites = new ProjectInvitationService(db);
+        var competing = await joins.SendAsync(project.Id, applicant.Id, new(" developer "));
+        var competingInvite = await invites.SendAsync(project.Id, owner.Id, new(applicant.Profile!.Id, "Developer"));
+        if (viaInvitation)
+        {
+            var invitation = await invites.SendAsync(project.Id, owner.Id, new(selected.Profile!.Id, "Developer"));
+            Assert.Equal(ProjectInvitationStatus.Accepted, (await invites.AcceptAsync(invitation.Id, selected.Id)).Status);
+        }
+        else
+        {
+            var request = await joins.SendAsync(project.Id, selected.Id, new("Developer"));
+            Assert.Equal(ProjectJoinRequestStatus.Accepted, (await joins.AcceptAsync(request.Id, owner.Id)).Status);
+        }
+        Assert.Equal(quantity == 1 ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
+            (await db.ProjectJoinRequests.FindAsync(competing.Id))!.Status);
+        Assert.Equal(quantity == 1 ? ProjectInvitationStatus.Cancelled : ProjectInvitationStatus.Sent,
+            (await db.ProjectInvitations.FindAsync(competingInvite.Id))!.Status);
+        if (quantity == 1)
+        {
+            // Simulate a legacy pending request left behind before automatic cancellation existed.
+            (await db.ProjectJoinRequests.FindAsync(competing.Id))!.Status = ProjectJoinRequestStatus.Pending;
+            await db.SaveChangesAsync();
+            var replacement = await joins.SendAsync(project.Id, applicant.Id, new("Tester"));
+            Assert.Equal(ProjectJoinRequestStatus.Pending, replacement.Status);
+            Assert.Equal(ProjectJoinRequestStatus.Cancelled, (await db.ProjectJoinRequests.FindAsync(competing.Id))!.Status);
+            var duplicate = await Assert.ThrowsAsync<ProjectJoinRequestException>(() =>
+                joins.SendAsync(project.Id, applicant.Id, new("Tester")));
+            Assert.Equal("JOIN_REQUEST_EXISTS", duplicate.Code);
+            var blocked = await Assert.ThrowsAsync<ProjectInvitationException>(() =>
+                invites.SendAsync(project.Id, owner.Id, new(applicant.Profile.Id, "Developer")));
+            Assert.Equal("PROJECT_ROLE_FULL", blocked.Code);
+        }
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(2)]
     public async Task FirstRequestChecksOccupiedPositionBeforeCreatingRequest(int quantity)

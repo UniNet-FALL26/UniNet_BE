@@ -99,8 +99,29 @@ public sealed class ProjectModerationService(
     public Task<ProjectModerationResponse> SubmitProjectAsync(Guid projectId, Guid accountId, CancellationToken ct)
         => ModerateProjectAsync(projectId, accountId, isInitialAttempt: false, ct);
 
+    public async Task RetryTransientErrorsAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var abandoned = now.AddMinutes(-10);
+        await db.ProjectModerations.Where(m => m.Status == ProjectModerationStatus.Processing && m.UpdatedAt <= abandoned &&
+                m.RetryCount < 5 && !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, ProjectModerationStatus.Error)
+                .SetProperty(m => m.ResultJson, "{\"flags\":[\"TRANSIENT_ERROR\"],\"reason\":\"Abandoned AI attempt\"}"), ct);
+        var cutoff = now.AddMinutes(-5);
+        var attempts = await db.ProjectModerations.AsNoTracking()
+            .Where(m => m.Status == ProjectModerationStatus.Error && m.RetryCount < 5 && m.UpdatedAt <= cutoff &&
+                m.ResultJson != null && m.ResultJson.Contains("TRANSIENT_ERROR") &&
+                (m.Project.Status == ProjectStatus.Pending || m.Project.Status == ProjectStatus.Rejected) &&
+                !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
+            .OrderBy(m => m.UpdatedAt).Select(m => new { m.ProjectId, m.Project.Creator.AccountId }).Take(25).ToListAsync(ct);
+        foreach (var attempt in attempts)
+        {
+            db.ChangeTracker.Clear();
+            await ModerateProjectAsync(attempt.ProjectId, attempt.AccountId, false, ct, retry: true);
+        }
+    }
+
     private async Task<ProjectModerationResponse> ModerateProjectAsync(
-        Guid projectId, Guid accountId, bool isInitialAttempt, CancellationToken ct)
+        Guid projectId, Guid accountId, bool isInitialAttempt, CancellationToken ct, bool retry = false)
     {
         var threshold = configuration.GetValue<decimal?>("ProjectModeration:AutoApproveConfidence")
             ?? throw new InvalidOperationException("ProjectModeration:AutoApproveConfidence is required.");
@@ -141,6 +162,7 @@ public sealed class ProjectModerationService(
             var now = DateTimeOffset.UtcNow;
             moderation = new ProjectModeration
             {
+                RetryCount = retry ? (latest?.RetryCount ?? 0) + 1 : 0,
                 Id = Guid.NewGuid(), ProjectId = projectId,
                 AttemptNumber = (latest?.AttemptNumber ?? 0) + 1,
                 Status = ProjectModerationStatus.Pending,

@@ -13,17 +13,17 @@ namespace UniNet.Tests;
 public sealed class PortraitTests
 {
     private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==");
-    private sealed class Processor : IPortraitProcessor
+    private sealed class Processor(byte[]? result = null) : IPortraitProcessor
     {
         public int Calls;
-        public Task<byte[]> Process(byte[] source, CancellationToken ct) { Calls++; return Task.FromResult(Png); }
+        public Task<byte[]> Process(byte[] source, CancellationToken ct) { Calls++; return Task.FromResult(result ?? Png); }
     }
-    private sealed class Cloud : IPortraitCloudStorage
+    private sealed class Cloud(byte[]? expectedPng = null) : IPortraitCloudStorage
     {
         public int Calls; public bool Fail; public List<string> Ids = []; public Action? AfterUpload;
         public Task<string> Upload(byte[] png, string id, CancellationToken ct)
         {
-            Calls++; Ids.Add(id); Assert.Equal(Png, png);
+            Calls++; Ids.Add(id); Assert.Equal(expectedPng ?? Png, png);
             if (Fail) throw new AuthException("PORTRAIT_UPLOAD_FAILED", "Fixture failed", 502);
             AfterUpload?.Invoke();
             return Task.FromResult($"https://res.cloudinary.com/fixture/image/upload/v1/{id}.png");
@@ -31,6 +31,23 @@ public sealed class PortraitTests
         public Task Destroy(string id, CancellationToken ct) => Task.CompletedTask;
     }
     private static FormFile File() => new(new MemoryStream(Png), 0, Png.Length, "file", "portrait.png");
+    [Fact]
+    public async Task LargePreviewIsBoundedWhileConfirmationKeepsOriginalImageBytes()
+    {
+        var png = System.IO.File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "portrait-sample.png"));
+        var sessions = new PortraitSessions(new Processor(png));
+        var (connection, db, owner) = await Setup();
+        await using var lease = connection; await using var context = db;
+        var preview = await sessions.Process(owner.Id, File(), default);
+        var bytes = Convert.FromBase64String(preview.PreviewUrl.Split(',')[1]);
+        using var image = SkiaSharp.SKBitmap.Decode(bytes);
+        Assert.True(Math.Max(image.Width, image.Height) <= 1024);
+        Assert.True(bytes.Length < png.Length);
+        Assert.Contains(image.Pixels, pixel => pixel.Alpha == 0);
+        var cloud = new Cloud(png);
+        await sessions.Confirm(owner.Id, Guid.Parse(preview.SessionId), db, cloud, default);
+        Assert.Equal(1, cloud.Calls);
+    }
     private static async Task<(SqliteConnection, UniNetDbContext, Account)> Setup()
     {
         var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();

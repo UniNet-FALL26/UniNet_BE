@@ -37,4 +37,11 @@ public sealed class UserProfile
     public List<Job> PostedJobs { get; set; } = [];
     public List<StudentSavedJob> SavedJobs { get; set; } = [];
     public List<JobApplication> JobApplications { get; set; } = [];
+
+    public List<ProjectVerification> RequestedVerifications { get; set; } = [];
+
+    public List<ProjectVerification> FinalizedVerifications { get; set; } = [];
+    public List<VerificationAssignment> VerificationAssignments { get; set; } = [];
+    public List<Transaction> Transactions { get; set; } = [];
+
 }

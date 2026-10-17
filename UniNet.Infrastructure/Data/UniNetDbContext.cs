@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using System.Reflection.Emit;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
+using UniNet.Domain.Entities.Community;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -32,9 +34,28 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<User1SavedUser2> User1SavedUser2 => Set<User1SavedUser2>();
     public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
-
+    public DbSet<ProjectVerification> ProjectVerifications => Set<ProjectVerification>();
+    public DbSet<ProjectVerificationEvidence> ProjectVerificationEvidence => Set<ProjectVerificationEvidence>();
+    public DbSet<VerificationAssignment> VerificationAssignments => Set<VerificationAssignment>();
+    public DbSet<VerificationReport> VerificationReports => Set<VerificationReport>();
+    public DbSet<VerificationReportVersion> VerificationReportVersions => Set<VerificationReportVersion>();
+    public DbSet<ReportAuditLog> ReportAuditLogs => Set<ReportAuditLog>();
+    public DbSet<Transaction> Transactions => Set<Transaction>();
+    public DbSet<Package> Packages => Set<Package>();
+    public DbSet<RefundTransaction> RefundTransactions => Set<RefundTransaction>();
+    public DbSet<VerificationTransaction> VerificationTransactions => Set<VerificationTransaction>();
+    public DbSet<CommunityPost> CommunityPosts => Set<CommunityPost>();
+    public DbSet<CommunityPostMedia> CommunityPostMedia => Set<CommunityPostMedia>();
+    public DbSet<CommunityPostComment> CommunityPostComments => Set<CommunityPostComment>();
+    public DbSet<CommunityPostReaction> CommunityPostReactions => Set<CommunityPostReaction>();
+    public DbSet<CommunityPostBookmark> CommunityPostBookmarks => Set<CommunityPostBookmark>();
+    public DbSet<ContentReport> ContentReports => Set<ContentReport>();
+    public DbSet<AdvertisementCampaign> AdvertisementCampaigns => Set<AdvertisementCampaign>();
+    public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.ApplyConfiguration(new VerificationAdminActionConfiguration());
+        model.ApplyConfiguration(new VerificationNotificationConfiguration());
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);
@@ -97,7 +118,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         });
         model.Entity<Skill>(e =>
         {
-            e.ToTable("Skills", t => t.HasCheckConstraint("CK_Skills_Category", "\"Category\" BETWEEN 0 AND 3")); e.HasKey(x => x.Id);
+            e.ToTable("Skills", t => t.HasCheckConstraint("CK_Skills_Category", "\"Category\" IS NULL OR \"Category\" BETWEEN 0 AND 3")); e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(100).IsRequired();
             e.Property(x => x.Category).HasConversion<short>();
             e.HasIndex(x => new { x.Category, x.IsActive });
@@ -192,7 +213,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         });
         model.Entity<ProjectRoleRequirement>(e =>
         {
-            e.ToTable("ProjectRoleRequirements", t=>
+            e.ToTable("ProjectRoleRequirements", t =>
             {
                 t.HasCheckConstraint(
                     "CK_ProjectRoleRequirements_Quantity",
@@ -714,6 +735,206 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => new { x.JobId, x.Status });
             e.HasIndex(x => new { x.StudentUserId, x.AppliedAt });
         });
+        model.Entity<ProjectVerification>(e =>
+        {
+            e.ToTable("ProjectVerifications", t =>
+                t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3"));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.AiSummary).HasColumnType("text");
+            e.Property(x => x.AiScore).HasPrecision(5, 2);
+            e.Property(x => x.AiAdditionalEvidenceJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.CancellationReason).HasColumnType("text");
+            e.Property(x => x.SubmittedAt).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.Project).WithMany(x => x.Verifications)
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.RequestByUser).WithMany(x => x.RequestedVerifications)
+                .HasForeignKey(x => x.RequestByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.FinalizedByUser).WithMany(x => x.FinalizedVerifications)
+                .HasForeignKey(x => x.FinalizedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Package).WithMany()
+                .HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.ProjectId, x.Status });
+            e.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" = 0")
+                .HasDatabaseName("IX_ProjectVerifications_PendingProject");
+            e.HasIndex(x => new { x.RequestByUserId, x.SubmittedAt });
+        });
+        model.Entity<ProjectVerificationEvidence>(e =>
+        {
+            e.ToTable("ProjectVerificationEvidence", t =>
+                t.HasCheckConstraint("CK_ProjectVerificationEvidence_Version", "\"Version\" > 0"));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.EvidenceJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.SubmittedAt).IsRequired();
+            e.HasOne(x => x.ProjectVerification).WithMany(x => x.EvidenceSubmissions)
+                .HasForeignKey(x => x.ProjectVerificationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.SubmittedByUser).WithMany()
+                .HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.ProjectVerificationId, x.Version }).IsUnique();
+        });
+        model.Entity<VerificationAssignment>(e =>
+        {
+            e.ToTable("VerificationAssignments", t =>
+                t.HasCheckConstraint("CK_VerificationAssignments_Status", "\"Status\" BETWEEN 0 AND 3"));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.ReplacementReason).HasColumnType("text");
+            e.Property(x => x.AssignedAt).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.ProjectVerification).WithMany(x => x.Assignments)
+                .HasForeignKey(x => x.ProjectVerificationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.AssignedToUser).WithMany(x => x.VerificationAssignments)
+                .HasForeignKey(x => x.AssignedToUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.AssignedByUser).WithMany()
+                .HasForeignKey(x => x.AdminId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.ReplacedBy).WithMany()
+                .HasForeignKey("ReplacedById").OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.ProjectVerificationId, x.Status });
+            e.HasIndex(x => new { x.AssignedToUserId, x.Status });
+            e.HasIndex(x => x.ReportDueAt);
+            e.HasIndex(x => x.AssignmentDueAt);
+        });
+        model.Entity<VerificationReport>(e =>
+        {
+            e.ToTable("VerificationReports");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Summary).HasColumnType("text").IsRequired();
+            e.Property(x => x.Findings).HasColumnType("text");
+            e.Property(x => x.Recommendations).HasColumnType("text");
+            e.Property(x => x.SubmittetAt).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.VerificationAssignment).WithOne(x => x.Report)
+                .HasForeignKey<VerificationReport>(x => x.VerificationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.Outcome).HasConversion<short?>();
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.VerificationId).IsUnique();
+        });
+        model.Entity<VerificationReportVersion>(e =>
+        {
+            e.ToTable("VerificationReportVersions", t =>
+            {
+                t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
+                t.HasCheckConstraint("CK_ReportVersions_Outcome", "\"Outcome\" IN (1, 2)");
+            });
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.ReportId, x.Version }).IsUnique();
+            e.Property(x => x.Summary).HasColumnType("text").IsRequired();
+            e.Property(x => x.Findings).HasColumnType("text").IsRequired();
+            e.Property(x => x.Recommendations).HasColumnType("text").IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(2000).IsRequired();
+            e.Property(x => x.Outcome).HasConversion<short>();
+            e.HasOne(x => x.Report).WithMany(x => x.Versions).HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<ReportAuditLog>(e =>
+        {
+            e.ToTable("ReportAuditLogs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Action).HasMaxLength(50).IsRequired();
+            e.Property(x => x.Reason).HasMaxLength(2000);
+            e.HasIndex(x => new { x.ReportId, x.Version }).IsUnique();
+            e.HasOne<VerificationReport>().WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<Package>(e =>
+        {
+            e.ToTable("Packages", t =>
+            {
+                t.HasCheckConstraint("CK_Packages_Type", "\"Type\" BETWEEN 0 AND 1");
+                t.HasCheckConstraint("CK_Packages_Role", "\"Role\" BETWEEN 0 AND 1");
+                t.HasCheckConstraint("CK_Packages_Price", "\"Price\" >= 0");
+                t.HasCheckConstraint("CK_Packages_DurationInDays", "\"DurationInDays\" IS NULL OR \"DurationInDays\" > 0");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Code).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(255).IsRequired();
+            e.Property(x => x.Type).HasConversion<short>().IsRequired();
+            e.Property(x => x.Role).HasConversion<short>().IsRequired();
+            e.Property(x => x.Price).HasPrecision(18, 2).IsRequired();
+            e.Property(x => x.IsActive).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasIndex(x => x.Code).IsUnique();
+            e.HasIndex(x => new { x.Type, x.Role, x.IsActive });
+        });
+        model.Entity<Transaction>(e =>
+        {
+            e.ToTable("Transactions", t =>
+            {
+                t.HasCheckConstraint("CK_Transactions_Status", "\"Status\" BETWEEN 0 AND 2");
+                t.HasCheckConstraint("CK_Transactions_Amount", "\"Amount\" >= 0");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.Amount).HasPrecision(18, 2).IsRequired();
+            e.Property(x => x.PaymentRef).HasMaxLength(255);
+            e.Property(x => x.PaymentUrl).HasMaxLength(2048);
+            e.Property(x => x.PaymentMethod).HasMaxLength(100);
+            e.Property(x => x.ProviderOrderCode).HasMaxLength(255);
+            e.Property(x => x.ProviderPaymentLinkId).HasMaxLength(255);
+            e.Property(x => x.FailureReason).HasColumnType("text");
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.User).WithMany(x => x.Transactions)
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Package).WithMany(x => x.Transactions)
+                .HasForeignKey(x => x.PackageId).OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.UserId, x.Status });
+            e.HasIndex(x => x.ProviderOrderCode);
+            e.HasIndex(x => x.ProviderPaymentLinkId);
+            e.HasIndex(x => new { x.PaymentMethod, x.ProviderOrderCode }).IsUnique()
+                .HasFilter("\"PaymentMethod\" = 'PayOS' AND \"ProviderOrderCode\" IS NOT NULL");
+            e.HasIndex(x => new { x.PaymentMethod, x.ProviderPaymentLinkId }).IsUnique()
+                .HasFilter("\"PaymentMethod\" = 'PayOS' AND \"ProviderPaymentLinkId\" IS NOT NULL");
+            e.HasIndex(x => new { x.Status, x.ExpiredAt });
+        });
+        model.Entity<VerificationTransaction>(e =>
+        {
+            e.ToTable("VerificationTransactions");
+            e.HasKey(x => x.TransactionId);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+
+            e.HasOne(x => x.Transaction).WithOne(x => x.VerificationTransaction)
+                .HasForeignKey<VerificationTransaction>(x => x.TransactionId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Verification).WithMany(x => x.VerificationTransactions)
+                .HasForeignKey(x => x.VerificationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.VerificationId);
+        });
+        model.Entity<RefundTransaction>(e =>
+        {
+            e.ToTable("RefundTransactions", t =>
+            {
+                t.HasCheckConstraint("CK_RefundTransactions_Status", "\"Status\" BETWEEN 0 AND 2");
+                t.HasCheckConstraint("CK_RefundTransactions_Amount", "\"Amount\" >= 0");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Amount).HasPrecision(18, 2).IsRequired();
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.PaymentProvider).HasMaxLength(100).IsRequired();
+            e.Property(x => x.RefundRef).HasMaxLength(255);
+            e.Property(x => x.Reason).HasColumnType("text").IsRequired();
+            e.Property(x => x.FailureReason).HasColumnType("text");
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.CompletedAt).IsRequired();
+
+            e.HasOne(x => x.Transaction).WithMany(x => x.RefundTransactions)
+                .HasForeignKey(x => x.TransactionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.TransactionId, x.Status });
+        });
         model.Entity<UserSkill>(e =>
         {
             e.ToTable("UserSkills");
@@ -754,6 +975,153 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
             // Support skill-based user recommendations
             e.HasIndex(x => x.SkillId);
+        });
+
+        // 1. CommunityPost
+        model.Entity<CommunityPost>(entity =>
+        {
+            entity.ToTable("CommunityPosts");
+            entity.HasKey(e => e.Id);
+
+            // Ép ki?u list string thành JSONB
+            entity.Property(e => e.MediaUrlsJson).HasColumnType("jsonb");
+
+            // Ràng bu?c Check Constraints
+            entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPosts_AuthorActorType", "\"AuthorActorType\" BETWEEN 0 AND 1"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPosts_Status", "\"Status\" BETWEEN 0 AND 3"));
+
+            entity.HasOne(e => e.AuthorUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.AuthorUserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 2. CommunityPostMedia
+        model.Entity<CommunityPostMedia>(entity =>
+        {
+            entity.ToTable("CommunityPostMedia");
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPostMedia_MediaType", "\"MediaType\" BETWEEN 0 AND 1"));
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Media)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 3. CommunityPostComment
+        model.Entity<CommunityPostComment>(entity =>
+        {
+            entity.ToTable("CommunityPostComments");
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Comments)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.AuthorUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.AuthorUserId)
+                  .OnDelete(DeleteBehavior.Restrict); // Dùng Restrict ð? tránh l?i multiple cascade paths
+
+            entity.HasOne(e => e.ParentComment)
+                  .WithMany(c => c.Replies)
+                  .HasForeignKey(e => e.ParentCommentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ReplyToUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ReplyToUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 4. CommunityPostReaction (Khóa chính kép / Composite Key)
+        model.Entity<CommunityPostReaction>(entity =>
+        {
+            entity.ToTable("CommunityPostReactions");
+            entity.HasKey(e => new { e.PostId, e.UserId });
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Reactions)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 5. CommunityPostBookmark (Khóa chính kép / Composite Key)
+        model.Entity<CommunityPostBookmark>(entity =>
+        {
+            entity.ToTable("CommunityPostBookmarks");
+            entity.HasKey(e => new { e.PostId, e.UserId });
+
+            entity.HasOne(e => e.Post)
+                  .WithMany(p => p.Bookmarks)
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 6. ContentReport
+        model.Entity<ContentReport>(entity =>
+        {
+            entity.ToTable("ContentReports");
+            entity.HasKey(e => e.Id);
+
+            entity.ToTable(t => t.HasCheckConstraint("CK_ContentReports_Status", "\"Status\" BETWEEN 0 AND 2"));
+
+            entity.HasOne(e => e.Post)
+                  .WithMany()
+                  .HasForeignKey(e => e.PostId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ReporterUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ReporterUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+        // 1. AdvertisementCampaign
+        model.Entity<AdvertisementCampaign>(entity =>
+        {
+            entity.ToTable("AdvertisementCampaigns");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.BudgetCap).HasColumnType("numeric(18,2)");
+
+            entity.HasOne(e => e.CompanyUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.CompanyUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Package)
+                  .WithMany()
+                  .HasForeignKey(e => e.PackageId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // 2. AdvertisementTransaction (Mapping 1-1 v?i Transaction)
+        model.Entity<AdvertisementTransaction>(entity =>
+        {
+            entity.ToTable("AdvertisementTransactions");
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Transaction)
+                  .WithOne(t => t.AdvertisementTransaction)
+                  .HasForeignKey<AdvertisementTransaction>(e => e.TransactionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Campaign)
+                  .WithMany(c => c.AdvertisementTransactions)
+                  .HasForeignKey(e => e.CampaignId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
