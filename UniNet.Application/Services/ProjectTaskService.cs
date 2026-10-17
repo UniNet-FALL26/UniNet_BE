@@ -1,5 +1,7 @@
+using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using System.Text.RegularExpressions;
 using UniNet.Application.Interfaces;
@@ -35,9 +37,59 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         Require(profile is not null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
 
         var account = profile.Account;
-        Require(account is not null && account.Status == AccountStatus.Active,
-            "ACCOUNT_INACTIVE", "Only active accounts can access project tasks.", 403);
+        Require(account is not null && account.Status == AccountStatus.Active &&
+            account.Role == AccountRole.Student,
+            "FORBIDDEN", "Only active Student accounts can access project tasks.", 403);
         return profile;
+    }
+
+    private async Task<IDbContextTransaction> BeginInputMutationAsync(Guid projectId, CancellationToken ct)
+    {
+        var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            var projectLocked = await db.Projects
+                .Where(p => p.Id == projectId)
+                .ExecuteUpdateAsync(update => update.SetProperty(p => p.Status, p => p.Status), ct);
+            Require(projectLocked == 1, "PROJECT_NOT_FOUND", "Project not found.", 404);
+
+            var status = await db.Projects.AsNoTracking()
+                .Where(p => p.Id == projectId)
+                .Select(p => p.Status)
+                .SingleAsync(ct);
+            if (status == ProjectStatus.Active)
+                return transaction;
+
+            Require(status == ProjectStatus.Completed,
+                "INVALID_PROJECT_STATE",
+                "Task and report inputs can only be changed for active projects or during contribution data collection.",
+                409);
+            var cycleId = await db.ContributionCycles.AsNoTracking()
+                .Where(c => c.ProjectId == projectId)
+                .Select(c => (Guid?)c.Id)
+                .SingleOrDefaultAsync(ct);
+            if (cycleId is not null)
+            {
+                var cycleLocked = await db.ContributionCycles
+                    .Where(c => c.Id == cycleId && c.Status == ContributionCycleStatus.CollectingEvaluations)
+                    .ExecuteUpdateAsync(update => update.SetProperty(c => c.Status, c => c.Status), ct);
+                Require(cycleLocked == 1,
+                    "CONTRIBUTION_INPUTS_LOCKED",
+                    "Task and report inputs are locked while contribution results are awaiting review or finalized.",
+                    409);
+                return transaction;
+            }
+
+            throw new ProjectException(
+                "CONTRIBUTION_INPUTS_LOCKED",
+                "Task and report inputs can only be changed while the project is active or contribution data collection is open.",
+                409);
+        }
+        catch
+        {
+            await transaction.DisposeAsync();
+            throw;
+        }
     }
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken ct)
@@ -84,15 +136,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         => status is ProjectTaskStatus.Completed or ProjectTaskStatus.Cancelled;
 
     private static ProjectTaskStatus ResolveEffectiveStatus(ProjectTask task, DateTimeOffset now)
-    {
-        if (task.Status == ProjectTaskStatus.Overdue)
-            return ProjectTaskStatus.Overdue;
-
-        if (IsTerminalStatus(task.Status))
-            return task.Status;
-
-        return task.Deadline <= now ? ProjectTaskStatus.Overdue : task.Status;
-    }
+        => ProjectTaskStatusResolver.Resolve(task, now);
 
     private static void ValidateStatus(ProjectTaskStatus status)
     {
@@ -525,6 +569,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
     public async Task<ProjectTaskResponse> CreateProjectTaskAsync(Guid projectId, Guid accountId, CreateProjectTaskRequest request, CancellationToken ct = default)
     {
         await EnsureProjectLeaderAsync(projectId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
 
         ValidateTitle(request.Title);
         ValidateDescription(request.Description);
@@ -566,6 +611,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             db.ProjectTaskAssignments.AddRange(assignments);
             await db.SaveChangesAsync(ct);
         }
+        await transaction.CommitAsync(ct);
 
         var createdTask = await db.ProjectTasks
             .Include(t => t.Creator)
@@ -578,6 +624,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
     public async Task<ProjectTaskResponse> UpdateProjectTaskAsync(Guid projectId, Guid taskId, Guid accountId, UpdateProjectTaskRequest request, CancellationToken ct = default)
     {
         await EnsureProjectLeaderAsync(projectId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
 
         var task = await db.ProjectTasks
             .Include(t => t.Creator)
@@ -636,6 +683,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         }
 
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return Map(await db.ProjectTasks
             .Include(t => t.Creator)
             .Include(t => t.Assignments).ThenInclude(a => a.User)
@@ -645,6 +693,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
     public async Task DeleteProjectTaskAsync(Guid projectId, Guid taskId, Guid accountId, CancellationToken ct = default)
     {
         await EnsureProjectLeaderAsync(projectId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
 
         var task = await db.ProjectTasks
             .SingleOrDefaultAsync(t => t.Id == taskId && t.ProjectId == projectId, ct);
@@ -653,11 +702,13 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
         db.ProjectTasks.Remove(task);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     public async Task<ProjectTaskResponse> AssignUsersAsync(Guid projectId, Guid taskId, Guid accountId, List<Guid> userIds, CancellationToken ct = default)
     {
         await EnsureProjectLeaderAsync(projectId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
 
         var task = await db.ProjectTasks
             .Include(t => t.Creator)
@@ -690,6 +741,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
         task.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         var updatedTask = await db.ProjectTasks
             .Include(t => t.Creator)
@@ -748,6 +800,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         Guid projectId, Guid taskId, Guid accountId, SubmitTaskReportRequest request, CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
         var activeReportExists = await db.TaskReports.AsNoTracking()
             .AnyAsync(report =>
@@ -771,6 +824,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_ALREADY_SUBMITTED",
             "A report was submitted concurrently. Refresh the report history and try again.",
             ct);
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
     }
@@ -783,6 +837,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
         var now = DateTimeOffset.UtcNow;
         var draft = NewTaskReport(
@@ -794,6 +849,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_ALREADY_SUBMITTED",
             "A report was created concurrently. Refresh the report history and try again.",
             ct);
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, draft.Id, ct));
     }
@@ -807,6 +863,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
         Require(report.SubmittedById == submitter.Id,
             "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can edit a draft.", 403);
@@ -859,6 +916,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
             throw;
         }
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
     }
@@ -871,16 +929,13 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
         Require(report.SubmittedById == submitter.Id,
             "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can submit a draft.", 403);
         Require(report.Status == TaskReportStatus.Draft,
             "TASK_REPORT_DRAFT_NOT_SUBMITTABLE",
             "Only draft reports can be submitted.",
-            409);
-        Require(report.Status == TaskReportStatus.Withdrawn,
-            "TASK_REPORT_WITHDRAWN_NOT_SUBMITTABLE",
-            "Only withdrawn reports can be submitted.",
             409);
         report.Status = TaskReportStatus.Submitted;
         report.SubmittedAt = DateTimeOffset.UtcNow;
@@ -889,6 +944,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The draft changed concurrently. Reload it before submitting again.");
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
     }
@@ -901,6 +957,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
         Require(report.SubmittedById == submitter.Id,
             "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can withdraw it.", 403);
@@ -915,6 +972,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The report was reviewed or changed concurrently and can no longer be withdrawn.");
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
     }
@@ -927,6 +985,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
         Require(report.SubmittedById == submitter.Id,
             "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can delete a draft.", 403);
@@ -943,6 +1002,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The draft changed concurrently and could not be deleted.");
+        await transaction.CommitAsync(ct);
     }
 
     public async Task<TaskReportResponse> ReviseTaskReportAsync(
@@ -954,6 +1014,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         var previous = await GetTaskReportAsync(projectId, taskId, reportId, ct);
         Require(previous.SubmittedById == submitter.Id,
             "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can submit a revision.", 403);
@@ -979,6 +1040,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "A revision was created concurrently. Reload the report history before trying again.",
             ct);
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, revised.Id, ct));
     }
@@ -992,6 +1054,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         CancellationToken ct = default)
     {
         await EnsureProjectLeaderAsync(projectId, accountId, ct);
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
         if (request is null || !Enum.IsDefined(request.Decision))
             throw new ProjectException("INVALID_TASK_REPORT_DECISION", "Report review decision is invalid.");
 
@@ -1029,6 +1092,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The report was reviewed or changed concurrently.");
+        await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, reportId, ct));
     }

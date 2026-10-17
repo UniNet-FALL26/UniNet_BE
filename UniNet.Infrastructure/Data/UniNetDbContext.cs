@@ -27,6 +27,13 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<TaskReport> TaskReports => Set<TaskReport>();
     public DbSet<TaskEvidence> TaskEvidence => Set<TaskEvidence>();
     public DbSet<TaskReportReview> TaskReportReviews => Set<TaskReportReview>();
+    public DbSet<ContributionCycle> ContributionCycles => Set<ContributionCycle>();
+    public DbSet<ContributionParticipant> ContributionParticipants => Set<ContributionParticipant>();
+    public DbSet<ContributionPeerEvaluation> ContributionPeerEvaluations => Set<ContributionPeerEvaluation>();
+    public DbSet<ContributionPeerEvaluationHistory> ContributionPeerEvaluationHistory => Set<ContributionPeerEvaluationHistory>();
+    public DbSet<ContributionCalculationRun> ContributionCalculationRuns => Set<ContributionCalculationRun>();
+    public DbSet<ContributionResult> ContributionResults => Set<ContributionResult>();
+    public DbSet<ContributionReview> ContributionReviews => Set<ContributionReview>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -191,6 +198,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.UpdatedAt)
                 .IsRequired();
 
+            e.Property(x => x.CompletedAt);
+
             // Creator / Leader
             e.HasOne(x => x.Creator)
                 .WithMany()
@@ -210,6 +219,11 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => x.ProjectField);
 
             e.HasIndex(x => x.RecruitmentDeadline);
+
+            e.HasOne(x => x.ContributionCycle)
+                .WithOne(x => x.Project)
+                .HasForeignKey<ContributionCycle>(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<ProjectRoleRequirement>(e =>
         {
@@ -562,6 +576,142 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(x => x.TaskReportId).IsUnique();
+            e.HasIndex(x => x.ReviewerId);
+        });
+        model.Entity<ContributionCycle>(e =>
+        {
+            e.ToTable("ContributionCycles", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionCycles_Status", "\"Status\" BETWEEN 0 AND 2");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.OpenedAt).IsRequired();
+            e.Property(x => x.FormulaVersion).HasMaxLength(32).IsRequired();
+            e.HasOne(x => x.OpenedBy).WithMany().HasForeignKey(x => x.OpenedById).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.ProjectId).IsUnique();
+        });
+        model.Entity<ContributionParticipant>(e =>
+        {
+            e.ToTable("ContributionParticipants", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionParticipants_MembershipStatus", "\"MembershipStatusAtSnapshot\" BETWEEN 0 AND 2");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.RoleAtSnapshot).HasMaxLength(150).IsRequired();
+            e.Property(x => x.MembershipStatusAtSnapshot).HasConversion<short>().IsRequired();
+            e.Property(x => x.JoinedAt).IsRequired();
+            e.HasOne(x => x.Cycle).WithMany(x => x.Participants).HasForeignKey(x => x.CycleId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.CycleId, x.UserId }).IsUnique();
+        });
+        model.Entity<ContributionPeerEvaluation>(e =>
+        {
+            e.ToTable("ContributionPeerEvaluations", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionPeerEvaluations_Score", "\"Score\" BETWEEN 1 AND 5");
+                t.HasCheckConstraint("CK_ContributionPeerEvaluations_NoSelf", "\"EvaluatorUserId\" <> \"EvaluateeUserId\"");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Comment).HasMaxLength(2000);
+            e.Property(x => x.SubmittedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.HasOne(x => x.Cycle).WithMany(x => x.PeerEvaluations).HasForeignKey(x => x.CycleId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ContributionParticipant>().WithMany()
+                .HasForeignKey(x => new { x.CycleId, x.EvaluatorUserId })
+                .HasPrincipalKey(x => new { x.CycleId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ContributionParticipant>().WithMany()
+                .HasForeignKey(x => new { x.CycleId, x.EvaluateeUserId })
+                .HasPrincipalKey(x => new { x.CycleId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Evaluator).WithMany().HasForeignKey(x => x.EvaluatorUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Evaluatee).WithMany().HasForeignKey(x => x.EvaluateeUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.CycleId, x.EvaluatorUserId, x.EvaluateeUserId }).IsUnique();
+            e.HasIndex(x => new { x.CycleId, x.EvaluateeUserId });
+        });
+        model.Entity<ContributionPeerEvaluationHistory>(e =>
+        {
+            e.ToTable("ContributionPeerEvaluationHistory", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionPeerEvaluationHistory_Action", "\"Action\" BETWEEN 0 AND 1");
+                t.HasCheckConstraint("CK_ContributionPeerEvaluationHistory_NewScore", "\"NewScore\" BETWEEN 1 AND 5");
+                t.HasCheckConstraint("CK_ContributionPeerEvaluationHistory_PreviousScore", "\"PreviousScore\" IS NULL OR \"PreviousScore\" BETWEEN 1 AND 5");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Action).HasConversion<short>().IsRequired();
+            e.Property(x => x.PreviousComment).HasMaxLength(2000);
+            e.Property(x => x.NewComment).HasMaxLength(2000);
+            e.Property(x => x.ChangedAt).IsRequired();
+            e.HasOne(x => x.ContributionPeerEvaluation).WithMany(x => x.History)
+                .HasForeignKey(x => x.ContributionPeerEvaluationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ContributionCycle>().WithMany().HasForeignKey(x => x.CycleId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ContributionParticipant>().WithMany()
+                .HasForeignKey(x => new { x.CycleId, x.EvaluatorUserId })
+                .HasPrincipalKey(x => new { x.CycleId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ContributionParticipant>().WithMany()
+                .HasForeignKey(x => new { x.CycleId, x.EvaluateeUserId })
+                .HasPrincipalKey(x => new { x.CycleId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.CycleId, x.EvaluatorUserId, x.EvaluateeUserId, x.ChangedAt });
+        });
+        model.Entity<ContributionCalculationRun>(e =>
+        {
+            e.ToTable("ContributionCalculationRuns", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionCalculationRuns_RunNumber", "\"RunNumber\" > 0");
+                t.HasCheckConstraint("CK_ContributionCalculationRuns_Status", "\"Status\" BETWEEN 0 AND 2");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FormulaVersion).HasMaxLength(32).IsRequired();
+            e.Property(x => x.InputSnapshot).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.InputHash).HasMaxLength(64).IsRequired();
+            e.Property(x => x.WarningsJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property(x => x.CalculatedAt).IsRequired();
+            e.HasOne(x => x.Cycle).WithMany(x => x.CalculationRuns).HasForeignKey(x => x.CycleId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.CalculatedBy).WithMany().HasForeignKey(x => x.CalculatedById).OnDelete(DeleteBehavior.Restrict);
+            e.HasAlternateKey(x => new { x.Id, x.CycleId });
+            e.HasIndex(x => new { x.CycleId, x.RunNumber }).IsUnique();
+            e.HasIndex(x => new { x.CycleId, x.Status });
+        });
+        model.Entity<ContributionResult>(e =>
+        {
+            e.ToTable("ContributionResults", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionResults_Scores",
+                    "CAST(\"TaskExecutionScore\" AS NUMERIC) BETWEEN 0 AND 100 AND " +
+                    "CAST(\"ApprovedDeliverablesScore\" AS NUMERIC) BETWEEN 0 AND 100 AND " +
+                    "CAST(\"PeerEvaluationScore\" AS NUMERIC) BETWEEN 0 AND 100 AND " +
+                    "CAST(\"TotalScore\" AS NUMERIC) BETWEEN 0 AND 100");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.TaskExecutionScore).HasPrecision(5, 2).IsRequired();
+            e.Property(x => x.ApprovedDeliverablesScore).HasPrecision(5, 2).IsRequired();
+            e.Property(x => x.PeerEvaluationScore).HasPrecision(5, 2).IsRequired();
+            e.Property(x => x.TotalScore).HasPrecision(5, 2).IsRequired();
+            e.Property(x => x.CalculationDetails).HasColumnType("jsonb").IsRequired();
+            e.HasOne(x => x.Run).WithMany(x => x.Results)
+                .HasForeignKey(x => new { x.RunId, x.CycleId })
+                .HasPrincipalKey(x => new { x.Id, x.CycleId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ContributionParticipant>().WithMany()
+                .HasForeignKey(x => new { x.CycleId, x.UserId })
+                .HasPrincipalKey(x => new { x.CycleId, x.UserId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.RunId, x.UserId }).IsUnique();
+        });
+        model.Entity<ContributionReview>(e =>
+        {
+            e.ToTable("ContributionReviews", t =>
+            {
+                t.HasCheckConstraint("CK_ContributionReviews_Decision", "\"Decision\" BETWEEN 0 AND 1");
+                t.HasCheckConstraint("CK_ContributionReviews_RevisionFeedback",
+                    "\"Decision\" <> 1 OR length(trim(\"Feedback\")) > 0");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Decision).HasConversion<short>().IsRequired();
+            e.Property(x => x.Feedback).HasMaxLength(2000);
+            e.Property(x => x.ReviewedAt).IsRequired();
+            e.HasOne(x => x.Run).WithMany(x => x.Reviews).HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Reviewer).WithMany().HasForeignKey(x => x.ReviewerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.RunId).IsUnique();
             e.HasIndex(x => x.ReviewerId);
         });
         model.Entity<ProjectModeration>(e =>
@@ -983,10 +1133,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             entity.ToTable("CommunityPosts");
             entity.HasKey(e => e.Id);
 
-            // Ép ki?u list string thành JSONB
+            // ï¿½p ki?u list string thï¿½nh JSONB
             entity.Property(e => e.MediaUrlsJson).HasColumnType("jsonb");
 
-            // Ràng bu?c Check Constraints
+            // Rï¿½ng bu?c Check Constraints
             entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPosts_AuthorActorType", "\"AuthorActorType\" BETWEEN 0 AND 1"));
             entity.ToTable(t => t.HasCheckConstraint("CK_CommunityPosts_Status", "\"Status\" BETWEEN 0 AND 3"));
 
@@ -1024,7 +1174,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             entity.HasOne(e => e.AuthorUser)
                   .WithMany()
                   .HasForeignKey(e => e.AuthorUserId)
-                  .OnDelete(DeleteBehavior.Restrict); // Dùng Restrict ð? tránh l?i multiple cascade paths
+                  .OnDelete(DeleteBehavior.Restrict); // Dï¿½ng Restrict ï¿½? trï¿½nh l?i multiple cascade paths
 
             entity.HasOne(e => e.ParentComment)
                   .WithMany(c => c.Replies)
@@ -1037,7 +1187,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // 4. CommunityPostReaction (Khóa chính kép / Composite Key)
+        // 4. CommunityPostReaction (Khï¿½a chï¿½nh kï¿½p / Composite Key)
         model.Entity<CommunityPostReaction>(entity =>
         {
             entity.ToTable("CommunityPostReactions");
@@ -1054,7 +1204,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // 5. CommunityPostBookmark (Khóa chính kép / Composite Key)
+        // 5. CommunityPostBookmark (Khï¿½a chï¿½nh kï¿½p / Composite Key)
         model.Entity<CommunityPostBookmark>(entity =>
         {
             entity.ToTable("CommunityPostBookmarks");

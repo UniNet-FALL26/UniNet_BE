@@ -31,6 +31,7 @@ builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
@@ -135,6 +136,17 @@ app.UseSwaggerUI();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (error?.GetBaseException() is Npgsql.PostgresException
+        { SqlState: Npgsql.PostgresErrorCodes.SerializationFailure or Npgsql.PostgresErrorCodes.DeadlockDetected })
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            code = "CONCURRENT_MODIFICATION",
+            message = "A concurrent database update prevented this operation. Retry the request."
+        });
+        return;
+    }
     if (error is TransactionException transactionError)
     {
         context.Response.StatusCode = transactionError.Status;
