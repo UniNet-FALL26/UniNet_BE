@@ -611,6 +611,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             db.ProjectTaskAssignments.AddRange(assignments);
             await db.SaveChangesAsync(ct);
         }
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         var createdTask = await db.ProjectTasks
@@ -683,6 +684,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         }
 
         await db.SaveChangesAsync(ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
         return Map(await db.ProjectTasks
             .Include(t => t.Creator)
@@ -702,6 +704,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
         db.ProjectTasks.Remove(task);
         await db.SaveChangesAsync(ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
     }
 
@@ -741,6 +744,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
         task.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         var updatedTask = await db.ProjectTasks
@@ -824,6 +828,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_ALREADY_SUBMITTED",
             "A report was submitted concurrently. Refresh the report history and try again.",
             ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
@@ -849,6 +854,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_ALREADY_SUBMITTED",
             "A report was created concurrently. Refresh the report history and try again.",
             ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, draft.Id, ct));
@@ -916,6 +922,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
             throw;
         }
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
@@ -944,6 +951,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The draft changed concurrently. Reload it before submitting again.");
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
@@ -972,6 +980,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The report was reviewed or changed concurrently and can no longer be withdrawn.");
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
@@ -1002,6 +1011,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The draft changed concurrently and could not be deleted.");
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
     }
 
@@ -1040,6 +1050,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "A revision was created concurrently. Reload the report history before trying again.",
             ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, revised.Id, ct));
@@ -1060,7 +1071,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
         var reviewer = await GetProfileAsync(accountId, ct);
         var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
-        
+
             Require(report.Status == TaskReportStatus.Submitted,
             "TASK_REPORT_NOT_REVIEWABLE", "Only submitted reports can be reviewed.", 409);
 
@@ -1092,6 +1103,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             ct,
             "TASK_REPORT_CONCURRENT_MODIFICATION",
             "The report was reviewed or changed concurrently.");
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, reportId, ct));

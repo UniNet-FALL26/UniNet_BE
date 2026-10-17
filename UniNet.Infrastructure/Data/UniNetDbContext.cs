@@ -35,6 +35,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ContributionResult> ContributionResults => Set<ContributionResult>();
     public DbSet<ContributionReview> ContributionReviews => Set<ContributionReview>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
+    public DbSet<ProjectEvidenceModeration> ProjectEvidenceModerations => Set<ProjectEvidenceModeration>();
+    public DbSet<EvidenceModerationAttempt> EvidenceModerationAttempts => Set<EvidenceModerationAttempt>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
@@ -63,6 +65,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     {
         model.ApplyConfiguration(new VerificationAdminActionConfiguration());
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
+        model.ApplyConfiguration(new ProjectEvidenceModerationConfiguration());
+        model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);

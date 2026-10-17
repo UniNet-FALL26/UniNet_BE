@@ -24,52 +24,60 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             ?? throw NotFound();
         Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can complete it.", 403);
         var now = DateTimeOffset.UtcNow;
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var updated = await db.Projects
-            .Where(p => p.Id == request.ProjectId && p.CreatorId == actor.Id && p.Status == ProjectStatus.Active)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, ProjectStatus.Completed)
-                .SetProperty(p => p.UpdatedAt, now)
-                .SetProperty(p => p.CompletedAt, now), ct);
-        Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
-
-        var members = await db.ProjectMembers.AsNoTracking()
-            .Where(m => m.ProjectId == request.ProjectId &&
-                m.JoinedAt <= now &&
-                m.UserId != project.CreatorId &&
-                m.Status != ProjectMemberStatus.Kicked)
-            .OrderBy(m => m.UserId)
-            .ToListAsync(ct);
-        var cycle = new ContributionCycle
+        try
         {
-            ProjectId = request.ProjectId,
-            OpenedById = actor.Id,
-            OpenedAt = now,
-            FormulaVersion = "1",
-            Status = ContributionCycleStatus.CollectingEvaluations,
-            Participants =
-            [
-                new ContributionParticipant
-                {
-                    UserId = project.CreatorId,
-                    RoleAtSnapshot = "Creator",
-                    MembershipStatusAtSnapshot = ProjectMemberStatus.Active,
-                    JoinedAt = project.CreatedAt,
-                    IsLeader = true
-                },
-                .. members.Select(member => new ContributionParticipant
-                {
-                    UserId = member.UserId,
-                    RoleAtSnapshot = member.Role,
-                    MembershipStatusAtSnapshot = member.Status,
-                    JoinedAt = member.JoinedAt,
-                    LeftAt = member.LeftAt
-                })
-            ]
-        };
-        db.ContributionCycles.Add(cycle);
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return new(request.ProjectId, ProjectStatus.Completed, now, now);
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var updated = await db.Projects
+                .Where(p => p.Id == request.ProjectId && p.CreatorId == actor.Id && p.Status == ProjectStatus.Active)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, ProjectStatus.Completed)
+                    .SetProperty(p => p.UpdatedAt, now)
+                    .SetProperty(p => p.CompletedAt, now), ct);
+            Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
+
+            var members = await db.ProjectMembers.AsNoTracking()
+                .Where(m => m.ProjectId == request.ProjectId &&
+                    m.JoinedAt <= now &&
+                    m.UserId != project.CreatorId &&
+                    m.Status != ProjectMemberStatus.Kicked)
+                .OrderBy(m => m.UserId)
+                .ToListAsync(ct);
+            var cycle = new ContributionCycle
+            {
+                ProjectId = request.ProjectId,
+                OpenedById = actor.Id,
+                OpenedAt = now,
+                FormulaVersion = "1",
+                Status = ContributionCycleStatus.CollectingEvaluations,
+                Participants =
+                [
+                    new ContributionParticipant
+                    {
+                        UserId = project.CreatorId,
+                        RoleAtSnapshot = "Creator",
+                        MembershipStatusAtSnapshot = ProjectMemberStatus.Active,
+                        JoinedAt = project.CreatedAt,
+                        IsLeader = true
+                    },
+                    .. members.Select(member => new ContributionParticipant
+                    {
+                        UserId = member.UserId,
+                        RoleAtSnapshot = member.Role,
+                        MembershipStatusAtSnapshot = member.Status,
+                        JoinedAt = member.JoinedAt,
+                        LeftAt = member.LeftAt
+                    })
+                ]
+            };
+            db.ContributionCycles.Add(cycle);
+            await db.SaveChangesAsync(ct);
+            await new EvidenceModerationSource(db, configuration).RefreshAsync(request.ProjectId, now, ct, createInitial: true);
+            await transaction.CommitAsync(ct);
+            return new(request.ProjectId, ProjectStatus.Completed, now, now);
+        }
+        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        {
+            throw new ProjectException("EVIDENCE_MODERATION_CONFLICT", "Project evidence changed concurrently. Reload and try again.", 409);
+        }
     }
 
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -219,7 +227,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Include(p => p.JoinRequests).ThenInclude(r => r.User)
             .AsSplitQuery()
             .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
-         
+
             .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
@@ -485,7 +493,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(r => new RoleRequirementInfo(r.Id, r.Role, r.Quantity, r.Requirements))
             .ToList();
 
-      
+
 
         var members = project.Members
             .Where(m => m.Status == ProjectMemberStatus.Active)

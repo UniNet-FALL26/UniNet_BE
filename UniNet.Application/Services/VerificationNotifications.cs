@@ -32,4 +32,14 @@ public sealed class VerificationNotifications(UniNetDbContext db)
             .OrderByDescending(n => n.CreatedAt).ThenBy(n => n.Id)
             .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue)).Take(pageSize).ToListAsync(ct);
     }
+
+    public async Task EvidenceAdminsAsync(Guid moderationId, string key, string message, DateTimeOffset now, CancellationToken ct)
+    {
+        var admins = await db.UserProfiles.Where(p => p.Account.Role == AccountRole.Admin && p.Account.Status == AccountStatus.Active)
+            .Select(p => p.Id).ToListAsync(ct);
+        foreach (var admin in admins)
+            if (!await db.Set<VerificationNotification>().AnyAsync(n => n.EventKey == key && n.RecipientUserId == admin, ct))
+                db.Set<VerificationNotification>().Add(new() { Id = Guid.NewGuid(), EvidenceModerationId = moderationId,
+                    RecipientUserId = admin, EventKey = key, Message = message, CreatedAt = now });
+    }
 }

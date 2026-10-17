@@ -21,8 +21,15 @@ builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<VerificationDeadlineTasks>();
 builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<VerificationAiTasks>();
+builder.Services.AddScoped<EvidenceModerationTasks>();
+builder.Services.AddScoped<EvidenceModerationChecks>();
+builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
-builder.Services.AddHttpClient<IVerificationAiReviewer, GeminiVerificationAiReviewer>(client => client.Timeout = TimeSpan.FromSeconds(35))
+builder.Services.AddHttpClient<GeminiVerificationAiReviewer>(client => client.Timeout = TimeSpan.FromSeconds(35))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddTransient<IVerificationAiReviewer>(s => s.GetRequiredService<GeminiVerificationAiReviewer>());
+builder.Services.AddTransient<IEvidenceContentReviewer>(s => s.GetRequiredService<GeminiVerificationAiReviewer>());
+builder.Services.AddHttpClient<IEvidenceUrlChecker, GoogleSafeBrowsingUrlChecker>(client => client.Timeout = TimeSpan.FromSeconds(35))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
