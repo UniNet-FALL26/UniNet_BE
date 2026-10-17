@@ -12,6 +12,21 @@ namespace UniNet.Application.Services;
 
 public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration configuration) : IProjectTaskService
 {
+    private async Task SaveSourceChangesAsync(Guid projectId, CancellationToken ct)
+    {
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+            await db.SaveChangesAsync(ct);
+            await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        {
+            throw new ProjectException("EVIDENCE_MODERATION_CONFLICT", "Project evidence changed concurrently. Reload and try again.", 409);
+        }
+    }
+
     private sealed record ValidatedEvidence(
         string FileUrl,
         string? PublicId,
@@ -445,7 +460,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         };
 
         db.ProjectTasks.Add(task);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
 
         if (assignedUserIds.Count > 0)
         {
@@ -459,7 +474,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
                 .ToList();
 
             db.ProjectTaskAssignments.AddRange(assignments);
-            await db.SaveChangesAsync(ct);
+            await SaveSourceChangesAsync(projectId, ct);
         }
 
         var createdTask = await db.ProjectTasks
@@ -530,7 +545,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             }
         }
 
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
         return Map(await db.ProjectTasks
             .Include(t => t.Creator)
             .Include(t => t.Assignments).ThenInclude(a => a.User)
@@ -547,7 +562,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         Require(task is not null, "PROJECT_TASK_NOT_FOUND", "Task not found.", 404);
 
         db.ProjectTasks.Remove(task);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
     }
 
     public async Task<ProjectTaskResponse> AssignUsersAsync(Guid projectId, Guid taskId, Guid accountId, List<Guid> userIds, CancellationToken ct = default)
@@ -584,7 +599,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         }
 
         task.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
 
         var updatedTask = await db.ProjectTasks
             .Include(t => t.Creator)
@@ -668,7 +683,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             }).ToList()
         };
         db.TaskReports.Add(report);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
     }
@@ -717,7 +732,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             }).ToList()
         };
         db.TaskReports.Add(revised);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, revised.Id, ct));
     }
@@ -765,7 +780,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             Feedback = string.IsNullOrWhiteSpace(feedback) ? null : feedback,
             ReviewedAt = now
         });
-        await db.SaveChangesAsync(ct);
+        await SaveSourceChangesAsync(projectId, ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, reportId, ct));
     }

@@ -1,5 +1,7 @@
 # API trạng thái project và các tác vụ tự động
 
+Phần kiểm duyệt evidence cấp 1 khi Active → Completed được bổ sung trong [project-evidence-moderation.md](project-evidence-moderation.md). Đây là tác vụ riêng với completeness pre-check và moderation đầu vào mô tả bên dưới.
+
 ## PATCH /api/projects/status
 
 Body: `{"projectId":"<guid>","status":2}` (`2` = Completed).

@@ -24,11 +24,21 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             ?? throw NotFound();
         Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can complete it.", 403);
         var now = DateTimeOffset.UtcNow;
-        var updated = await db.Projects.Where(p => p.Id == request.ProjectId && p.CreatorId == actor.Id && p.Status == ProjectStatus.Active)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, ProjectStatus.Completed)
-                .SetProperty(p => p.UpdatedAt, now), ct);
-        Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
-        return new(request.ProjectId, ProjectStatus.Completed, now);
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var updated = await db.Projects.Where(p => p.Id == request.ProjectId && p.CreatorId == actor.Id && p.Status == ProjectStatus.Active)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, ProjectStatus.Completed)
+                    .SetProperty(p => p.UpdatedAt, now), ct);
+            Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
+            await new EvidenceModerationSource(db, configuration).RefreshAsync(request.ProjectId, now, ct, createInitial: true);
+            await transaction.CommitAsync(ct);
+            return new(request.ProjectId, ProjectStatus.Completed, now);
+        }
+        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        {
+            throw new ProjectException("EVIDENCE_MODERATION_CONFLICT", "Project evidence changed concurrently. Reload and try again.", 409);
+        }
     }
 
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
