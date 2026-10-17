@@ -434,6 +434,340 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionCalculationRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CalculatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CalculatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FormulaVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("InputHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("InputSnapshot")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("RunNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("WarningsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CalculatedById");
+
+                    b.HasIndex("CycleId", "RunNumber")
+                        .IsUnique();
+
+                    b.HasIndex("CycleId", "Status");
+
+                    b.ToTable("ContributionCalculationRuns", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionCalculationRuns_RunNumber", "\"RunNumber\" > 0");
+
+                            t.HasCheckConstraint("CK_ContributionCalculationRuns_Status", "\"Status\" BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionCycle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("FinalizedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FormulaVersion")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("OpenedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OpenedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OpenedById");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("ContributionCycles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionCycles_Status", "\"Status\" BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionParticipant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsLeader")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LeftAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("MembershipStatusAtSnapshot")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("RoleAtSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CycleId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("ContributionParticipants", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionParticipants_MembershipStatus", "\"MembershipStatusAtSnapshot\" BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionPeerEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EvaluateeUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EvaluatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Score")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EvaluateeUserId");
+
+                    b.HasIndex("EvaluatorUserId");
+
+                    b.HasIndex("CycleId", "EvaluateeUserId");
+
+                    b.HasIndex("CycleId", "EvaluatorUserId", "EvaluateeUserId")
+                        .IsUnique();
+
+                    b.ToTable("ContributionPeerEvaluations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionPeerEvaluations_NoSelf", "\"EvaluatorUserId\" <> \"EvaluateeUserId\"");
+
+                            t.HasCheckConstraint("CK_ContributionPeerEvaluations_Score", "\"Score\" BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionPeerEvaluationHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Action")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ContributionPeerEvaluationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EvaluateeUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EvaluatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NewComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("NewScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PreviousComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int?>("PreviousScore")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ContributionPeerEvaluationId");
+
+                    b.HasIndex("CycleId", "EvaluateeUserId");
+
+                    b.HasIndex("CycleId", "EvaluatorUserId", "EvaluateeUserId", "ChangedAt");
+
+                    b.ToTable("ContributionPeerEvaluationHistory", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionPeerEvaluationHistory_Action", "\"Action\" BETWEEN 0 AND 1");
+
+                            t.HasCheckConstraint("CK_ContributionPeerEvaluationHistory_NewScore", "\"NewScore\" BETWEEN 1 AND 5");
+
+                            t.HasCheckConstraint("CK_ContributionPeerEvaluationHistory_PreviousScore", "\"PreviousScore\" IS NULL OR \"PreviousScore\" BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ApprovedDeliverablesScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("CalculationDetails")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("CycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("PeerEvaluationScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TaskExecutionScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<decimal>("TotalScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CycleId", "UserId");
+
+                    b.HasIndex("RunId", "CycleId");
+
+                    b.HasIndex("RunId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("ContributionResults", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionResults_Scores", "CAST(\"TaskExecutionScore\" AS NUMERIC) BETWEEN 0 AND 100 AND CAST(\"ApprovedDeliverablesScore\" AS NUMERIC) BETWEEN 0 AND 100 AND CAST(\"PeerEvaluationScore\" AS NUMERIC) BETWEEN 0 AND 100 AND CAST(\"TotalScore\" AS NUMERIC) BETWEEN 0 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Decision")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Feedback")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ReviewerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReviewerId");
+
+                    b.HasIndex("RunId")
+                        .IsUnique();
+
+                    b.ToTable("ContributionReviews", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionReviews_Decision", "\"Decision\" BETWEEN 0 AND 1");
+
+                            t.HasCheckConstraint("CK_ContributionReviews_RevisionFeedback", "\"Decision\" <> 1 OR length(trim(\"Feedback\")) > 0");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.Property<Guid>("Id")
@@ -617,6 +951,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1324,12 +1661,31 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasMaxLength(5000)
                         .HasColumnType("character varying(5000)");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ParentReportId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("ProjectTaskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReportGroupId")
                         .HasColumnType("uuid");
 
                     b.Property<short>("Status")
@@ -1349,16 +1705,22 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DeletedById");
+
+                    b.HasIndex("ParentReportId");
+
                     b.HasIndex("SubmittedById");
 
                     b.HasIndex("ProjectTaskId", "SubmittedAt");
 
-                    b.HasIndex("ProjectTaskId", "SubmittedById", "Version")
+                    b.HasIndex("ReportGroupId", "Version")
                         .IsUnique();
 
                     b.ToTable("TaskReports", null, t =>
                         {
-                            t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 2");
+                            t.HasCheckConstraint("CK_TaskReports_DeletedMetadata", "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR (\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 4");
 
                             t.HasCheckConstraint("CK_TaskReports_Version", "\"Version\" > 0");
                         });
@@ -2219,6 +2581,189 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("ReporterUser");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionCalculationRun", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "CalculatedBy")
+                        .WithMany()
+                        .HasForeignKey("CalculatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionCycle", "Cycle")
+                        .WithMany("CalculationRuns")
+                        .HasForeignKey("CycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CalculatedBy");
+
+                    b.Navigation("Cycle");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionCycle", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "OpenedBy")
+                        .WithMany()
+                        .HasForeignKey("OpenedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Project", "Project")
+                        .WithOne("ContributionCycle")
+                        .HasForeignKey("UniNet.Domain.Entities.ContributionCycle", "ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OpenedBy");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionParticipant", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.ContributionCycle", "Cycle")
+                        .WithMany("Participants")
+                        .HasForeignKey("CycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Cycle");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionPeerEvaluation", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.ContributionCycle", "Cycle")
+                        .WithMany("PeerEvaluations")
+                        .HasForeignKey("CycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "Evaluatee")
+                        .WithMany()
+                        .HasForeignKey("EvaluateeUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "Evaluator")
+                        .WithMany()
+                        .HasForeignKey("EvaluatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("CycleId", "EvaluateeUserId")
+                        .HasPrincipalKey("CycleId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("CycleId", "EvaluatorUserId")
+                        .HasPrincipalKey("CycleId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ContributionPeerEvaluations_ContributionParticipants_Cycle~1");
+
+                    b.Navigation("Cycle");
+
+                    b.Navigation("Evaluatee");
+
+                    b.Navigation("Evaluator");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionPeerEvaluationHistory", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionPeerEvaluation", "ContributionPeerEvaluation")
+                        .WithMany("History")
+                        .HasForeignKey("ContributionPeerEvaluationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionCycle", null)
+                        .WithMany()
+                        .HasForeignKey("CycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("CycleId", "EvaluateeUserId")
+                        .HasPrincipalKey("CycleId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("CycleId", "EvaluatorUserId")
+                        .HasPrincipalKey("CycleId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ContributionPeerEvaluationHistory_ContributionParticipants~1");
+
+                    b.Navigation("ContributionPeerEvaluation");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionResult", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("CycleId", "UserId")
+                        .HasPrincipalKey("CycleId", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionCalculationRun", "Run")
+                        .WithMany("Results")
+                        .HasForeignKey("RunId", "CycleId")
+                        .HasPrincipalKey("Id", "CycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionReview", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "Reviewer")
+                        .WithMany()
+                        .HasForeignKey("ReviewerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ContributionCalculationRun", "Run")
+                        .WithMany("Reviews")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Reviewer");
+
+                    b.Navigation("Run");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "Partner")
@@ -2541,6 +3086,16 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.TaskReport", b =>
                 {
+                    b.HasOne("UniNet.Domain.UserProfile", "DeletedBy")
+                        .WithMany()
+                        .HasForeignKey("DeletedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.TaskReport", "ParentReport")
+                        .WithMany("ChildReports")
+                        .HasForeignKey("ParentReportId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UniNet.Domain.Entities.ProjectTask", "ProjectTask")
                         .WithMany("Reports")
                         .HasForeignKey("ProjectTaskId")
@@ -2552,6 +3107,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasForeignKey("SubmittedById")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("DeletedBy");
+
+                    b.Navigation("ParentReport");
 
                     b.Navigation("ProjectTask");
 
@@ -2832,6 +3391,27 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Replies");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionCalculationRun", b =>
+                {
+                    b.Navigation("Results");
+
+                    b.Navigation("Reviews");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionCycle", b =>
+                {
+                    b.Navigation("CalculationRuns");
+
+                    b.Navigation("Participants");
+
+                    b.Navigation("PeerEvaluations");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ContributionPeerEvaluation", b =>
+                {
+                    b.Navigation("History");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.Navigation("Applications");
@@ -2848,6 +3428,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>
                 {
+                    b.Navigation("ContributionCycle");
+
                     b.Navigation("Invitations");
 
                     b.Navigation("JoinRequests");
@@ -2881,6 +3463,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.TaskReport", b =>
                 {
+                    b.Navigation("ChildReports");
+
                     b.Navigation("Evidence");
 
                     b.Navigation("Reviews");

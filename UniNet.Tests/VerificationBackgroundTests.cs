@@ -47,6 +47,58 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         var service = new ProjectService(f.Db, null!, f.Configuration);
         f.Project.Status = ProjectStatus.Active;
+        var joinedAt = DateTimeOffset.UtcNow.AddDays(-2);
+        f.Db.ProjectMembers.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = f.Project.Id,
+            UserId = f.Other.Profile!.Id,
+            Role = "Developer",
+            Status = ProjectMemberStatus.Left,
+            JoinedAt = joinedAt,
+            LeftAt = joinedAt.AddDays(1),
+            CreatedAt = joinedAt,
+            UpdatedAt = joinedAt.AddDays(1)
+        });
+        var kickedAccount = new Account
+        {
+            Email = "kicked@example.com",
+            Role = AccountRole.Student,
+            Status = AccountStatus.Active,
+            Profile = new UserProfile
+            {
+                FullName = "Kicked Member",
+                Nickname = "kicked",
+                IsVerified = true,
+                CreatedAt = joinedAt,
+                UpdatedAt = joinedAt
+            }
+        };
+        kickedAccount.Profile.AccountId = kickedAccount.Id;
+        f.Db.Accounts.Add(kickedAccount);
+        f.Db.ProjectMembers.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = f.Project.Id,
+            UserId = kickedAccount.Profile.Id,
+            Role = "Designer",
+            Status = ProjectMemberStatus.Kicked,
+            JoinedAt = joinedAt,
+            LeftAt = joinedAt.AddDays(1),
+            CreatedAt = joinedAt,
+            UpdatedAt = joinedAt.AddDays(1)
+        });
+        f.Db.ProjectMembers.Add(new ProjectMember
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = f.Project.Id,
+            UserId = f.Project.CreatorId,
+            Role = "Creator",
+            Status = ProjectMemberStatus.Active,
+            JoinedAt = joinedAt,
+            CreatedAt = joinedAt,
+            UpdatedAt = joinedAt
+        });
         await f.Db.SaveChangesAsync();
         var forbidden = await Assert.ThrowsAsync<ProjectException>(() => service.UpdateStatusAsync(f.Other.Id, new(f.Project.Id, ProjectStatus.Completed), default));
         Assert.Equal(403, forbidden.Status);
@@ -54,9 +106,19 @@ public sealed partial class ProjectVerificationTests
             await Assert.ThrowsAsync<ProjectException>(() => service.UpdateStatusAsync(f.Owner.Id, new(f.Project.Id, target), default));
         var result = await service.UpdateStatusAsync(f.Owner.Id, new(f.Project.Id, ProjectStatus.Completed), default);
         Assert.Equal(ProjectStatus.Completed, result.Status);
+        Assert.NotNull(result.CompletedAt);
         await Assert.ThrowsAsync<ProjectException>(() => service.UpdateStatusAsync(f.Owner.Id, new(f.Project.Id, ProjectStatus.Completed), default));
         f.Db.ChangeTracker.Clear();
-        Assert.Equal(ProjectStatus.Completed, (await f.Db.Projects.SingleAsync()).Status);
+        var completedProject = await f.Db.Projects.SingleAsync();
+        Assert.Equal(ProjectStatus.Completed, completedProject.Status);
+        Assert.Equal(result.CompletedAt, completedProject.CompletedAt);
+        var cycle = await f.Db.ContributionCycles.Include(c => c.Participants).SingleAsync();
+        Assert.Equal(result.CompletedAt, cycle.OpenedAt);
+        Assert.Equal(f.Owner.Profile!.Id, cycle.OpenedById);
+        Assert.Equal(2, cycle.Participants.Count);
+        Assert.Single(cycle.Participants, p => p.IsLeader && p.UserId == f.Project.CreatorId);
+        Assert.Single(cycle.Participants, p => p.UserId == f.Other.Profile!.Id && p.LeftAt != null);
+        Assert.DoesNotContain(cycle.Participants, p => p.UserId == kickedAccount.Profile.Id);
     }
 
     [Fact]

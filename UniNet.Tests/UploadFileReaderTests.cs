@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Buffers.Binary;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using UniNet.API.Services;
@@ -10,6 +11,112 @@ namespace UniNet.Tests;
 public sealed class UploadFileReaderTests
 {
     private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==");
+
+    [Theory]
+    [InlineData("clip.mp4", "video/mp4", "isom")]
+    [InlineData("clip.MOV", "video/quicktime", "qt  ")]
+    public async Task ReadsIsoBaseMediaVideoContainers(string fileName, string contentType, string brand)
+    {
+        var upload = await UploadFileReader.Read(File(IsoBaseMediaFile(brand), fileName, contentType), default);
+
+        Assert.Equal(Path.GetExtension(fileName)[1..].ToLowerInvariant(), upload.Format);
+        Assert.Equal("video", upload.ResourceType);
+        Assert.Equal(fileName, upload.FileName);
+    }
+
+    [Fact]
+    public async Task ReadsWebmByEbmlContainerAndDocType()
+    {
+        var upload = await UploadFileReader.Read(File(WebmFile(), "clip.webm", "video/webm"), default);
+
+        Assert.Equal("webm", upload.Format);
+        Assert.Equal("video", upload.ResourceType);
+    }
+
+    [Theory]
+    [InlineData("clip.MP4", "video/mp4", "isom", "mp4")]
+    [InlineData("clip.WEBM", "video/webm", "webm", "webm")]
+    [InlineData("clip.MOV", "video/quicktime", "qt  ", "mov")]
+    public async Task VideoExtensionsAreCaseInsensitive(
+        string fileName,
+        string contentType,
+        string brand,
+        string format)
+    {
+        var bytes = format == "webm" ? WebmFile() : IsoBaseMediaFile(brand);
+
+        var upload = await UploadFileReader.Read(File(bytes, fileName, contentType), default);
+
+        Assert.Equal(format, upload.Format);
+        Assert.Equal("video", upload.ResourceType);
+    }
+
+    [Theory]
+    [InlineData("clip.mp4", "video/mp4")]
+    [InlineData("clip.webm", "video/webm")]
+    [InlineData("clip.mov", "video/quicktime")]
+    public async Task RejectsEmptyVideos(string fileName, string contentType)
+    {
+        var error = await Assert.ThrowsAsync<AuthException>(() => UploadFileReader.Read(
+            File([], fileName, contentType), default));
+
+        Assert.Equal("INVALID_VIDEO", error.Code);
+    }
+
+    [Theory]
+    [InlineData("clip.mp4", "video/mp4")]
+    [InlineData("clip.webm", "video/webm")]
+    [InlineData("clip.mov", "video/quicktime")]
+    public async Task RejectsSpoofedVideoContent(string fileName, string contentType)
+    {
+        var error = await Assert.ThrowsAsync<AuthException>(() => UploadFileReader.Read(
+            File(Encoding.ASCII.GetBytes("not a video container"), fileName, contentType), default));
+
+        Assert.Equal("INVALID_VIDEO", error.Code);
+    }
+
+    [Fact]
+    public async Task RejectsVideoWithMismatchedMimeType()
+    {
+        var error = await Assert.ThrowsAsync<AuthException>(() => UploadFileReader.Read(
+            File(IsoBaseMediaFile("isom"), "clip.mp4", "application/octet-stream"), default));
+
+        Assert.Equal("INVALID_VIDEO", error.Code);
+    }
+
+    [Fact]
+    public async Task EnforcesConfiguredVideoSizeLimit()
+    {
+        const int maxBytes = 32;
+        var bytes = IsoBaseMediaFile("isom", maxBytes + 1);
+
+        var error = await Assert.ThrowsAsync<AuthException>(() => UploadFileReader.Read(
+            File(bytes, "clip.mp4", "video/mp4"), default, maxBytes));
+
+        Assert.Equal("INVALID_VIDEO", error.Code);
+    }
+
+    [Fact]
+    public async Task RejectsUnsupportedVideoExtension()
+    {
+        var error = await Assert.ThrowsAsync<AuthException>(() => UploadFileReader.Read(
+            File(IsoBaseMediaFile("isom"), "clip.avi", "video/x-msvideo"), default));
+
+        Assert.Equal("INVALID_VIDEO", error.Code);
+    }
+
+    [Fact]
+    public async Task RejectsVideoLargerThanConfiguredLimit()
+    {
+        const int maxBytes = 50 * 1024 * 1024;
+        var bytes = IsoBaseMediaFile("isom", maxBytes + 1);
+
+        var error = await Assert.ThrowsAsync<AuthException>(() => UploadFileReader.Read(
+            File(bytes, "clip.mp4", "video/mp4"), default));
+
+        Assert.Equal("INVALID_VIDEO", error.Code);
+    }
+
 
     [Fact]
     public async Task ReadsImagesByContentAndKeepsTheirExistingUploadFormat()
@@ -164,6 +271,26 @@ public sealed class UploadFileReaderTests
             Headers = new HeaderDictionary(),
             ContentType = contentType
         };
+
+    private static byte[] IsoBaseMediaFile(string brand, int? totalLength = null)
+    {
+        var length = Math.Max(totalLength ?? 24, 16);
+        var bytes = new byte[length];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, 16);
+        Encoding.ASCII.GetBytes("ftyp").CopyTo(bytes, 4);
+        Encoding.ASCII.GetBytes(brand).CopyTo(bytes, 8);
+        BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(12), 0);
+        if (length >= 20)
+            Encoding.ASCII.GetBytes(brand).CopyTo(bytes, 16);
+        return bytes;
+    }
+
+    private static byte[] WebmFile()
+        => [
+            0x1A, 0x45, 0xDF, 0xA3, 0x87,
+            0x42, 0x82, 0x84, (byte)'w', (byte)'e', (byte)'b', (byte)'m',
+            0x18, 0x53, 0x80, 0x67, 0xFF
+        ];
 
     private static string MimeFor(string extension) => extension switch
     {
