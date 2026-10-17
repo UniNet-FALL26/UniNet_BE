@@ -189,7 +189,7 @@ public sealed class PortfolioHttpTests
         var confirmed = await owner.PostAsJsonAsync("api/ai-images/confirm", new { sessionId = id }); confirmed.EnsureSuccessStatusCode();
         using var result = System.Text.Json.JsonDocument.Parse(await confirmed.Content.ReadAsStringAsync());
         var url = result.RootElement.GetProperty("data").GetProperty("imageUrl").GetString();
-        var forgedCompany = await company.PutAsJsonAsync("api/profile/partner", new PartnerProfileRequest("Company", url, null, null, PartnerType.Company, null, null, null, null, null, "Company"));
+        var forgedCompany = await company.PutAsJsonAsync("api/profile/partner", new PartnerProfileRequest("Company", PartnerType.Company, url, null, null, null, null, null, null, null));
         Assert.Equal(HttpStatusCode.BadRequest, forgedCompany.StatusCode);
         Assert.Contains("INVALID_PORTRAIT_ASSET", await forgedCompany.Content.ReadAsStringAsync());
         var baseline = (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!; Assert.Null(baseline.Profile.AvatarUrl);

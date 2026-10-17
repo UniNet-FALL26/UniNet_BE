@@ -465,14 +465,20 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         {
             e.ToTable("TaskReports", t =>
             {
-                t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 2");
+                t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 4");
                 t.HasCheckConstraint("CK_TaskReports_Version", "\"Version\" > 0");
+                t.HasCheckConstraint(
+                    "CK_TaskReports_DeletedMetadata",
+                    "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR " +
+                    "(\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)");
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.Content).HasMaxLength(5000).IsRequired();
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
             e.Property(x => x.SubmittedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
+            e.Property(x => x.IsDeleted).IsRequired();
 
             e.HasOne(x => x.ProjectTask)
                 .WithMany(x => x.Reports)
@@ -484,7 +490,17 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasForeignKey(x => x.SubmittedById)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            e.HasIndex(x => new { x.ProjectTaskId, x.SubmittedById, x.Version }).IsUnique();
+            e.HasOne(x => x.ParentReport)
+                .WithMany(x => x.ChildReports)
+                .HasForeignKey(x => x.ParentReportId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.DeletedBy)
+                .WithMany()
+                .HasForeignKey(x => x.DeletedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.ReportGroupId, x.Version }).IsUnique();
             e.HasIndex(x => new { x.ProjectTaskId, x.SubmittedAt });
         });
         model.Entity<TaskEvidence>(e =>

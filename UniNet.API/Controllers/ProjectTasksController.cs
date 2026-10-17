@@ -95,6 +95,24 @@ public sealed class ProjectTasksController(IProjectTaskService tasks) : Controll
         }
     }
 
+    [Authorize(Roles = "Student"), HttpPost("tasks/{taskId:guid}/reports/drafts")]
+    public async Task<IActionResult> CreateTaskReportDraft(
+        Guid projectId, Guid taskId, SubmitTaskReportRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var result = await tasks.CreateTaskReportDraftAsync(projectId, taskId, AccountId, request, ct);
+            return CreatedAtAction(
+                nameof(GetTaskReport),
+                new { projectId, taskId, reportId = result.Id },
+                result);
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
     [Authorize(Roles = "Student"), HttpGet("tasks/{taskId:guid}/reports")]
     public Task<TaskReportListResponse> GetTaskReports(
         Guid projectId, Guid taskId, [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
@@ -113,6 +131,69 @@ public sealed class ProjectTasksController(IProjectTaskService tasks) : Controll
         {
             var result = await tasks.ReviseTaskReportAsync(projectId, taskId, reportId, AccountId, request, ct);
             return Ok(result);
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Student"), HttpPut("tasks/{taskId:guid}/reports/{reportId:guid}/draft")]
+    public async Task<IActionResult> UpdateTaskReportDraft(
+        Guid projectId, Guid taskId, Guid reportId, SubmitTaskReportRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var result = await tasks.UpdateTaskReportDraftAsync(
+                projectId, taskId, reportId, AccountId, request, ct);
+            return Ok(result);
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Student"), HttpPost("tasks/{taskId:guid}/reports/{reportId:guid}/submit")]
+    public async Task<IActionResult> SubmitTaskReportDraft(
+        Guid projectId, Guid taskId, Guid reportId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await tasks.SubmitTaskReportDraftAsync(
+                projectId, taskId, reportId, AccountId, ct);
+            return Ok(result);
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Student"), HttpPost("tasks/{taskId:guid}/reports/{reportId:guid}/withdraw")]
+    public async Task<IActionResult> WithdrawTaskReport(
+        Guid projectId, Guid taskId, Guid reportId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await tasks.WithdrawTaskReportAsync(
+                projectId, taskId, reportId, AccountId, ct);
+            return Ok(result);
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Student"), HttpDelete("tasks/{taskId:guid}/reports/{reportId:guid}")]
+    public async Task<IActionResult> DeleteTaskReportDraft(
+        Guid projectId, Guid taskId, Guid reportId, CancellationToken ct)
+    {
+        try
+        {
+            await tasks.DeleteTaskReportDraftAsync(projectId, taskId, reportId, AccountId, ct);
+            return NoContent();
         }
         catch (ProjectException ex)
         {

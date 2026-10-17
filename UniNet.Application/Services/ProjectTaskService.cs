@@ -183,6 +183,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             .SingleOrDefaultAsync(r =>
                 r.Id == reportId &&
                 r.ProjectTaskId == taskId &&
+                !r.IsDeleted &&
                 r.ProjectTask.ProjectId == projectId, ct);
         return report ?? throw new ProjectException("TASK_REPORT_NOT_FOUND", "Task report not found.", 404);
     }
@@ -250,6 +251,103 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         return (request.Content.Trim(), validatedEvidence);
     }
 
+    private static DateTimeOffset NextUpdatedAt(DateTimeOffset current)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return now - current >= TimeSpan.FromMilliseconds(1)
+            ? now
+            : current.AddMilliseconds(1);
+    }
+
+    private static void MarkReportChanged(TaskReport report)
+    {
+        report.UpdatedAt = NextUpdatedAt(report.UpdatedAt);
+        report.ConcurrencyToken = Guid.NewGuid();
+    }
+
+    private static TaskReport NewTaskReport(
+        Guid taskId,
+        Guid submitterId,
+        int version,
+        string content,
+        TaskReportStatus status,
+        List<ValidatedEvidence> evidence,
+        DateTimeOffset now,
+        Guid? reportGroupId = null,
+        Guid? parentReportId = null)
+    {
+        var reportId = Guid.NewGuid();
+        return new TaskReport
+        {
+            Id = reportId,
+            ProjectTaskId = taskId,
+            SubmittedById = submitterId,
+            ReportGroupId = reportGroupId ?? reportId,
+            ParentReportId = parentReportId,
+            Version = version,
+            Content = content,
+            Status = status,
+            SubmittedAt = now,
+            UpdatedAt = now,
+            Evidence = evidence.Select(item => NewTaskEvidence(item, now)).ToList()
+        };
+    }
+
+    private static TaskEvidence NewTaskEvidence(ValidatedEvidence item, DateTimeOffset createdAt)
+        => new()
+        {
+            FileUrl = item.FileUrl,
+            PublicId = item.PublicId,
+            ResourceType = item.ResourceType,
+            FileName = item.FileName,
+            Format = item.Format,
+            CreatedAt = createdAt
+        };
+
+    private async Task SaveNewReportAsync(
+        Guid reportGroupId,
+        TaskReport report,
+        string conflictCode,
+        string conflictMessage,
+        CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ProjectException(conflictCode, conflictMessage, 409);
+        }
+        catch (DbUpdateException)
+        {
+            db.ChangeTracker.Clear();
+            var versionAlreadyExists = await db.TaskReports.AsNoTracking()
+                .AnyAsync(item =>
+                    item.ReportGroupId == reportGroupId &&
+                    item.Version == report.Version, ct);
+            if (versionAlreadyExists)
+                throw new ProjectException(conflictCode, conflictMessage, 409);
+
+            throw;
+        }
+    }
+
+    private async Task SaveReportTransitionAsync(
+        CancellationToken ct,
+        string conflictCode,
+        string conflictMessage)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ProjectException(conflictCode, conflictMessage, 409);
+        }
+    }
+
     private static bool IsValidCloudinaryEvidence(
         string fileUrl,
         string publicId,
@@ -263,6 +361,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         {
             "image" => format is "png" or "jpg" or "webp",
             "raw" => format is "pdf" or "docx" or "xlsx" or "pptx" or "txt",
+            "video" => format is "mp4" or "webm" or "mov",
             _ => false
         };
         if (!supportedFormat || string.IsNullOrWhiteSpace(cloudName) || publicId.Length > 255)
@@ -275,11 +374,14 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             return false;
 
         var storedName = publicId[prefix.Length..];
-        var expectedName = resourceType == "image" ? storedName : Path.GetFileNameWithoutExtension(storedName);
-        var expectedExtension = resourceType == "image" ? string.Empty : $".{format}";
+        var expectedName = resourceType is "image" or "video"
+            ? storedName
+            : Path.GetFileNameWithoutExtension(storedName);
+        var expectedExtension = resourceType == "raw" ? $".{format}" : string.Empty;
         if (!Regex.IsMatch(expectedName, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant) ||
             resourceType == "image" && storedName != expectedName ||
-            resourceType == "raw" && !storedName.EndsWith(expectedExtension, StringComparison.Ordinal))
+            resourceType == "raw" && !storedName.EndsWith(expectedExtension, StringComparison.Ordinal) ||
+            resourceType == "video" && storedName != expectedName)
             return false;
 
         if (fileName is not null)
@@ -293,7 +395,8 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
                     ? string.Equals(fileExtension, ".jpg", StringComparison.OrdinalIgnoreCase) ||
                       string.Equals(fileExtension, ".jpeg", StringComparison.OrdinalIgnoreCase)
                     : string.Equals(fileExtension, $".{format}", StringComparison.OrdinalIgnoreCase)
-                : string.Equals(fileExtension, $".{format}", StringComparison.OrdinalIgnoreCase);
+                : resourceType is "raw" or "video" &&
+                  string.Equals(fileExtension, $".{format}", StringComparison.OrdinalIgnoreCase);
             if (!validFileExtension)
                 return false;
         }
@@ -316,7 +419,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             return false;
 
         var deliveredAsset = string.Join('/', segments.Skip(4));
-        var expectedAsset = resourceType == "image" ? $"{publicId}.{format}" : publicId;
+        var expectedAsset = resourceType is "image" or "video" ? $"{publicId}.{format}" : publicId;
         return string.Equals(deliveredAsset, expectedAsset, StringComparison.Ordinal);
     }
 
@@ -326,6 +429,8 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             report.ProjectTaskId,
             report.SubmittedById,
             report.SubmittedBy.FullName,
+            report.ReportGroupId,
+            report.ParentReportId,
             report.Version,
             report.Content,
             report.Status,
@@ -599,11 +704,13 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
     {
         await EnsureProjectParticipantAsync(projectId, accountId, ct);
         await GetTaskInProjectAsync(projectId, taskId, ct);
+        var viewer = await GetProfileAsync(accountId, ct);
 
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
         var query = db.TaskReports.AsNoTracking()
-            .Where(r => r.ProjectTaskId == taskId);
+            .Where(r => r.ProjectTaskId == taskId && !r.IsDeleted &&
+                (r.Status != TaskReportStatus.Draft || r.SubmittedById == viewer.Id));
         var totalItems = await query.CountAsync(ct);
         var reports = await query
             .OrderBy(r => r.SubmittedById)
@@ -630,7 +737,11 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
     {
         await EnsureProjectParticipantAsync(projectId, accountId, ct);
         await GetTaskInProjectAsync(projectId, taskId, ct);
-        return MapReport(await GetTaskReportAsync(projectId, taskId, reportId, ct));
+        var viewer = await GetProfileAsync(accountId, ct);
+        var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
+        if (report.Status == TaskReportStatus.Draft && report.SubmittedById != viewer.Id)
+            throw new ProjectException("TASK_REPORT_NOT_FOUND", "Task report not found.", 404);
+        return MapReport(report);
     }
 
     public async Task<TaskReportResponse> SubmitTaskReportAsync(
@@ -638,39 +749,200 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
     {
         var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
         var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
-        var latestVersion = await db.TaskReports.AsNoTracking()
-            .Where(r => r.ProjectTaskId == taskId && r.SubmittedById == submitter.Id)
-            .OrderByDescending(r => r.Version)
-            .FirstOrDefaultAsync(ct);
-        Require(latestVersion is null,
+        var activeReportExists = await db.TaskReports.AsNoTracking()
+            .AnyAsync(report =>
+                report.ProjectTaskId == taskId &&
+                report.SubmittedById == submitter.Id &&
+                !report.IsDeleted &&
+                (report.Status == TaskReportStatus.Submitted ||
+                 report.Status == TaskReportStatus.RevisionRequested), ct);
+        Require(!activeReportExists,
             "TASK_REPORT_ALREADY_SUBMITTED",
-            "A new report may only be submitted once; use the revision endpoint after a revision request.",
+            "An active report already exists; edit a draft or revise the requested report.",
             409);
 
         var now = DateTimeOffset.UtcNow;
-        var report = new TaskReport
-        {
-            ProjectTaskId = taskId,
-            SubmittedById = submitter.Id,
-            Version = 1,
-            Content = content,
-            Status = TaskReportStatus.Submitted,
-            SubmittedAt = now,
-            UpdatedAt = now,
-            Evidence = evidence.Select(item => new TaskEvidence
-            {
-                FileUrl = item.FileUrl,
-                PublicId = item.PublicId,
-                ResourceType = item.ResourceType,
-                FileName = item.FileName,
-                Format = item.Format,
-                CreatedAt = now
-            }).ToList()
-        };
+        var report = NewTaskReport(
+            taskId, submitter.Id, 1,
+            content, TaskReportStatus.Submitted, evidence, now);
         db.TaskReports.Add(report);
-        await db.SaveChangesAsync(ct);
+        await SaveNewReportAsync(
+            report.ReportGroupId, report,
+            "TASK_REPORT_ALREADY_SUBMITTED",
+            "A report was submitted concurrently. Refresh the report history and try again.",
+            ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
+    }
+
+    public async Task<TaskReportResponse> CreateTaskReportDraftAsync(
+        Guid projectId,
+        Guid taskId,
+        Guid accountId,
+        SubmitTaskReportRequest request,
+        CancellationToken ct = default)
+    {
+        var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
+        var now = DateTimeOffset.UtcNow;
+        var draft = NewTaskReport(
+            taskId, submitter.Id, 1,
+            content, TaskReportStatus.Draft, evidence, now);
+        db.TaskReports.Add(draft);
+        await SaveNewReportAsync(
+            draft.ReportGroupId, draft,
+            "TASK_REPORT_ALREADY_SUBMITTED",
+            "A report was created concurrently. Refresh the report history and try again.",
+            ct);
+
+        return MapReport(await GetTaskReportAsync(projectId, taskId, draft.Id, ct));
+    }
+
+    public async Task<TaskReportResponse> UpdateTaskReportDraftAsync(
+        Guid projectId,
+        Guid taskId,
+        Guid reportId,
+        Guid accountId,
+        SubmitTaskReportRequest request,
+        CancellationToken ct = default)
+    {
+        var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
+        Require(report.SubmittedById == submitter.Id,
+            "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can edit a draft.", 403);
+        Require(report.Status == TaskReportStatus.Draft,
+            "TASK_REPORT_DRAFT_NOT_EDITABLE",
+            "Only draft reports can be edited.",
+            409);
+
+        var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
+        var replacementEvidence = evidence
+            .Select(item => NewTaskEvidence(item, DateTimeOffset.UtcNow))
+            .ToList();
+        db.TaskEvidence.AddRange(replacementEvidence);
+        report.Evidence.Clear();
+        report.Evidence.AddRange(replacementEvidence);
+        report.Content = content;
+        var originalConcurrencyToken = report.ConcurrencyToken;
+        MarkReportChanged(report);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            if (!ex.Entries.Any(entry =>
+                    ReferenceEquals(entry.Entity, report) ||
+                    entry.Entity is TaskEvidence evidenceItem && evidenceItem.TaskReportId == reportId))
+                throw;
+
+            db.ChangeTracker.Clear();
+            var current = await db.TaskReports.AsNoTracking()
+                .Where(item =>
+                    item.Id == reportId &&
+                    item.ProjectTaskId == taskId &&
+                    item.ProjectTask.ProjectId == projectId)
+                .Select(item => new { item.Status, item.ConcurrencyToken })
+                .SingleOrDefaultAsync(ct);
+            if (current is null)
+                throw new ProjectException("TASK_REPORT_NOT_FOUND", "Task report not found.", 404);
+            if (current.Status != TaskReportStatus.Draft)
+                throw new ProjectException(
+                    "TASK_REPORT_DRAFT_NOT_EDITABLE",
+                    "Only draft reports can be edited.",
+                    409);
+            if (current.ConcurrencyToken != originalConcurrencyToken)
+                throw new ProjectException(
+                    "TASK_REPORT_CONCURRENT_MODIFICATION",
+                    "The draft was changed by another request. Reload it before editing again.",
+                    409);
+
+            throw;
+        }
+
+        return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
+    }
+
+    public async Task<TaskReportResponse> SubmitTaskReportDraftAsync(
+        Guid projectId,
+        Guid taskId,
+        Guid reportId,
+        Guid accountId,
+        CancellationToken ct = default)
+    {
+        var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
+        Require(report.SubmittedById == submitter.Id,
+            "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can submit a draft.", 403);
+        Require(report.Status == TaskReportStatus.Draft,
+            "TASK_REPORT_DRAFT_NOT_SUBMITTABLE",
+            "Only draft reports can be submitted.",
+            409);
+        Require(report.Status == TaskReportStatus.Withdrawn,
+            "TASK_REPORT_WITHDRAWN_NOT_SUBMITTABLE",
+            "Only withdrawn reports can be submitted.",
+            409);
+        report.Status = TaskReportStatus.Submitted;
+        report.SubmittedAt = DateTimeOffset.UtcNow;
+        MarkReportChanged(report);
+        await SaveReportTransitionAsync(
+            ct,
+            "TASK_REPORT_CONCURRENT_MODIFICATION",
+            "The draft changed concurrently. Reload it before submitting again.");
+
+        return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
+    }
+
+    public async Task<TaskReportResponse> WithdrawTaskReportAsync(
+        Guid projectId,
+        Guid taskId,
+        Guid reportId,
+        Guid accountId,
+        CancellationToken ct = default)
+    {
+        var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
+        Require(report.SubmittedById == submitter.Id,
+            "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can withdraw it.", 403);
+        Require(report.Status == TaskReportStatus.Submitted && report.Reviews.Count == 0,
+            "TASK_REPORT_WITHDRAW_NOT_ALLOWED",
+            "Only a submitted report with no review history can be withdrawn.",
+            409);
+
+        report.Status = TaskReportStatus.Draft;
+        MarkReportChanged(report);
+        await SaveReportTransitionAsync(
+            ct,
+            "TASK_REPORT_CONCURRENT_MODIFICATION",
+            "The report was reviewed or changed concurrently and can no longer be withdrawn.");
+
+        return MapReport(await GetTaskReportAsync(projectId, taskId, report.Id, ct));
+    }
+
+    public async Task DeleteTaskReportDraftAsync(
+        Guid projectId,
+        Guid taskId,
+        Guid reportId,
+        Guid accountId,
+        CancellationToken ct = default)
+    {
+        var submitter = await EnsureAssignedMemberAsync(projectId, taskId, accountId, ct);
+        var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
+        Require(report.SubmittedById == submitter.Id,
+            "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can delete a draft.", 403);
+        Require(report.Status == TaskReportStatus.Draft,
+            "TASK_REPORT_DELETE_NOT_ALLOWED",
+            "Only draft reports can be deleted.",
+            409);
+
+        report.IsDeleted = true;
+        report.DeletedAt = DateTimeOffset.UtcNow;
+        report.DeletedById = submitter.Id;
+        MarkReportChanged(report);
+        await SaveReportTransitionAsync(
+            ct,
+            "TASK_REPORT_CONCURRENT_MODIFICATION",
+            "The draft changed concurrently and could not be deleted.");
     }
 
     public async Task<TaskReportResponse> ReviseTaskReportAsync(
@@ -687,37 +959,26 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             "TASK_REPORT_ACCESS_DENIED", "Only the report submitter can submit a revision.", 403);
 
         var latest = await db.TaskReports.AsNoTracking()
-            .Where(r => r.ProjectTaskId == taskId && r.SubmittedById == submitter.Id)
+            .Where(r => r.ReportGroupId == previous.ReportGroupId && !r.IsDeleted)
             .OrderByDescending(r => r.Version)
             .FirstOrDefaultAsync(ct);
         Require(latest?.Id == previous.Id && previous.Status == TaskReportStatus.RevisionRequested,
             "TASK_REPORT_REVISION_NOT_ALLOWED",
-            "Only the latest report that requires revision can be revised.",
+            "Only the latest report in this report group that requires revision can be revised.",
             409);
 
         var (content, evidence) = ValidateReport(request, submitter.AccountId, configuration["Cloudinary:CloudName"]);
         var now = DateTimeOffset.UtcNow;
-        var revised = new TaskReport
-        {
-            ProjectTaskId = taskId,
-            SubmittedById = submitter.Id,
-            Version = previous.Version + 1,
-            Content = content,
-            Status = TaskReportStatus.Submitted,
-            SubmittedAt = now,
-            UpdatedAt = now,
-            Evidence = evidence.Select(item => new TaskEvidence
-            {
-                FileUrl = item.FileUrl,
-                PublicId = item.PublicId,
-                ResourceType = item.ResourceType,
-                FileName = item.FileName,
-                Format = item.Format,
-                CreatedAt = now
-            }).ToList()
-        };
+        var revised = NewTaskReport(
+            taskId, submitter.Id, latest.Version + 1,
+            content, TaskReportStatus.Submitted, evidence, now,
+            previous.ReportGroupId, previous.Id);
         db.TaskReports.Add(revised);
-        await db.SaveChangesAsync(ct);
+        await SaveNewReportAsync(
+            revised.ReportGroupId, revised,
+            "TASK_REPORT_CONCURRENT_MODIFICATION",
+            "A revision was created concurrently. Reload the report history before trying again.",
+            ct);
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, revised.Id, ct));
     }
@@ -736,9 +997,8 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
         var reviewer = await GetProfileAsync(accountId, ct);
         var report = await GetTaskReportAsync(projectId, taskId, reportId, ct);
-        Require(report.SubmittedById != reviewer.Id,
-            "TASK_REPORT_SELF_REVIEW", "A report submitter cannot review their own report.", 403);
-        Require(report.Status == TaskReportStatus.Submitted,
+        
+            Require(report.Status == TaskReportStatus.Submitted,
             "TASK_REPORT_NOT_REVIEWABLE", "Only submitted reports can be reviewed.", 409);
 
         var feedback = request.Feedback?.Trim();
@@ -755,7 +1015,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             TaskReportReviewDecision.RevisionRequested => TaskReportStatus.RevisionRequested,
             _ => throw new ProjectException("INVALID_TASK_REPORT_DECISION", "Report review decision is invalid.")
         };
-        report.UpdatedAt = now;
+        MarkReportChanged(report);
         db.TaskReportReviews.Add(new TaskReportReview
         {
             TaskReportId = report.Id,
@@ -765,7 +1025,10 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             Feedback = string.IsNullOrWhiteSpace(feedback) ? null : feedback,
             ReviewedAt = now
         });
-        await db.SaveChangesAsync(ct);
+        await SaveReportTransitionAsync(
+            ct,
+            "TASK_REPORT_CONCURRENT_MODIFICATION",
+            "The report was reviewed or changed concurrently.");
 
         return MapReport(await GetTaskReportAsync(projectId, taskId, reportId, ct));
     }

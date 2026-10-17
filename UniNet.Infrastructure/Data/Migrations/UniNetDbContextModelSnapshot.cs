@@ -707,26 +707,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("StudentSavedJobs", (string)null);
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
-                {
-                    b.Property<Guid>("UserBookmarkId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("SavedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserBookmarkId", "UserId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("User1SavedUser2", (string)null);
-                });
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.Property<Guid>("Id")
@@ -773,12 +753,31 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasMaxLength(5000)
                         .HasColumnType("character varying(5000)");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ParentReportId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("ProjectTaskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReportGroupId")
                         .HasColumnType("uuid");
 
                     b.Property<short>("Status")
@@ -798,16 +797,22 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DeletedById");
+
+                    b.HasIndex("ParentReportId");
+
                     b.HasIndex("SubmittedById");
 
                     b.HasIndex("ProjectTaskId", "SubmittedAt");
 
-                    b.HasIndex("ProjectTaskId", "SubmittedById", "Version")
+                    b.HasIndex("ReportGroupId", "Version")
                         .IsUnique();
 
                     b.ToTable("TaskReports", null, t =>
                         {
-                            t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 2");
+                            t.HasCheckConstraint("CK_TaskReports_DeletedMetadata", "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR (\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 4");
 
                             t.HasCheckConstraint("CK_TaskReports_Version", "\"Version\" > 0");
                         });
@@ -846,6 +851,27 @@ namespace UniNet.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_TaskReportReviews_Decision", "\"Decision\" BETWEEN 0 AND 1");
                         });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.Property<Guid>("UserBookmarkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserBookmarkId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("User1SavedUser2", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -1380,24 +1406,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Student");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
-                {
-                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
-                        .WithMany("SavedUsers")
-                        .HasForeignKey("UserBookmarkId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.UserProfile", "User")
-                        .WithMany("SavedByUsers")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-
-                    b.Navigation("UserBookmark");
-                });
             modelBuilder.Entity("UniNet.Domain.Entities.TaskEvidence", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.TaskReport", "TaskReport")
@@ -1411,6 +1419,16 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.TaskReport", b =>
                 {
+                    b.HasOne("UniNet.Domain.UserProfile", "DeletedBy")
+                        .WithMany()
+                        .HasForeignKey("DeletedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.TaskReport", "ParentReport")
+                        .WithMany("ChildReports")
+                        .HasForeignKey("ParentReportId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UniNet.Domain.Entities.ProjectTask", "ProjectTask")
                         .WithMany("Reports")
                         .HasForeignKey("ProjectTaskId")
@@ -1422,6 +1440,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasForeignKey("SubmittedById")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("DeletedBy");
+
+                    b.Navigation("ParentReport");
 
                     b.Navigation("ProjectTask");
 
@@ -1445,6 +1467,25 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Reviewer");
 
                     b.Navigation("TaskReport");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
+                        .WithMany("SavedUsers")
+                        .HasForeignKey("UserBookmarkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany("SavedByUsers")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+
+                    b.Navigation("UserBookmark");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -1555,6 +1596,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.TaskReport", b =>
                 {
+                    b.Navigation("ChildReports");
+
                     b.Navigation("Evidence");
 
                     b.Navigation("Reviews");

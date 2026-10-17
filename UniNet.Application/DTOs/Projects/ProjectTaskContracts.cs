@@ -88,6 +88,8 @@ public record TaskReportResponse(
     Guid ProjectTaskId,
     Guid SubmittedById,
     string SubmittedByFullName,
+    Guid ReportGroupId,
+    Guid? ParentReportId,
     int Version,
     string Content,
     TaskReportStatus Status,

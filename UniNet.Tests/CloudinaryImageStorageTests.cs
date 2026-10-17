@@ -48,7 +48,7 @@ public sealed class CloudinaryImageStorageTests
                 format,
                 resource_type = resourceType,
                 type = "upload",
-                secure_url = $"https://res.cloudinary.com/fixture/{resourceType}/upload/v1/{id}{(resourceType == "image" ? $".{format}" : "")}"
+                secure_url = $"https://res.cloudinary.com/fixture/{resourceType}/upload/v1/{id}{(resourceType is "image" or "video" ? $".{format}" : "")}"
             }))) };
         }
     }
@@ -132,6 +132,68 @@ public sealed class CloudinaryImageStorageTests
         Assert.Equal("raw", result.ResourceType);
         Assert.Equal("docx", result.Format);
         Assert.Equal($"https://res.cloudinary.com/fixture/raw/upload/v123/{DocxId}", result.ImageUrl);
+    }
+
+    [Theory]
+    [InlineData("mp4", "video/mp4")]
+    [InlineData("webm", "video/webm")]
+    [InlineData("mov", "video/quicktime")]
+    public async Task VideoUploadUsesVideoEndpointAndExpectedDeliveryUrl(string format, string mime)
+    {
+        var id = $"uninet/evidence/owner/{new string('a', 32)}";
+        using var handler = new Handler(format, resourceType: "video", publicId: id);
+        using var http = new HttpClient(handler);
+
+        var result = await new CloudinaryImageStorage(http, Config()).Upload(
+            new([1, 2, 3], id, format, "video"), default);
+
+        Assert.Equal("video", result.ResourceType);
+        Assert.Equal(id, result.PublicId);
+        Assert.Equal(format, result.Format);
+        Assert.Equal($"https://res.cloudinary.com/fixture/video/upload/v1/{id}.{format}", result.ImageUrl);
+        Assert.Equal(mime, handler.Mime);
+        Assert.Equal("false", handler.Fields["overwrite"]);
+        Assert.DoesNotContain("format", handler.Fields.Keys);
+    }
+
+    [Fact]
+    public async Task VideoUploadRejectsResponseWithoutFormat()
+    {
+        var id = $"uninet/evidence/owner/{new string('a', 32)}";
+        var response = JsonSerializer.Serialize(new
+        {
+            public_id = id,
+            resource_type = "video",
+            secure_url = $"https://res.cloudinary.com/fixture/video/upload/v123/{id}.mp4"
+        });
+        using var handler = new Handler(response: response, resourceType: "video", publicId: id);
+        using var http = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<AuthException>(() =>
+            new CloudinaryImageStorage(http, Config()).Upload(
+                new([1], id, "mp4", "video"), default));
+
+        Assert.Equal("FILE_UPLOAD_FAILED", error.Code);
+    }
+
+    [Fact]
+    public async Task VideoUploadRejectsPresentMismatchedFormat()
+    {
+        var id = $"uninet/evidence/owner/{new string('a', 32)}";
+        var response = JsonSerializer.Serialize(new
+        {
+            public_id = id,
+            format = "webm",
+            resource_type = "video",
+            secure_url = $"https://res.cloudinary.com/fixture/video/upload/v123/{id}.mp4"
+        });
+        using var handler = new Handler("mp4", response: response, resourceType: "video", publicId: id);
+        using var http = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<AuthException>(() => new CloudinaryImageStorage(http, Config())
+            .Upload(new([1], id, "mp4", "video"), default));
+
+        Assert.Equal("FILE_UPLOAD_FAILED", error.Code);
     }
 
     [Fact]

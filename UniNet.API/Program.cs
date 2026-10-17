@@ -8,6 +8,7 @@ using UniNet.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
+_ = UniNet.API.Services.UploadFileReader.GetMaxVideoBytes(builder.Configuration);
 var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
 var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is required.");
