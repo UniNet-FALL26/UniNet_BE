@@ -892,11 +892,19 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         model.Entity<ProjectVerification>(e =>
         {
             e.ToTable("ProjectVerifications", t =>
-                t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3"));
+            {
+                t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3");
+                t.HasCheckConstraint("CK_ProjectVerifications_BookingStatus", "\"BookingStatus\" BETWEEN 0 AND 5");
+                t.HasCheckConstraint("CK_ProjectVerifications_Reservation", "\"BookingStatus\" NOT IN (1, 2) OR (\"ReservationId\" IS NOT NULL AND \"ReservedUntil\" IS NOT NULL AND \"ScheduledStartAt\" IS NOT NULL AND \"ScheduledEndAt\" IS NOT NULL AND \"ScheduledEndAt\" > \"ScheduledStartAt\")");
+                t.HasCheckConstraint("CK_ProjectVerifications_ConfirmedBooking", "\"BookingStatus\" <> 2 OR (\"BookingConfirmedAt\" IS NOT NULL AND \"AssignmentEligibleAt\" IS NOT NULL)");
+            });
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
             e.HasOne(x => x.EvidenceModeration).WithMany()
                 .HasForeignKey(x => x.EvidenceModerationId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(x => x.BookingStatus).HasConversion<short>();
+            e.HasIndex(x => new { x.BookingStatus, x.ReservedUntil });
+            e.HasIndex(x => x.ReservationId).IsUnique();
             e.Property(x => x.AiSummary).HasColumnType("text");
             e.Property(x => x.AiScore).HasPrecision(5, 2);
             e.Property(x => x.AiAdditionalEvidenceJson).HasColumnType("jsonb").IsRequired();

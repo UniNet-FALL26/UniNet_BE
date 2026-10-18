@@ -165,6 +165,8 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         Require(verification.Status == ProjectVerificationStatus.Pending && verification.FinalizedAt == null &&
             verification.MeetingStartAt == null && verification.MeetingEndAt == null,
             "VERIFICATION_LOCKED", "Only pending verifications before the meeting starts can be assigned.", 409);
+        Require(verification.BookingStatus == VerificationBookingStatus.Confirmed && verification.BookingConfirmedAt.HasValue,
+            "BOOKING_NOT_CONFIRMED", "Only a booking confirmed by payment can be assigned.", 409);
         Require(verification.ScheduledStartAt.HasValue && verification.ScheduledEndAt.HasValue &&
             verification.ScheduledStartAt < verification.ScheduledEndAt && verification.ScheduledStartAt > DateTimeOffset.UtcNow,
             "INVALID_VERIFICATION_SCHEDULE", "A valid future meeting schedule is required.", 409);
@@ -172,7 +174,8 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         Require(await db.VerificationTransactions.AnyAsync(v => v.VerificationId == id &&
             v.Transaction.Status == PaymentStatus.Success && v.Transaction.PackageId == verification.PackageId &&
             v.Transaction.UserId == verification.RequestByUserId &&
-            v.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
+            v.Transaction.FailureReason == null &&
+            v.ReservationId == verification.ReservationId &&
             !v.Transaction.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct),
             "PAYMENT_REQUIRED", "A valid payment is required before assignment.", 409);
         return verification;

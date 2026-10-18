@@ -102,12 +102,25 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var policy = ProjectVerificationPolicy.Load(configuration);
         var zone = policy.RequireMeetingPolicy();
         var now = DateTimeOffset.UtcNow;
+        var holdMinutes = policy.RequireReservationMinutes();
+        Require(!verification.VerificationTransactions.Any(t => t.Transaction.Status == PaymentStatus.Pending),
+            "PAYMENT_PENDING", "Reconcile the existing checkout before changing or renewing a reservation.", 409);
         Require(policy.GenerateSlots(start, end, now, zone).Any(s => s.Start == start && s.End == end),
             "INVALID_MEETING_SLOT", "The interval does not match an available slot in the meeting policy.");
         var capacity = await GetCapacityAsync(policy, ct);
         var bookings = await GetBookingsAsync(verification.Id, start, end, ct);
         Require(RemainingCapacity(bookings, verification.Project.CreatorId, start, end, capacity) > 0,
             "MEETING_SLOT_UNAVAILABLE", "The slot is full or conflicts with another meeting of this leader.", 409);
+        // Repeating the same active hold cannot extend its deadline indefinitely.
+        if (verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil > now &&
+            verification.ScheduledStartAt == start && verification.ScheduledEndAt == end)
+            return ProjectVerificationMapping.ToDetailResponse(verification);
+        verification.ReservationId = Guid.NewGuid();
+        verification.BookingStatus = VerificationBookingStatus.Held;
+        var expires = now.AddMinutes(holdMinutes);
+        verification.ReservedUntil = DateTimeOffset.FromUnixTimeSeconds((expires < start ? expires : start).ToUnixTimeSeconds());
+        verification.BookingConfirmedAt = null;
+        verification.AssignmentEligibleAt = null;
         verification.ScheduledStartAt = start;
         verification.ScheduledEndAt = end;
         verification.UpdatedAt = now;
@@ -121,6 +134,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         RequireMutable(verification);
         Require(!string.IsNullOrWhiteSpace(request.Reason) && request.Reason.Trim().Length <= 2000,
             "INVALID_CANCELLATION_REASON", "Cancellation reason must be between 1 and 2000 characters.");
+        verification.BookingStatus = VerificationBookingStatus.Cancelled;
         verification.Status = ProjectVerificationStatus.Cancelled;
         verification.CancellationReason = request.Reason.Trim();
         verification.CancelledAt = DateTimeOffset.UtcNow;
@@ -176,18 +190,32 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
             "INVALID_VERIFICATION_STATE", "Only pending, unfinalized verifications can be changed.", 409);
         Require(verification.Assignments.Count == 0 && !verification.MeetingStartAt.HasValue &&
             !verification.MeetingEndAt.HasValue &&
-            (!verification.ScheduledStartAt.HasValue || verification.ScheduledStartAt > DateTimeOffset.UtcNow),
+            (!verification.ScheduledStartAt.HasValue || verification.ScheduledStartAt > DateTimeOffset.UtcNow ||
+             verification.BookingStatus is VerificationBookingStatus.Expired ||
+             (verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil <= DateTimeOffset.UtcNow)),
             "VERIFICATION_LOCKED", "The verification cannot be changed after assignment or the scheduled meeting begins.", 409);
     }
 
     private static void RequireSchedulable(ProjectVerification verification)
     {
         RequireMutable(verification);
-        Require(verification.VerificationTransactions.Any(v => v.Transaction.Status == PaymentStatus.Success &&
-            v.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
-            v.Transaction.PackageId == verification.PackageId && v.Transaction.UserId == verification.RequestByUserId &&
-            !v.Transaction.RefundTransactions.Any(r => r.Status is PaymentStatus.Pending or PaymentStatus.Success)), "PAYMENT_REQUIRED",
-            "A confirmed successful verification payment is required before booking a meeting.", 409);
+        Require(verification.BookingStatus != VerificationBookingStatus.Legacy, "LEGACY_BOOKING_REVIEW_REQUIRED",
+            "Review the historical booking before changing its schedule.", 409);
+        Require(verification.BookingStatus != VerificationBookingStatus.Confirmed &&
+            !verification.VerificationTransactions.Any(v => v.Transaction.Status == PaymentStatus.Success),
+            "BOOKING_ALREADY_PAID", "The schedule cannot be changed after payment.", 409);
+    }
+
+    // Run inside payment's Serializable transaction as well: another holder can win at expiry.
+    internal async Task<bool> HasConfirmationCapacityAsync(ProjectVerification verification, CancellationToken ct)
+    {
+        var policy = ProjectVerificationPolicy.Load(configuration);
+        policy.RequireMeetingPolicy();
+        var leaderId = await db.Projects.Where(p => p.Id == verification.ProjectId).Select(p => p.CreatorId).SingleAsync(ct);
+        var bookings = await GetBookingsAsync(verification.Id, verification.ScheduledStartAt!.Value,
+            verification.ScheduledEndAt!.Value, ct);
+        return RemainingCapacity(bookings, leaderId, verification.ScheduledStartAt.Value,
+            verification.ScheduledEndAt.Value, await GetCapacityAsync(policy, ct)) > 0;
     }
 
     private async Task<int> GetCapacityAsync(ProjectVerificationPolicy policy, CancellationToken ct)
@@ -199,11 +227,16 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
 
     private sealed record Booking(Guid LeaderId, DateTimeOffset Start, DateTimeOffset End);
 
-    private async Task<List<Booking>> GetBookingsAsync(Guid excludeId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct) =>
-        await db.ProjectVerifications.AsNoTracking().Where(v => v.Id != excludeId &&
-            v.Status != ProjectVerificationStatus.Cancelled && v.ScheduledStartAt.HasValue && v.ScheduledEndAt.HasValue &&
+    private async Task<List<Booking>> GetBookingsAsync(Guid excludeId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return await db.ProjectVerifications.AsNoTracking().Where(v => v.Id != excludeId &&
+            v.Status != ProjectVerificationStatus.Cancelled &&
+            (v.BookingStatus == VerificationBookingStatus.Confirmed || v.BookingStatus == VerificationBookingStatus.Legacy ||
+             (v.BookingStatus == VerificationBookingStatus.Held && v.ReservedUntil > now)) && v.ScheduledStartAt.HasValue && v.ScheduledEndAt.HasValue &&
             v.ScheduledStartAt < to && v.ScheduledEndAt > from)
             .Select(v => new Booking(v.Project.CreatorId, v.ScheduledStartAt!.Value, v.ScheduledEndAt!.Value)).ToListAsync(ct);
+    }
 
     private static int RemainingCapacity(List<Booking> bookings, Guid leaderId,
         DateTimeOffset start, DateTimeOffset end, int capacity)

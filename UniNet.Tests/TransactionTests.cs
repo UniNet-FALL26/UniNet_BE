@@ -15,7 +15,7 @@ using Xunit;
 
 namespace UniNet.Tests;
 
-public sealed class TransactionTests
+public sealed partial class TransactionTests
 {
     [Fact]
     public async Task CheckoutSnapshotsPackagePriceAndCommitsAttemptBeforeProviderCall()
@@ -255,7 +255,7 @@ public sealed class TransactionTests
         var stored = await f.Db.Transactions.SingleAsync();
         stored.ExpiredAt = DateTimeOffset.UtcNow.AddMinutes(-1);
         await f.Db.SaveChangesAsync();
-        Assert.Equal(created.Id, (await f.CheckoutAsync()).Id);
+        await Error("PAYMENT_RECONCILIATION_REQUIRED", f.CheckoutAsync);
         f.Configuration["Payments:AllowUserReconciliation"] = "false";
         await Error("RECONCILIATION_DISABLED", () => f.Service.ReconcileAsync(created.Id, f.Owner.Id));
     }
@@ -385,12 +385,20 @@ public sealed class TransactionTests
             var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verification",
                 Type = PackageType.Verification, Role = TargetRole.Student, IsActive = true, Price = 37000 };
             var verification = new ProjectVerification { Id = Guid.NewGuid(), Project = project,
-                RequestByUser = owner.Profile!, Package = package, Status = ProjectVerificationStatus.Pending };
-            db.Accounts.AddRange(owner, other);
+                RequestByUser = owner.Profile!, Package = package, Status = ProjectVerificationStatus.Pending,
+                BookingStatus = VerificationBookingStatus.Held, ReservationId = Guid.NewGuid(),
+                ReservedUntil = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds()),
+                ScheduledStartAt = DateTimeOffset.UtcNow.AddDays(2), ScheduledEndAt = DateTimeOffset.UtcNow.AddDays(2).AddHours(1) };
+            db.Accounts.AddRange(owner, other, new Account { Email = "staff@test.com", Role = AccountRole.Verificator,
+                Profile = new() { FullName = "Staff", Nickname = "Staff" } });
             db.ProjectVerifications.Add(verification);
             await db.SaveChangesAsync();
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
+                ["ProjectVerification:TimeZoneId"] = "UTC", ["ProjectVerification:WorkdayStart"] = "00:00:00",
+                ["ProjectVerification:WorkdayEnd"] = "23:59:00", ["ProjectVerification:SlotMinutes"] = "60",
+                ["ProjectVerification:Capacity"] = "1", ["ProjectVerification:MinimumNoticeMinutes"] = "0",
+                ["ProjectVerification:MaxAdvanceDays"] = "30", ["ProjectVerification:WorkingDays:0"] = "Monday",
                 ["Payments:ReturnUrl"] = "https://frontend.test/paid",
                 ["Payments:CancelUrl"] = "https://frontend.test/cancel"
             }).Build();

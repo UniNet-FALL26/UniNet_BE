@@ -1519,6 +1519,15 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("AiSummary")
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("AssignmentEligibleAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("BookingConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("BookingStatus")
+                        .HasColumnType("smallint");
+
                     b.Property<string>("CancellationReason")
                         .HasColumnType("text");
 
@@ -1552,6 +1561,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("RequestByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ReservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ReservedUntil")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset?>("ScheduledEndAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1580,12 +1595,23 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasDatabaseName("IX_ProjectVerifications_PendingProject")
                         .HasFilter("\"Status\" = 0");
 
+                    b.HasIndex("ReservationId")
+                        .IsUnique();
+
+                    b.HasIndex("BookingStatus", "ReservedUntil");
+
                     b.HasIndex("ProjectId", "Status");
 
                     b.HasIndex("RequestByUserId", "SubmittedAt");
 
                     b.ToTable("ProjectVerifications", null, t =>
                         {
+                            t.HasCheckConstraint("CK_ProjectVerifications_BookingStatus", "\"BookingStatus\" BETWEEN 0 AND 5");
+
+                            t.HasCheckConstraint("CK_ProjectVerifications_ConfirmedBooking", "\"BookingStatus\" <> 2 OR (\"BookingConfirmedAt\" IS NOT NULL AND \"AssignmentEligibleAt\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProjectVerifications_Reservation", "\"BookingStatus\" NOT IN (1, 2) OR (\"ReservationId\" IS NOT NULL AND \"ReservedUntil\" IS NOT NULL AND \"ScheduledStartAt\" IS NOT NULL AND \"ScheduledEndAt\" IS NOT NULL AND \"ScheduledEndAt\" > \"ScheduledStartAt\")");
+
                             t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3");
                         });
                 });
@@ -2286,6 +2312,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReservationId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

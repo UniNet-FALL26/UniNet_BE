@@ -33,7 +33,8 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
         if (from.HasValue) query = query.Where(v => v.SubmittedAt >= from);
         if (to.HasValue) query = query.Where(v => v.SubmittedAt <= to);
         if (pendingAssignment) query = query.Where(v => v.Status == ProjectVerificationStatus.Pending &&
-            v.FinalizedAt == null && !v.Assignments.Any(a => a.Status != VerificationAssignmentStatus.Cancelled));
+            v.FinalizedAt == null && v.BookingStatus == VerificationBookingStatus.Confirmed &&
+            v.AssignmentEligibleAt != null && !v.Assignments.Any(a => a.Status != VerificationAssignmentStatus.Cancelled));
         if (overdue)
         {
             var now = DateTimeOffset.UtcNow;

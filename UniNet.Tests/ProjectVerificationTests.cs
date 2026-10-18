@@ -38,10 +38,12 @@ public sealed partial class ProjectVerificationTests
         f.Other.Role = AccountRole.Admin;
         await f.Db.SaveChangesAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
+        await f.PayAsync(id, f.Owner);
         var service = new AdminProjectVerificationService(f.Db);
         Assert.Equal(id, Assert.Single((await service.ListAsync(f.Other.Id, pendingAssignment: true)).Verifications).Id);
         Assert.Empty((await service.ListAsync(f.Other.Id, overdue: true)).Verifications);
         var verification = await f.Db.ProjectVerifications.SingleAsync();
+        verification.ScheduledStartAt = DateTimeOffset.UtcNow.AddHours(-2);
         verification.ScheduledEndAt = DateTimeOffset.UtcNow.AddHours(-1);
         await f.Db.SaveChangesAsync();
         Assert.Equal(id, Assert.Single((await service.ListAsync(f.Other.Id, overdue: true)).Verifications).Id);
@@ -198,16 +200,17 @@ public sealed partial class ProjectVerificationTests
     }
 
     [Fact]
-    public async Task SchedulingRequiresEvidenceAndActualSuccessfulPayment()
+    public async Task SchedulingHoldsSlotBeforePaymentWithoutExtendingDuplicateHold()
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync()).Verification.Id;
-        await Error("PAYMENT_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
-        await f.PayAsync(id, f.Owner, PaymentStatus.Pending);
-        await Error("PAYMENT_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
-        (await f.Db.Transactions.SingleAsync()).Status = PaymentStatus.Success;
-        await f.Db.SaveChangesAsync();
-        await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot());
+        var held = await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot());
+        Assert.Equal(VerificationBookingStatus.Held, held.Verification.BookingStatus);
+        Assert.Empty(await f.Db.Transactions.ToListAsync());
+        var repeated = await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot());
+        Assert.Equal(held.Verification.ReservationId, repeated.Verification.ReservationId);
+        Assert.Equal(held.Verification.ReservedUntil, repeated.Verification.ReservedUntil);
+        Assert.InRange((held.Verification.ReservedUntil!.Value - DateTimeOffset.UtcNow).TotalMinutes, 29, 30);
     }
 
     [Fact]
@@ -215,7 +218,6 @@ public sealed partial class ProjectVerificationTests
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(id, f.Owner);
         f.Configuration["ProjectVerification:TimeZoneId"] = null;
         await Error("MEETING_POLICY_NOT_CONFIGURED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
     }
@@ -236,7 +238,7 @@ public sealed partial class ProjectVerificationTests
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow
         });
         await f.Db.SaveChangesAsync();
-        await Error("PAYMENT_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
+        await Error("BOOKING_ALREADY_PAID", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
         var payment = Assert.Single((await f.Service.GetDetailAsync(id, f.Owner.Id)).Payments);
         Assert.Equal(PaymentStatus.Success, payment.Status);
         var refund = Assert.Single(payment.Refunds);
@@ -250,8 +252,6 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         var first = (await f.CreateVerificationAsync(true)).Verification.Id;
         var second = (await f.CreateOtherVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(first, f.Owner);
-        await f.PayAsync(second, f.Other);
         var slot = Fixture.Slot();
         var offered = await f.Service.GetAvailableMeetingSlotsAsync(second, f.Other.Id, slot.StartAt, slot.EndAt);
         Assert.Single(offered.Slots);
@@ -272,7 +272,6 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         f.Configuration["ProjectVerification:Capacity"] = "5";
         var first = (await f.CreateVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(first, f.Owner);
         var staff = await f.Db.Accounts.SingleAsync(a => a.Role == AccountRole.Verificator);
         staff.Status = AccountStatus.Suspended;
         await f.Db.SaveChangesAsync();
@@ -284,7 +283,6 @@ public sealed partial class ProjectVerificationTests
         await f.Db.SaveChangesAsync();
         await f.SeedPassedAsync(secondProject.Id);
         var second = (await f.Service.CreateAsync(secondProject.Id, f.Owner.Id, new(f.Package.Id))).Verification.Id;
-        await f.PayAsync(second, f.Owner);
         await f.Service.ScheduleMeetingAsync(first, f.Owner.Id, Fixture.Slot());
         await Error("MEETING_SLOT_UNAVAILABLE", () => f.Service.ScheduleMeetingAsync(second, f.Owner.Id, Fixture.Slot()));
     }
@@ -294,7 +292,6 @@ public sealed partial class ProjectVerificationTests
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(id, f.Owner);
         var slot = Fixture.Slot();
         await Error("INVALID_MEETING_SLOT", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id,
             new(slot.StartAt.AddMinutes(15), slot.EndAt.AddMinutes(15))));
@@ -465,11 +462,23 @@ public sealed partial class ProjectVerificationTests
         }
         public async Task PayAsync(Guid id, Account owner, PaymentStatus status = PaymentStatus.Success)
         {
+            var verification = await Db.ProjectVerifications.SingleAsync(v => v.Id == id);
+            if (status == PaymentStatus.Success && verification.Status == ProjectVerificationStatus.Pending &&
+                verification.BookingStatus != VerificationBookingStatus.Confirmed)
+            {
+                verification.ReservationId ??= Guid.NewGuid();
+                verification.ScheduledStartAt ??= Slot().StartAt;
+                verification.ScheduledEndAt ??= Slot().EndAt;
+                verification.ReservedUntil ??= DateTimeOffset.UtcNow.AddMinutes(30);
+                verification.BookingStatus = VerificationBookingStatus.Confirmed;
+                verification.BookingConfirmedAt = DateTimeOffset.UtcNow;
+                verification.AssignmentEligibleAt = verification.BookingConfirmedAt;
+            }
             Db.Transactions.Add(new()
             {
                 Id = Guid.NewGuid(), UserId = owner.Profile!.Id, PackageId = Package.Id, Amount = Package.Price,
                 Status = status, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-                VerificationTransaction = new() { VerificationId = id, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow }
+                VerificationTransaction = new() { VerificationId = id, ReservationId = verification.ReservationId, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow }
             });
             await Db.SaveChangesAsync();
         }
@@ -493,7 +502,7 @@ public sealed partial class ProjectVerificationTests
             {
                 ["ProjectVerification:TimeZoneId"] = "UTC", ["ProjectVerification:WorkdayStart"] = "09:00:00",
                 ["ProjectVerification:WorkdayEnd"] = "17:00:00", ["ProjectVerification:SlotMinutes"] = "60",
-                ["ProjectVerification:Capacity"] = "1", ["ProjectVerification:MinimumNoticeMinutes"] = "60",
+                ["ProjectVerification:Capacity"] = "1", ["ProjectVerification:ReservationMinutes"] = "30", ["ProjectVerification:MinimumNoticeMinutes"] = "60",
                 ["ProjectVerification:MaxAdvanceDays"] = "30"
             };
             foreach (var day in Enum.GetValues<DayOfWeek>()) settings[$"ProjectVerification:WorkingDays:{(int)day}"] = day.ToString();

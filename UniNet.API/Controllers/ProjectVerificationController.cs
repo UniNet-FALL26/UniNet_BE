@@ -45,6 +45,7 @@ public sealed class ProjectVerificationController(IProjectVerificationService ve
     public Task<ProjectVerificationDetailResponse> GetDetail(Guid verificationId, CancellationToken ct)
         => verifications.GetDetailAsync(verificationId, AccountId, ct);
 
+    /// <summary>Xem slot trước thanh toán; vẫn cần cấp 1 hiện hành.</summary>
     [HttpGet("verifications/{verificationId:guid}/meeting-slots")]
     public Task<VerificationMeetingSlotsResponse> GetAvailableMeetingSlots(
         Guid verificationId,
@@ -53,6 +54,7 @@ public sealed class ProjectVerificationController(IProjectVerificationService ve
         CancellationToken ct)
         => verifications.GetAvailableMeetingSlotsAsync(verificationId, AccountId, from, to, ct);
 
+    /// <summary>Giữ slot có hạn trước checkout; không đổi lịch sau thanh toán.</summary>
     [HttpPut("verifications/{verificationId:guid}/meeting")]
     public Task<ProjectVerificationDetailResponse> ScheduleMeeting(
         Guid verificationId, [FromBody] ScheduleProjectVerificationRequest request, CancellationToken ct)

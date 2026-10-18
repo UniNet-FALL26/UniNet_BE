@@ -130,6 +130,7 @@ public sealed partial class ProjectVerificationTests
         var now = DateTimeOffset.UtcNow;
         var payment = await f.Db.Transactions.SingleAsync();
         payment.Amount = 51000; payment.PaidAt = now.AddHours(-24);
+        (await f.Db.ProjectVerifications.SingleAsync()).AssignmentEligibleAt = now.AddHours(-24);
         await f.Db.SaveChangesAsync();
         var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
         await tasks.RefundTimeoutsAsync(now, default);
@@ -166,6 +167,7 @@ public sealed partial class ProjectVerificationTests
         await f.PayAsync(id, f.Owner);
         var payment = await f.Db.Transactions.SingleAsync();
         payment.PaidAt = DateTimeOffset.UtcNow.AddDays(-2);
+        (await f.Db.ProjectVerifications.SingleAsync()).AssignmentEligibleAt = payment.PaidAt;
         f.Db.RefundTransactions.Add(new() { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = 10000,
             PaymentProvider = "Manual", Status = PaymentStatus.Success, Reason = "Previous partial refund" });
         await f.Db.SaveChangesAsync();
@@ -265,6 +267,7 @@ public sealed partial class ProjectVerificationTests
         await f.PayAsync(id, f.Owner);
         var now = DateTimeOffset.UtcNow;
         (await f.Db.Transactions.SingleAsync()).PaidAt = now.AddDays(-2);
+        (await f.Db.ProjectVerifications.SingleAsync()).AssignmentEligibleAt = now.AddDays(-2);
         await f.Db.SaveChangesAsync();
         await new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration).RefundTimeoutAsync(id, now, default);
         var probe = new RefundProbe();
@@ -288,6 +291,7 @@ public sealed partial class ProjectVerificationTests
         await f.PayAsync(id, f.Owner);
         var now = DateTimeOffset.UtcNow;
         (await f.Db.Transactions.SingleAsync()).PaidAt = now.AddDays(-2);
+        (await f.Db.ProjectVerifications.SingleAsync()).AssignmentEligibleAt = now.AddDays(-2);
         await f.Db.SaveChangesAsync();
         await new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration).RefundTimeoutAsync(id, now, default);
         var tasks = new VerificationRefundTasks(f.Db, new ManualRefundProvider(), new(f.Db));

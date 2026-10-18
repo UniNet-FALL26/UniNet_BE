@@ -19,8 +19,7 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, VerificationNo
         var ids = await db.ProjectVerifications.AsNoTracking().Where(v =>
             (v.Status == ProjectVerificationStatus.Pending && v.FinalizedAt == null &&
                 ((!v.Assignments.Any(a => a.Status != VerificationAssignmentStatus.Cancelled) &&
-                  v.VerificationTransactions.Any(p => p.Transaction.Status == PaymentStatus.Success &&
-                      (p.Transaction.PaidAt ?? p.Transaction.CreatedAt) <= assignmentCutoff)) ||
+                  v.BookingStatus == VerificationBookingStatus.Confirmed && v.AssignmentEligibleAt <= assignmentCutoff) ||
                  v.Assignments.Any(old => old.ReplacedBy != null && old.ReplacedBy.AssignedAt <= replacementCutoff &&
                      (old.ReplacedBy.Status == VerificationAssignmentStatus.Assigned || old.ReplacedBy.Status == VerificationAssignmentStatus.Overdue) && old.ReplacedBy.Report == null))) ||
             (v.Status == ProjectVerificationStatus.Cancelled &&
@@ -47,11 +46,12 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, VerificationNo
             if (v.Status != ProjectVerificationStatus.Pending || v.FinalizedAt != null || payments.Count == 0 ||
                 v.Assignments.Any(a => a.Report != null)) return;
             if (!v.Assignments.Any(a => a.Status != VerificationAssignmentStatus.Cancelled) &&
-                payments.Min(p => p.PaidAt ?? p.CreatedAt) <= now.AddHours(-24)) reason = AssignmentTimeout;
+                v.BookingStatus == VerificationBookingStatus.Confirmed && v.AssignmentEligibleAt <= now.AddHours(-24)) reason = AssignmentTimeout;
             else if (v.Assignments.Any(old => old.ReplacedBy != null &&
                 (old.ReplacedBy.Status == VerificationAssignmentStatus.Assigned || old.ReplacedBy.Status == VerificationAssignmentStatus.Overdue) && old.ReplacedBy.Report == null &&
                 old.ReplacedBy.AssignedAt <= now.AddHours(-48))) reason = ReplacementTimeout;
             else return;
+            v.BookingStatus = VerificationBookingStatus.Cancelled;
             v.Status = ProjectVerificationStatus.Cancelled;
             v.CancellationReason = reason; v.CancelledAt = now; v.UpdatedAt = now;
             foreach (var a in v.Assignments.Where(a => a.Status is VerificationAssignmentStatus.Assigned or VerificationAssignmentStatus.Overdue))
@@ -128,7 +128,8 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, VerificationNo
             catch (UniNet.Application.ProjectVerificationException) { eligible = false; }
             eligible = eligible && await db.VerificationTransactions.AnyAsync(t => t.VerificationId == v.Id &&
                 t.Transaction.Status == PaymentStatus.Success && t.Transaction.PackageId == v.PackageId &&
-                t.Transaction.UserId == v.RequestByUserId && t.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
+                t.Transaction.UserId == v.RequestByUserId && t.Transaction.FailureReason == null &&
+                t.ReservationId == v.ReservationId && v.BookingStatus == VerificationBookingStatus.Confirmed &&
                 !t.Transaction.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct);
             if (eligible && admin != null && replacement != null)
             {

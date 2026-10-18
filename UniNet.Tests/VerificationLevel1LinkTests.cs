@@ -47,9 +47,9 @@ public sealed partial class ProjectVerificationTests
         f.Other.Role = AccountRole.Admin;
         await f.Db.SaveChangesAsync();
         var id = (await f.CreateVerificationAsync()).Verification.Id;
-        await f.PayAsync(id, f.Owner);
         var slot = Fixture.Slot();
         await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, slot);
+        await f.PayAsync(id, f.Owner);
         var pin = (await f.Db.ProjectVerifications.SingleAsync()).EvidenceModerationId;
         if (policyChanged) f.Configuration["EvidenceModeration:PolicyVersion"] = "changed";
         else
@@ -148,7 +148,7 @@ public sealed partial class ProjectVerificationTests
         var staff = await f.Db.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Verificator);
         var assignments = new AssignmentService(f.Db, f.Configuration);
         var error = await Assert.ThrowsAsync<AssignmentException>(() => assignments.CreateAsync(f.Other.Id, new(id, staff.Id)));
-        Assert.Equal("PAYMENT_REQUIRED", error.Code);
+        Assert.Equal("BOOKING_NOT_CONFIRMED", error.Code);
         await f.PayAsync(id, f.Owner);
         var assignment = await assignments.CreateAsync(f.Other.Id, new(id, staff.Id));
         var detail = await assignments.GetDetailAsync(assignment.Id, staff.AccountId);
