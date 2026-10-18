@@ -895,6 +895,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3"));
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.HasOne(x => x.EvidenceModeration).WithMany()
+                .HasForeignKey(x => x.EvidenceModerationId).OnDelete(DeleteBehavior.Restrict);
             e.Property(x => x.AiSummary).HasColumnType("text");
             e.Property(x => x.AiScore).HasPrecision(5, 2);
             e.Property(x => x.AiAdditionalEvidenceJson).HasColumnType("jsonb").IsRequired();

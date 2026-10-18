@@ -131,7 +131,7 @@ public sealed partial class ProjectVerificationTests
         var payment = await f.Db.Transactions.SingleAsync();
         payment.Amount = 51000; payment.PaidAt = now.AddHours(-24);
         await f.Db.SaveChangesAsync();
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db));
+        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
         await tasks.RefundTimeoutsAsync(now, default);
         await tasks.RefundTimeoutsAsync(now.AddMinutes(1), default);
         var refund = await f.Db.RefundTransactions.SingleAsync();
@@ -150,7 +150,7 @@ public sealed partial class ProjectVerificationTests
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync()).Verification.Id;
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db));
+        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
         await tasks.RefundTimeoutAsync(id, DateTimeOffset.UtcNow, default);
         Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
         await f.PayAsync(id, f.Owner);
@@ -169,7 +169,7 @@ public sealed partial class ProjectVerificationTests
         f.Db.RefundTransactions.Add(new() { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = 10000,
             PaymentProvider = "Manual", Status = PaymentStatus.Success, Reason = "Previous partial refund" });
         await f.Db.SaveChangesAsync();
-        await new VerificationDeadlineTasks(f.Db, new(f.Db)).RefundTimeoutAsync(id, DateTimeOffset.UtcNow, default);
+        await new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration).RefundTimeoutAsync(id, DateTimeOffset.UtcNow, default);
         Assert.Equal(payment.Amount, (await f.Db.RefundTransactions.ToListAsync()).Sum(r => r.Amount));
     }
 
@@ -196,7 +196,7 @@ public sealed partial class ProjectVerificationTests
         var original = await PrepareOverdueAsync(f, id, now.AddHours(-48));
         f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Verificator));
         await f.Db.SaveChangesAsync();
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db));
+        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
         await tasks.RemindAndEscalateAsync(now.AddTicks(-1), default);
         Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
         await tasks.RemindAndEscalateAsync(now, default);
@@ -221,7 +221,7 @@ public sealed partial class ProjectVerificationTests
         var id = (await f.CreateVerificationAsync()).Verification.Id;
         var now = DateTimeOffset.UtcNow;
         var a = await PrepareOverdueAsync(f, id, now.AddHours(-48));
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db));
+        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
         await tasks.RemindOrReplaceAsync(a.Id, now, default);
         await tasks.RemindOrReplaceAsync(a.Id, now.AddHours(24), default);
         await tasks.RemindOrReplaceAsync(a.Id, now.AddHours(25), default);
@@ -238,7 +238,7 @@ public sealed partial class ProjectVerificationTests
         var a = await PrepareOverdueAsync(f, id, now.AddDays(-5));
         f.Db.VerificationReports.Add(new() { Id = Guid.NewGuid(), VerificationId = a.Id, Summary = "Completed report" });
         await f.Db.SaveChangesAsync();
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db));
+        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
         await tasks.RemindAndEscalateAsync(now, default);
         await tasks.RefundTimeoutsAsync(now, default);
         Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
@@ -266,7 +266,7 @@ public sealed partial class ProjectVerificationTests
         var now = DateTimeOffset.UtcNow;
         (await f.Db.Transactions.SingleAsync()).PaidAt = now.AddDays(-2);
         await f.Db.SaveChangesAsync();
-        await new VerificationDeadlineTasks(f.Db, new(f.Db)).RefundTimeoutAsync(id, now, default);
+        await new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration).RefundTimeoutAsync(id, now, default);
         var probe = new RefundProbe();
         var tasks = new VerificationRefundTasks(f.Db, probe, new(f.Db));
         await tasks.RunAsync(now, default);
@@ -289,55 +289,11 @@ public sealed partial class ProjectVerificationTests
         var now = DateTimeOffset.UtcNow;
         (await f.Db.Transactions.SingleAsync()).PaidAt = now.AddDays(-2);
         await f.Db.SaveChangesAsync();
-        await new VerificationDeadlineTasks(f.Db, new(f.Db)).RefundTimeoutAsync(id, now, default);
+        await new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration).RefundTimeoutAsync(id, now, default);
         var tasks = new VerificationRefundTasks(f.Db, new ManualRefundProvider(), new(f.Db));
         await tasks.RunAsync(now, default); await tasks.RunAsync(now.AddHours(2), default);
         Assert.Equal(PaymentStatus.Pending, (await f.Db.RefundTransactions.AsNoTracking().SingleAsync()).Status);
         Assert.Equal(2, await f.Db.Set<VerificationNotification>().CountAsync());
     }
 
-    private sealed class AiProbe : IVerificationAiReviewer
-    {
-        public int Calls;
-        public bool Permanent;
-        public Task<VerificationAiReview> ReviewAsync(VerificationAiInput input, CancellationToken ct)
-        {
-            Calls++;
-            if (Calls == 1 || Permanent) throw new VerificationAiException("Provider unavailable", !Permanent);
-            return Task.FromResult(new VerificationAiReview("Metadata pre-check", 80, []));
-        }
-    }
-
-    [Fact]
-    public async Task AiRetriesTemporaryErrorsAndDoesNotFinalizeVerification()
-    {
-        await using var f = await Fixture.CreateAsync();
-        var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        var now = DateTimeOffset.UtcNow;
-        var probe = new AiProbe();
-        var tasks = new VerificationAiTasks(f.Db, probe, new(f.Db));
-        await tasks.RunAsync(now, default); await tasks.RunAsync(now, default);
-        Assert.Equal(1, probe.Calls);
-        await tasks.RunAsync(now.AddMinutes(2), default); await tasks.RunAsync(now.AddMinutes(3), default);
-        Assert.Equal(2, probe.Calls);
-        var result = await f.Service.GetAiPreCheckAsync(id, f.Owner.Id);
-        Assert.True(result.IsCurrent);
-        Assert.Equal(80, result.Score);
-        Assert.Equal(ProjectVerificationStatus.Pending, (await f.Db.ProjectVerifications.AsNoTracking().SingleAsync()).Status);
-    }
-
-    [Fact]
-    public async Task AiPermanentFailureStopsRetryUntilEvidenceChanges()
-    {
-        await using var f = await Fixture.CreateAsync();
-        var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        var now = DateTimeOffset.UtcNow;
-        var probe = new AiProbe { Permanent = true };
-        var tasks = new VerificationAiTasks(f.Db, probe, new(f.Db));
-        await tasks.RunAsync(now, default); await tasks.RunAsync(now.AddHours(1), default);
-        Assert.Equal(1, probe.Calls);
-        await f.Service.ResubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence()));
-        await tasks.RunAsync(now.AddHours(2), default);
-        Assert.Equal(2, probe.Calls);
-    }
 }

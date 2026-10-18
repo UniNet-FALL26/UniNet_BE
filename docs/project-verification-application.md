@@ -1,87 +1,85 @@
-# Project verification Application service
+# Project verification — level 1 and level 2 (A + B)
 
-`IProjectVerificationService` is registered in the existing API dependency injection container.
-All methods accept the authenticated **account ID**, resolve the profile and check the current
-`Project.CreatorId`. Active accounts are required. No controllers/endpoints or migrations are added.
+## Public contracts
 
-## Workflow
+- `GET /api/projects/{projectId}/evidence-moderation`: latest level-1 decision, version,
+  currentness, reasons, source/policy snapshots, attempts and per-item results.
+- `POST /api/projects/{projectId}/evidence-moderation/retry`: no request body or uploaded
+  evidence. Creator or active Admin only, as for the read route. A Completed project with
+  no prior review can explicitly request its initial review; this never marks it Passed.
+  Changed task/report data or policy creates a new immutable version. Pending/Processing
+  requests are idempotent. An unchanged completed decision returns `LEVEL1_UNCHANGED`.
+  Error retries retain the worker's five-attempt budget and scheduled backoff; exhausted
+  or permanent errors require source/policy correction (`LEVEL1_RETRY_EXHAUSTED`).
+- `POST /api/projects/{projectId}/verifications`: body `{ "packageId": "..." }`.
+  Requires project creator, active account, Completed project, no Pending case, valid
+  package and a current Passed level-1 decision matching both source and policy hashes.
+  No evidence is submitted separately for level 2.
+- The level-2 evidence submit/resubmit and AI completeness routes have been removed.
+  Detail responses expose `evidenceModeration` instead of `evidenceSubmissions`/`aiPreCheck`.
+  OpenAPI is generated from these controllers/contracts. Frontends must remove their
+  verification upload/pre-check flows and use the level-1 read/retry routes.
 
-- `CreateAsync`: Completed project, owning leader, no Pending request, active verification package
-  matching the account role. The selected package is recorded, but no charge is created here.
-  Initial evidence is optional unless `RequireEvidenceOnCreate` is enabled. `SubmittedAt` on the
-  verification records the request time; each evidence submission has its own timestamp.
-- `GetMyVerificationsAsync`: only projects currently led by the caller; optional project/status
-  filters, page >= 1 and page size 1..100.
-- `GetDetailAsync`: project, all evidence versions, AI feedback, meeting times, assignment reports
-  and actual payment/refund attempts. Empty collections/nulls represent data not yet available.
-- `SubmitEvidenceAsync`: first submission. `ResubmitEvidenceAsync`: a new immutable version of the
-  complete evidence set. To supplement evidence, send both retained and new items in that version.
-  Evidence requires a type, title and absolute HTTPS URL; duplicate URLs and missing configured
-  types are rejected. Links are stored, not downloaded or interpreted as commands.
-- `GetAiPreCheckAsync`: reads persisted feedback without invoking the existing content moderation
-  provider or finalizing verification. `HasResult=false` means no feedback yet. `IsCurrent=false`
-  means the result is not associated with the latest evidence version. The future pre-check writer
-  must persist `AiSummary`, `AiScore`, `AiReviewedAt`, `AiEvidenceVersion` and
-  `AiAdditionalEvidenceJson` (a JSON string array) together after validating provider output.
-  There is no existing evidence pre-check integration; project content moderation is a different
-  operation. This service does not invent AI thresholds or return simulated results.
-- `GetAvailableMeetingSlotsAsync` and `ScheduleMeetingAsync`: require submitted evidence and a
-  linked Success transaction for the selected package and requester, with no Pending/Success
-  refund attempt. Refunded charges cannot authorize a new booking. Working hours, notice and horizon are
-  checked on the server. Capacity is the smaller of configured capacity and active verificator
-  profiles. Existing overlapping bookings consume capacity; the same leader cannot double-book
-  across projects. Updating a booking excludes its own existing reservation.
-- Evidence changes, scheduling and cancellation require Pending, no finalization, no assignment,
-  no started/ended meeting, and a future existing booking if one exists.
-- `CancelAsync` records the reason/time and changes only verification state. It does not infer
-  refund eligibility or change transaction status. Cancellation frees the booking's capacity.
-- `GetFinalResultAsync`: reports or Verified/Failed result must exist; otherwise returns a 404
-  business exception. Reports are linked to their assignments and all previous reports remain
-  visible. No leader operation can set Verified or Failed.
+Level 1 checks report text and URL reputation only. It does not read file contents.
+It remains independent of purchasing a level-2 package. Project creation moderation,
+completion contributions, report-group selection and soft-delete history remain intact.
+Gemini content moderation and Google Safe Browsing remain registered; the completeness
+worker and its provider contract are removed.
 
-No existing completed-project peer-review eligibility policy was found. Creation checks Completed,
-package eligibility and configured evidence requirements; further prerequisites must be specified
-before adding them. Configured evidence types are enforced on every evidence submission.
+## Pinned decision and changes after creation
 
-## Required meeting configuration
+New cases persist `EvidenceModerationId`, a restrictive FK to the exact Passed review.
+Booking, slot reads, checkout and assignment (including automatic replacement) recompute
+source/policy hashes and reject stale or superseded decisions. A newly Passed version
+never rebinds an existing case. As approved for this batch, these failures preserve the
+case, original snapshot, booking and recorded payments; they do not initiate a refund.
+Existing deadline/refund policies continue independently. There is no automatic case
+recovery/rebinding API in this batch.
 
-Add approved values under `ProjectVerification` in deployment configuration. The following values
-are an **example to review**, not defaults automatically installed by this change:
+Creator case detail, Admin case detail and authorized verificator assignment detail load
+that pinned snapshot using their existing case permissions. This grants no general task
+or report access. An historical snapshot remains readable after supersession.
 
-```json
-{
-  "ProjectVerification": {
-    "RequireEvidenceOnCreate": false,
-    "RequiredEvidenceTypes": ["demo", "source"],
-    "TimeZoneId": "Asia/Bangkok",
-    "WorkingDays": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-    "WorkdayStart": "09:00:00",
-    "WorkdayEnd": "17:00:00",
-    "SlotMinutes": 60,
-    "Capacity": 2,
-    "MinimumNoticeMinutes": 1440,
-    "MaxAdvanceDays": 30
-  }
-}
-```
+## Booking and assignment
 
-Missing/invalid meeting configuration returns `MEETING_POLICY_NOT_CONFIGURED` (503). A query range
-may span at most 31 days. Slot boundaries are generated in the configured timezone and all stored
-and returned timestamps are UTC. Nonexistent/ambiguous daylight-saving times are skipped.
-Availability represents the configured common working calendar and persisted bookings; the
-current schema has no staff-specific leave/working-hours calendar. Assignment must independently
-check the selected verificator's eligibility and conflicts.
+A + B retain the existing payment-before-booking sequence; reservation and payment order
+changes belong to C. Slots and booking require a successful linked payment for the case's
+requester/package with no Pending/Success refund and no duplicate-payment-review flag.
+Assignment requires the same payment eligibility and a valid future booking, in addition
+to current level 1 and existing staff membership/conflict rules.
 
-## Persistence and concurrency
+Supply approved `ProjectVerification` settings: `TimeZoneId`, `WorkingDays`,
+`WorkdayStart`, `WorkdayEnd`, `SlotMinutes`, `Capacity`, `MinimumNoticeMinutes`,
+`MaxAdvanceDays`. Missing/invalid policy returns `MEETING_POLICY_NOT_CONFIGURED` (503).
+`RequireEvidenceOnCreate` and `RequiredEvidenceTypes` are no longer used.
 
-Minimal schema support was added for evidence versions, selected package, AI feedback metadata,
-cancellation reason/time and a nullable finalizer for Pending requests. All mutations use
-Serializable transactions. A filtered unique index enforces one Pending verification per project;
-evidence versions are unique within a verification. PostgreSQL serialization, unique-key and
-deadlock conflicts are converted to `VERIFICATION_CONFLICT` (409); reload and retry the operation.
+## Migration and historical data
 
-**No migration was generated or applied.** The service requires a later migration for these model
-changes before use against an existing PostgreSQL database. Existing rows also need an explicit
-package backfill when making `PackageId` required. Read/payment/admin/AI writers should use the
-same transaction discipline; this service does not implement payment providers, assignments,
-background jobs or formal final decisions.
+`LinkVerificationToEvidenceModeration` only adds a nullable UUID, index and restrictive FK.
+It does not drop or rewrite legacy evidence, AI completeness columns, report versions,
+Admin actions, notifications or payments. Legacy cases are not automatically linked or
+marked Passed: they remain readable, but booking/checkout/assignment returns
+`LEVEL1_LINK_REQUIRED` until a separately reviewed migration handles them. Never infer a
+historical decision by attaching the latest Passed review. This migration is generated,
+not applied to an application database by this change.
+
+Mutations retain Serializable transactions and write-conflict handling. Read-only slot
+availability is advisory; booking checks eligibility/capacity again in its transaction.
+Provider callbacks still record actual money, including for a case whose source changed;
+level-1 eligibility must not hide an actual successful payment.
+
+## Verification of this batch (18 October 2026)
+
+- API/test projects compile. EF reports no pending model changes, and the incremental
+  migration SQL was generated successfully. No application database was migrated.
+- Expanded selection: 220 passed, 2 failed, 2 skipped (224 total). It includes A/B,
+  level-1/provider fakes, checkout, deadline/refund, contribution, task/report, portfolio,
+  payment HTTP and database model tests. No portrait/native ONNX tests were selected.
+- Two existing contract mismatches, verified against the unchanged HEAD sources:
+  `TransactionHttpTests.AllFiveRoutesBindAndUserRoutesRequireStudentWhileWebhookAllowsAnonymous`
+  calls the absent `/api/payments/{id}/reconcile` route; `DatabaseDesignTests.SkillsUseExactlyFourCategories`
+  expects a non-null category check although the model permits null categories. These
+  failures were not repaired by changing unrelated product behavior in A/B.
+- Two PostgreSQL concurrency tests skip because `UNINET_TEST_POSTGRES` is not configured.
+  Real PostgreSQL migration/concurrency and real Gemini/Safe Browsing/PayOS integrations
+  are not verified by these results. Provider tests use fakes/HTTP handlers.

@@ -69,20 +69,6 @@ public sealed class EvidenceProviderTests
     }
 
     [Fact]
-    public async Task CompletenessContractRemainsAdvisoryAndUnchanged()
-    {
-        using var http = new HttpClient(new Handler(async (request, ct) =>
-        {
-            var body = await request.Content!.ReadAsStringAsync(ct);
-            Assert.Contains("advisory evidence completeness", body);
-            Assert.DoesNotContain("administrator policy", body);
-            return Json(GeminiResponse("{\"summary\":\"Metadata only\",\"score\":80,\"additionalEvidenceRequired\":[]}"));
-        }));
-        var result = await new GeminiVerificationAiReviewer(http, Config()).ReviewAsync(new("Title", "Description", []), default);
-        Assert.Equal(80, result.Score); Assert.Equal("Metadata only", result.Summary);
-    }
-
-    [Fact]
     public async Task SafeBrowsingUsesFixedEndpointAndActualListResponseWithoutFetchingEvidence()
     {
         var count = 0;
