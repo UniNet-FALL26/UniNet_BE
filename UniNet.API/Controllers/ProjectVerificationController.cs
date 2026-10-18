@@ -45,26 +45,6 @@ public sealed class ProjectVerificationController(IProjectVerificationService ve
     public Task<ProjectVerificationDetailResponse> GetDetail(Guid verificationId, CancellationToken ct)
         => verifications.GetDetailAsync(verificationId, AccountId, ct);
 
-    [HttpPost("verifications/{verificationId:guid}/evidence")]
-    public async Task<ActionResult<VerificationEvidenceSubmissionResponse>> SubmitEvidence(
-        Guid verificationId, [FromBody] SubmitVerificationEvidenceRequest request, CancellationToken ct)
-    {
-        var result = await verifications.SubmitEvidenceAsync(verificationId, AccountId, request, ct);
-        return CreatedAtAction(nameof(GetDetail), new { verificationId }, result);
-    }
-
-    [HttpPost("verifications/{verificationId:guid}/evidence/resubmit")]
-    public async Task<ActionResult<VerificationEvidenceSubmissionResponse>> ResubmitEvidence(
-        Guid verificationId, [FromBody] SubmitVerificationEvidenceRequest request, CancellationToken ct)
-    {
-        var result = await verifications.ResubmitEvidenceAsync(verificationId, AccountId, request, ct);
-        return CreatedAtAction(nameof(GetDetail), new { verificationId }, result);
-    }
-
-    [HttpGet("verifications/{verificationId:guid}/ai-pre-check")]
-    public Task<VerificationAiPreCheckResponse> GetAiPreCheck(Guid verificationId, CancellationToken ct)
-        => verifications.GetAiPreCheckAsync(verificationId, AccountId, ct);
-
     [HttpGet("verifications/{verificationId:guid}/meeting-slots")]
     public Task<VerificationMeetingSlotsResponse> GetAvailableMeetingSlots(
         Guid verificationId,

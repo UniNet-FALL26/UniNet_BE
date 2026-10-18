@@ -394,6 +394,16 @@ public sealed class TransactionTests
                 ["Payments:ReturnUrl"] = "https://frontend.test/paid",
                 ["Payments:CancelUrl"] = "https://frontend.test/cancel"
             }).Build();
+            var source = new EvidenceModerationSource(db, configuration);
+            var snapshot = JsonSerializer.Serialize(await source.CaptureAsync(project.Id, default));
+            var policy = JsonSerializer.Serialize(source.CapturePolicy());
+            var review = new ProjectEvidenceModeration { ProjectId = project.Id, Version = 1,
+                SnapshotJson = snapshot, SourceHash = EvidenceModerationSource.Hash(snapshot),
+                PolicyJson = policy, PolicyHash = EvidenceModerationSource.Hash(policy),
+                Status = EvidenceModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow };
+            verification.EvidenceModeration = review;
+            db.ProjectEvidenceModerations.Add(review);
+            await db.SaveChangesAsync();
             return new(connection, db, options, configuration, owner, other, project, package, verification);
         }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await connection.DisposeAsync(); }

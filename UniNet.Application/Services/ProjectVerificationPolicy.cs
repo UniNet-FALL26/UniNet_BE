@@ -5,8 +5,6 @@ namespace UniNet.Application.Services;
 // No meeting hours/capacity are assumed until the deployment supplies its approved policy.
 public sealed class ProjectVerificationPolicy
 {
-    public bool RequireEvidenceOnCreate { get; set; }
-    public string[] RequiredEvidenceTypes { get; set; } = [];
     public string? TimeZoneId { get; set; }
     public DayOfWeek[] WorkingDays { get; set; } = [];
     public TimeOnly? WorkdayStart { get; set; }

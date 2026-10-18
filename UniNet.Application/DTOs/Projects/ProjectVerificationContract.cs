@@ -2,9 +2,7 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application;
 
-public record VerificationEvidenceRequest(string Type, string Title, string Url, string? Description = null);
-public record CreateProjectVerificationRequest(Guid PackageId, List<VerificationEvidenceRequest>? Evidence = null);
-public record SubmitVerificationEvidenceRequest(List<VerificationEvidenceRequest> Evidence);
+public record CreateProjectVerificationRequest(Guid PackageId);
 public record ScheduleProjectVerificationRequest(DateTimeOffset StartAt, DateTimeOffset EndAt);
 public record CancelProjectVerificationRequest(string Reason);
 
@@ -15,10 +13,6 @@ public record ProjectVerificationsResponse(int Page, int PageSize, int TotalItem
     List<ProjectVerificationResponse> Verifications);
 public record VerificationProjectResponse(Guid Id, string Title, string ProjectField, string Description,
     ProjectStatus Status, Guid LeaderId);
-public record VerificationEvidenceSubmissionResponse(Guid Id, int Version, Guid SubmittedByUserId,
-    DateTimeOffset SubmittedAt, List<VerificationEvidenceRequest> Evidence);
-public record VerificationAiPreCheckResponse(bool HasResult, bool IsCurrent, int? EvidenceVersion,
-    string? Summary, decimal? Score, DateTimeOffset? ReviewedAt, List<string> AdditionalEvidenceRequired);
 public record VerificationReportResponse(Guid Id, Guid AssignmentId, string Summary, string? Findings,
     string? Recommendations, DateTimeOffset SubmittedAt);
 public record VerificationAssignmentResponse(Guid Id, Guid AssignedToUserId, VerificationAssignmentStatus Status,
@@ -31,7 +25,7 @@ public record VerificationFinalResultResponse(ProjectVerificationStatus Status, 
     Guid? FinalizedByUserId, List<VerificationReportResponse> Reports);
 public record ProjectVerificationDetailResponse(ProjectVerificationResponse Verification,
     VerificationProjectResponse Project, Guid PackageId,
-    List<VerificationEvidenceSubmissionResponse> EvidenceSubmissions, VerificationAiPreCheckResponse AiPreCheck,
+    UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration,
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt,
     List<VerificationAssignmentResponse> Assignments, List<VerificationPaymentResponse> Payments,
     VerificationFinalResultResponse? FinalResult, string? CancellationReason, DateTimeOffset? CancelledAt);

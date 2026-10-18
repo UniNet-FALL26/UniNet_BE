@@ -7,7 +7,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class VerificationDeadlineTasks(UniNetDbContext db, VerificationNotifications notifications)
+public sealed class VerificationDeadlineTasks(UniNetDbContext db, VerificationNotifications notifications, Microsoft.Extensions.Configuration.IConfiguration configuration)
 {
     public const string AssignmentTimeout = "SYSTEM_TIMEOUT:ASSIGNMENT";
     public const string ReplacementTimeout = "SYSTEM_TIMEOUT:REPLACEMENT";
@@ -123,7 +123,14 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, VerificationNo
                     (active.Status == VerificationAssignmentStatus.Assigned || active.Status == VerificationAssignmentStatus.Overdue) &&
                     active.ProjectVerification.Status == ProjectVerificationStatus.Pending))
                 .OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
-            if (admin != null && replacement != null)
+            var eligible = true;
+            try { await new VerificationEligibility(db, configuration).RequireCaseAsync(v, ct); }
+            catch (UniNet.Application.ProjectVerificationException) { eligible = false; }
+            eligible = eligible && await db.VerificationTransactions.AnyAsync(t => t.VerificationId == v.Id &&
+                t.Transaction.Status == PaymentStatus.Success && t.Transaction.PackageId == v.PackageId &&
+                t.Transaction.UserId == v.RequestByUserId && t.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
+                !t.Transaction.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct);
+            if (eligible && admin != null && replacement != null)
             {
                 var next = new VerificationAssignment { Id = Guid.NewGuid(), ProjectVerificationId = v.Id, ProjectVerification = v,
                     AssignedToUserId = replacement.Id, AdminId = admin.Id, Status = VerificationAssignmentStatus.Assigned,

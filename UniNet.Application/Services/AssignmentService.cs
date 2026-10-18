@@ -10,7 +10,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
+public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.Configuration.IConfiguration configuration) : IAssignmentService
 {
     public async Task<AssignmentDetailResponse> GetDetailAsync(Guid assignmentId, Guid accountId,
         CancellationToken ct = default)
@@ -18,7 +18,7 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
         var user = await GetActorAsync(accountId, null, ct);
         var assignment = await AssignmentQuery().AsNoTracking()
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
-            .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceSubmissions)
+            .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
             .Include(a => a.Report).ThenInclude(r => r!.Versions).AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == assignmentId &&
                 (user.Account.Role == AccountRole.Admin || a.AssignedToUserId == user.Id), ct)
@@ -168,6 +168,13 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
         Require(verification.ScheduledStartAt.HasValue && verification.ScheduledEndAt.HasValue &&
             verification.ScheduledStartAt < verification.ScheduledEndAt && verification.ScheduledStartAt > DateTimeOffset.UtcNow,
             "INVALID_VERIFICATION_SCHEDULE", "A valid future meeting schedule is required.", 409);
+        await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+        Require(await db.VerificationTransactions.AnyAsync(v => v.VerificationId == id &&
+            v.Transaction.Status == PaymentStatus.Success && v.Transaction.PackageId == verification.PackageId &&
+            v.Transaction.UserId == verification.RequestByUserId &&
+            v.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
+            !v.Transaction.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct),
+            "PAYMENT_REQUIRED", "A valid payment is required before assignment.", 409);
         return verification;
     }
 

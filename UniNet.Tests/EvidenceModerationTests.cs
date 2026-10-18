@@ -77,7 +77,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task CompletionSnapshotsLatestReportPerGroupIncludingUnapprovedAndCancelledTasks()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await Fixture.CreateAsync(passed: false);
         var old = await SeedEvidenceAsync(f);
         var revised = new TaskReport { ProjectTaskId = old.ProjectTaskId, SubmittedById = old.SubmittedById,
             ReportGroupId = old.ReportGroupId, ParentReportId = old.Id,
@@ -110,7 +110,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task SnapshotFailureRollsBackCompletedTransition()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         await f.Db.Database.ExecuteSqlRawAsync("CREATE TRIGGER FailSnapshot BEFORE INSERT ON ProjectEvidenceModerations BEGIN SELECT RAISE(ABORT, 'snapshot failed'); END;");
         await Assert.ThrowsAsync<DbUpdateException>(() => CompleteAsync(f));
         f.Db.ChangeTracker.Clear();
@@ -123,7 +123,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task EmptyEvidenceNeverPassesOrCallsProviders()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f, file: false); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f, file: false); await CompleteAsync(f);
         var content = new ContentChecker(); var urls = new UrlChecker();
         await EvidenceWorker(f, content, urls).RunAsync(DateTimeOffset.UtcNow, default);
         Assert.Equal(EvidenceModerationStatus.NeedsEvidence, (await f.Db.ProjectEvidenceModerations.SingleAsync()).Status);
@@ -133,7 +133,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task PassedOnlyCoversTextAndUrlsWithExplicitFileExclusion()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await Fixture.CreateAsync(passed: false);
         var report = await SeedEvidenceAsync(f, text: "Work is at https://example.com/demo."); await CompleteAsync(f);
         var content = new ContentChecker(); var urls = new UrlChecker();
         await EvidenceWorker(f, content, urls).RunAsync(DateTimeOffset.UtcNow, default);
@@ -157,7 +157,7 @@ public sealed partial class ProjectVerificationTests
     [InlineData("cấmabc", "FormC", false, false)]
     public async Task ForbiddenTermsFollowExplicitCaseAccentAndWordPolicy(string text, string normalization, bool caseSensitive, bool rejected)
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f, text: text);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f, text: text);
         f.Configuration["EvidenceModeration:TextNormalization"] = normalization;
         f.Configuration["EvidenceModeration:CaseSensitive"] = caseSensitive.ToString();
         await CompleteAsync(f);
@@ -171,7 +171,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task UnsafeUrlAndContextualContentViolationsAreRecordedAgainstTheirSource()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
         await EvidenceWorker(f, new() { Pass = false }, new() { Pass = false }).RunAsync(DateTimeOffset.UtcNow, default);
         var m = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync();
         Assert.Equal(EvidenceModerationStatus.Rejected, m.Status);
@@ -183,7 +183,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task TransientProviderErrorsRetryWithHistoryAndNeverBecomePassedPrematurely()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
         var content = new ContentChecker { Error = new("Timeout", true, "AI_TIMEOUT") }; var urls = new UrlChecker();
         var worker = EvidenceWorker(f, content, urls); var now = DateTimeOffset.UtcNow;
         await worker.RunAsync(now, default); await worker.RunAsync(now, default);
@@ -199,7 +199,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task UrlProviderFailureLeavesSuccessfulContentCheckButBlocksPassing()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
         await EvidenceWorker(f, new(), new() { Error = new("No URL credentials", false, "URL_NOT_CONFIGURED") })
             .RunAsync(DateTimeOffset.UtcNow, default);
         var m = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync();
@@ -215,7 +215,7 @@ public sealed partial class ProjectVerificationTests
     [InlineData("[Proof](relative-evidence.pdf)", "relative-evidence.pdf")]
     public async Task ExplicitUncheckableLinksAreNotSilentlyOmitted(string text, string expected)
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f, text: text); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f, text: text); await CompleteAsync(f);
         var urls = new UrlChecker { Error = new("Unsupported URL", false, "URL_NOT_CHECKABLE") };
         await EvidenceWorker(f, new(), urls).RunAsync(DateTimeOffset.UtcNow, default);
         Assert.Contains(expected, urls.Seen);
@@ -225,7 +225,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task MissingPolicyStopsAndNotifiesAdminsWithoutInventingDefaults()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync();
         f.Configuration["EvidenceModeration:PolicyVersion"] = null; await CompleteAsync(f);
         var content = new ContentChecker(); var worker = EvidenceWorker(f, content, new());
@@ -243,7 +243,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task RetryBudgetExhaustionNotifiesOnceAndPreservesAllAttempts()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync(); await CompleteAsync(f);
         var content = new ContentChecker { Error = new("Unavailable", true) }; var worker = EvidenceWorker(f, content, new());
         var now = DateTimeOffset.UtcNow;
@@ -262,7 +262,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task AbandonedProcessingIsRecoveredWithAuditAndBackoff()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
         var now = DateTimeOffset.UtcNow; var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
         m.Status = EvidenceModerationStatus.Processing; m.LeaseToken = Guid.NewGuid();
         m.LeaseExpiresAt = now.AddTicks(-1); m.AttemptCount = 1;
@@ -281,7 +281,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task SourceChangeDuringProviderCallRetainsOldResultWithoutApplyingIt()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
         var content = new ContentChecker { DuringCall = async () =>
         {
             f.Db.TaskReports.Add(new() { ProjectTaskId = report.ProjectTaskId, SubmittedById = report.SubmittedById,
@@ -301,7 +301,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task TaskReportRevisionAutomaticallyInvalidatesCompletedProjectSnapshot()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f);
         report.Status = TaskReportStatus.RevisionRequested; await f.Db.SaveChangesAsync(); await CompleteAsync(f);
         await EvidenceWorker(f, new(), new()).RunAsync(DateTimeOffset.UtcNow, default);
         var oldJson = (await f.Db.ProjectEvidenceModerations.SingleAsync()).SnapshotJson;
@@ -315,7 +315,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task DeletingTaskRetainsItsAuditSnapshotAndQueuesEmptySource()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
         var oldJson = (await f.Db.ProjectEvidenceModerations.SingleAsync()).SnapshotJson;
         await new ProjectTaskService(f.Db, f.Configuration).DeleteProjectTaskAsync(f.Project.Id, report.ProjectTaskId, f.Owner.Id);
         Assert.Equal(oldJson, (await f.Db.ProjectEvidenceModerations.SingleAsync(m => m.Version == 1)).SnapshotJson);
@@ -327,7 +327,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task SnapshotColumnsCannotBeRewrittenThroughEf()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
         var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
         f.Db.Entry(m).Property(x => x.SnapshotJson).CurrentValue = "{}";
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
@@ -336,7 +336,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task MergeKeepsEveryReportGroupIncludingDraftWithdrawnAndSoftDeletedEvidence()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f);
         foreach (var state in new[] { TaskReportStatus.Draft, TaskReportStatus.Withdrawn, TaskReportStatus.Approved })
         {
             var deleted = state == TaskReportStatus.Approved;

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
 
@@ -10,19 +9,6 @@ public static class ProjectVerificationMapping
         verification.Id, verification.ProjectId, verification.Project.Title, verification.Status,
         verification.SubmittedAt, verification.ScheduledStartAt, verification.ScheduledEndAt,
         verification.CreatedAt, verification.UpdatedAt);
-
-    public static VerificationEvidenceSubmissionResponse ToEvidenceResponse(ProjectVerificationEvidence evidence) => new(
-        evidence.Id, evidence.Version, evidence.SubmittedByUserId, evidence.SubmittedAt,
-        JsonSerializer.Deserialize<List<VerificationEvidenceRequest>>(evidence.EvidenceJson) ?? []);
-
-    public static VerificationAiPreCheckResponse ToAiResponse(ProjectVerification verification)
-    {
-        var latest = verification.EvidenceSubmissions.Select(e => (int?)e.Version).Max();
-        var hasResult = verification.AiReviewedAt.HasValue || verification.AiSummary != null || verification.AiScore.HasValue;
-        return new(hasResult, hasResult && latest.HasValue && verification.AiEvidenceVersion == latest,
-            verification.AiEvidenceVersion, verification.AiSummary, verification.AiScore, verification.AiReviewedAt,
-            JsonSerializer.Deserialize<List<string>>(verification.AiAdditionalEvidenceJson) ?? []);
-    }
 
     public static VerificationReportResponse ToReportResponse(VerificationReport report)
     {
@@ -45,8 +31,7 @@ public static class ProjectVerificationMapping
         ToResponse(verification), new(verification.ProjectId, verification.Project.Title,
             verification.Project.ProjectField, verification.Project.Description, verification.Project.Status,
             verification.Project.CreatorId), verification.PackageId,
-        verification.EvidenceSubmissions.OrderBy(e => e.Version).Select(ToEvidenceResponse).ToList(),
-        ToAiResponse(verification), verification.MeetingStartAt, verification.MeetingEndAt,
+        verification.EvidenceModeration == null ? null : EvidenceModerationMapping.ToResponse(verification.EvidenceModeration), verification.MeetingStartAt, verification.MeetingEndAt,
         verification.Assignments.OrderBy(a => a.AssignedAt).ThenBy(a => a.Id)
             .Select(a => new VerificationAssignmentResponse(a.Id, a.AssignedToUserId, a.Status, a.AssignedAt,
                 a.Report == null ? null : ToReportResponse(a.Report))).ToList(),

@@ -28,6 +28,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 "INVALID_VERIFICATION_STATE", "Only pending, unfinalized verifications can be paid.", 409);
             Require(verification.Project.Status == ProjectStatus.Completed, "PROJECT_NOT_COMPLETED",
                 "Only completed projects are eligible for verification payment.", 409);
+            await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
             var attempts = await db.Transactions.AsNoTracking()
                 .Where(t => t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == verificationId)
                 .OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id).ToListAsync(ct);

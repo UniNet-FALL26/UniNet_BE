@@ -51,7 +51,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
     }
 
     private async Task<ProjectVerification> LoadAsync(Guid id, CancellationToken ct) =>
-        await db.ProjectVerifications.AsNoTracking().Include(v => v.Project).Include(v => v.EvidenceSubmissions)
+        await db.ProjectVerifications.AsNoTracking().Include(v => v.Project).Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
         .Include(v => v.Assignments).ThenInclude(a => a.Report).ThenInclude(r => r!.Versions)
         .Include(v => v.VerificationTransactions).ThenInclude(t => t.Transaction).ThenInclude(t => t.RefundTransactions)
         .AsSplitQuery().FirstOrDefaultAsync(v => v.Id == id, ct)

@@ -9,11 +9,6 @@ public interface IProjectVerificationService
     Task<ProjectVerificationsResponse> GetMyVerificationsAsync(Guid accountId, Guid? projectId = null,
         ProjectVerificationStatus? status = null, int page = 1, int pageSize = 10, CancellationToken ct = default);
     Task<ProjectVerificationDetailResponse> GetDetailAsync(Guid verificationId, Guid accountId, CancellationToken ct = default);
-    Task<VerificationEvidenceSubmissionResponse> SubmitEvidenceAsync(Guid verificationId, Guid accountId,
-        SubmitVerificationEvidenceRequest request, CancellationToken ct = default);
-    Task<VerificationEvidenceSubmissionResponse> ResubmitEvidenceAsync(Guid verificationId, Guid accountId,
-        SubmitVerificationEvidenceRequest request, CancellationToken ct = default);
-    Task<VerificationAiPreCheckResponse> GetAiPreCheckAsync(Guid verificationId, Guid accountId, CancellationToken ct = default);
     Task<VerificationMeetingSlotsResponse> GetAvailableMeetingSlotsAsync(Guid verificationId, Guid accountId,
         DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default);
     Task<ProjectVerificationDetailResponse> ScheduleMeetingAsync(Guid verificationId, Guid accountId,
