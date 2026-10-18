@@ -5,6 +5,8 @@ namespace UniNet.Application;
 
 public static class TransactionMapping
 {
+    public const string LatePaymentReview = "LATE_PAYMENT_REVIEW_REQUIRED";
+    public const string BookingPaymentReview = "BOOKING_PAYMENT_REVIEW_REQUIRED";
     public const string DuplicatePaymentReview = "DUPLICATE_PAYMENT_REVIEW_REQUIRED";
 
     public static TransactionResponse ToResponse(Transaction transaction, Guid verificationId) => new(
@@ -14,5 +16,5 @@ public static class TransactionMapping
         transaction.ExpiredAt, transaction.CreatedAt, transaction.UpdatedAt,
         transaction.Status == PaymentStatus.Pending &&
             (string.IsNullOrEmpty(transaction.PaymentUrl) || transaction.FailureReason != null),
-        transaction.FailureReason is DuplicatePaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", transaction.FailureReason);
+        transaction.FailureReason is DuplicatePaymentReview or LatePaymentReview or BookingPaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", transaction.FailureReason);
 }

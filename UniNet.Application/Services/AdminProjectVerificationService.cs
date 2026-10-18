@@ -33,7 +33,8 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
         if (from.HasValue) query = query.Where(v => v.SubmittedAt >= from);
         if (to.HasValue) query = query.Where(v => v.SubmittedAt <= to);
         if (pendingAssignment) query = query.Where(v => v.Status == ProjectVerificationStatus.Pending &&
-            v.FinalizedAt == null && !v.Assignments.Any(a => a.Status != VerificationAssignmentStatus.Cancelled));
+            v.FinalizedAt == null && v.BookingStatus == VerificationBookingStatus.Confirmed &&
+            v.AssignmentEligibleAt != null && !v.Assignments.Any(a => a.Status != VerificationAssignmentStatus.Cancelled));
         if (overdue)
         {
             var now = DateTimeOffset.UtcNow;
@@ -52,7 +53,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
 
     private async Task<ProjectVerification> LoadAsync(Guid id, CancellationToken ct) =>
         await db.ProjectVerifications.AsNoTracking().Include(v => v.Project).Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
-        .Include(v => v.Assignments).ThenInclude(a => a.Report).ThenInclude(r => r!.Versions)
+        .Include(v => v.Assignments).ThenInclude(a => a.Report)
         .Include(v => v.VerificationTransactions).ThenInclude(t => t.Transaction).ThenInclude(t => t.RefundTransactions)
         .AsSplitQuery().FirstOrDefaultAsync(v => v.Id == id, ct)
         ?? throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
@@ -61,9 +62,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
     {
         await AuthorizeAsync(accountId, ct);
         var detail = ProjectVerificationMapping.ToDetailResponse(await LoadAsync(id, ct));
-        var actions = await db.Set<VerificationAdminAction>().AsNoTracking().Where(a => a.VerificationId == id)
-            .OrderBy(a => a.CreatedAt).ThenBy(a => a.Id).ToListAsync(ct);
-        return new(detail, actions.Select(MapAction).ToList());
+        return new(detail);
     }
 
     public async Task<List<VerificationReportResponse>> GetReportsAsync(Guid id, Guid accountId, CancellationToken ct = default)
@@ -96,26 +95,10 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
             throw Error("INVALID_REFUND_AMOUNT", "Refund must be a positive whole VND amount within the unreserved payment balance.", 409);
         var now = DateTimeOffset.UtcNow;
         var refund = new RefundTransaction { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = request.Amount,
-            Status = PaymentStatus.Pending, PaymentProvider = payment.PaymentMethod ?? "Manual", Reason = request.Reason.Trim(), CreatedAt = now, UpdatedAt = now };
+            Status = PaymentStatus.Pending, PaymentProvider = payment.PaymentMethod ?? "Manual", Reason = request.Reason.Trim(), RequestedByUserId = actor, RequestedAt = now, RequestSource = RefundRequestSource.Admin, CreatedAt = now, UpdatedAt = now };
         payment.UpdatedAt = now;
         db.RefundTransactions.Add(refund);
-        db.Set<VerificationAdminAction>().Add(new() { Id = Guid.NewGuid(), VerificationId = id, ActorUserId = actor,
-            Decision = "RefundRequested", Reason = refund.Reason, RefundId = refund.Id, CreatedAt = now });
-        return new VerificationRefundResponse(refund.Id, refund.Amount, refund.Status, refund.Reason, null);
-    }, ct);
-
-    public Task<VerificationAdminActionResponse> ReviewAsync(Guid id, Guid accountId, ReviewVerificationRequest request,
-        CancellationToken ct = default) => MutateAsync(async () =>
-    {
-        var actor = await AuthorizeAsync(accountId, ct);
-        ValidateReason(request.Reason);
-        if (!Enum.IsDefined(request.Decision)) throw Error("INVALID_REVIEW_DECISION", "Invalid review decision.");
-        var verification = await LoadAsync(id, ct);
-        if (!verification.Assignments.Any(a => a.Report != null)) throw Error("REPORT_REQUIRED", "A report is required for review.", 409);
-        var action = new VerificationAdminAction { Id = Guid.NewGuid(), VerificationId = id, ActorUserId = actor,
-            Decision = request.Decision.ToString(), Reason = request.Reason.Trim(), CreatedAt = DateTimeOffset.UtcNow };
-        db.Set<VerificationAdminAction>().Add(action);
-        return MapAction(action);
+        return new VerificationRefundResponse(refund.Id, refund.Amount, refund.Status, refund.Reason, null, refund.RequestedByUserId, refund.RequestedAt, refund.RequestSource);
     }, ct);
 
     private async Task<T> MutateAsync<T>(Func<Task<T>> action, CancellationToken ct)
@@ -137,6 +120,5 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
     {
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 2000) throw Error("INVALID_REASON", "Reason must contain 1 to 2000 characters.");
     }
-    private static VerificationAdminActionResponse MapAction(VerificationAdminAction a) => new(a.Id, a.ActorUserId, a.Decision, a.Reason, a.RefundId, a.CreatedAt);
     private static ProjectVerificationException Error(string code, string message, int status = 400) => new(code, message, status);
 }

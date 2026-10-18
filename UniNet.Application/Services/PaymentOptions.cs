@@ -18,9 +18,9 @@ public sealed class PaymentOptions
         }
     }
 
-    public void RequireCheckoutConfiguration()
+    public void RequireCheckoutConfiguration(bool requireLinkDuration = true)
     {
-        if (!IsWebUrl(ReturnUrl) || !IsWebUrl(CancelUrl) || LinkExpirationMinutes is < 1 or > 1440)
+        if (!IsWebUrl(ReturnUrl) || !IsWebUrl(CancelUrl) || (requireLinkDuration && (LinkExpirationMinutes is < 1 or > 1440)))
             throw new TransactionException("PAYMENT_NOT_CONFIGURED",
                 "Configure payment return/cancel URLs and link expiration before creating checkout.", 503);
     }

@@ -34,10 +34,21 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 .OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id).ToListAsync(ct);
             Require(!attempts.Any(t => t.Status == PaymentStatus.Success), "VERIFICATION_ALREADY_PAID",
                 "This verification already has a successful payment.", 409);
+            var reservationNow = DateTimeOffset.UtcNow;
+            Require(verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservationId.HasValue &&
+                verification.ReservedUntil > reservationNow && verification.ScheduledStartAt > reservationNow,
+                "RESERVATION_REQUIRED", "Hold an available slot before checkout; expired reservations cannot be paid.", 409);
             var pending = attempts.FirstOrDefault(t => t.Status == PaymentStatus.Pending);
-            if (pending != null) return (Transaction: pending, Created: false);
+            if (pending != null)
+            {
+                var association = await db.VerificationTransactions.SingleAsync(t => t.TransactionId == pending.Id, ct);
+                Require(association.ReservationId == verification.ReservationId && pending.ExpiredAt > reservationNow &&
+                    pending.ExpiredAt == verification.ReservedUntil, "PAYMENT_RECONCILIATION_REQUIRED",
+                    "Resolve the existing checkout before requesting another payment.", 409);
+                return (Transaction: pending, Created: false);
+            }
 
-            options.RequireCheckoutConfiguration();
+            options.RequireCheckoutConfiguration(requireLinkDuration: false);
             provider.EnsureConfigured();
             var package = await db.Packages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == verification.PackageId, ct);
             Require(package != null && package.IsActive && package.Type == PackageType.Verification &&
@@ -53,12 +64,13 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 // 52-bit random codes remain exact in both .NET Int64 and JavaScript numbers.
                 ProviderOrderCode = ((BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8)) &
                     ((1UL << 52) - 1)) + 1).ToString(CultureInfo.InvariantCulture),
-                ExpiredAt = now.AddMinutes(options.LinkExpirationMinutes), CreatedAt = now, UpdatedAt = now,
+                ExpiredAt = verification.ReservedUntil, CreatedAt = now, UpdatedAt = now,
                 VerificationTransaction = new()
                 {
-                    VerificationId = verificationId, CreatedAt = now, UpdatedAt = now
+                    VerificationId = verificationId, ReservationId = verification.ReservationId, CreatedAt = now, UpdatedAt = now
                 }
             };
+            verification.UpdatedAt = now;
             db.Transactions.Add(transaction);
             return (Transaction: transaction, Created: true);
         }, ct);
@@ -202,12 +214,37 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             {
                 var alreadyPaid = await db.Transactions.AnyAsync(t => t.Id != transaction.Id &&
                     t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == verification.Id &&
-                    t.Status == PaymentStatus.Success && t.FailureReason != TransactionMapping.DuplicatePaymentReview, ct);
+                    t.Status == PaymentStatus.Success, ct);
                 // Preserve every real charge, but only the first successful charge is accepted.
                 transaction.Status = PaymentStatus.Success;
                 transaction.PaidAt = result.PaidAt?.ToUniversalTime() ?? now;
                 transaction.PaymentRef = result.Reference?.Length <= 255 ? result.Reference : null;
                 transaction.FailureReason = alreadyPaid ? TransactionMapping.DuplicatePaymentReview : null;
+                if (!alreadyPaid)
+                {
+                    var validHold = verification.Status == ProjectVerificationStatus.Pending && verification.FinalizedAt == null &&
+                        verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil > now &&
+                        verification.ScheduledStartAt > now && transaction.ExpiredAt > now &&
+                        transaction.VerificationTransaction.ReservationId != null &&
+                        transaction.VerificationTransaction.ReservationId == verification.ReservationId;
+                    if (!validHold) transaction.FailureReason = TransactionMapping.LatePaymentReview;
+                    else
+                    {
+                        try
+                        {
+                            await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+                            if (!await new ProjectVerificationService(db, configuration).HasConfirmationCapacityAsync(verification, ct))
+                                transaction.FailureReason = TransactionMapping.BookingPaymentReview;
+                        }
+                        catch (ProjectVerificationException) { transaction.FailureReason = TransactionMapping.BookingPaymentReview; }
+                        if (transaction.FailureReason == null)
+                        {
+                            verification.BookingStatus = VerificationBookingStatus.Confirmed;
+                            verification.BookingConfirmedAt = now;
+                            verification.AssignmentEligibleAt = now;
+                        }
+                    }
+                }
                 if (alreadyPaid) logger.LogError("Duplicate verification charge requires review: {TransactionId} / {VerificationId}",
                     transaction.Id, verification.Id);
             }
@@ -263,7 +300,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             ?? throw new TransactionException("PROFILE_NOT_FOUND", "User profile not found.", 404);
         Require(profile.Account.Status == AccountStatus.Active && profile.Account.Role == AccountRole.Student,
             "FORBIDDEN", "Only active Students can access verification payments.", 403);
-        var verification = await db.ProjectVerifications.AsNoTracking().Include(v => v.Project)
+        var verification = await db.ProjectVerifications.Include(v => v.Project)
             .FirstOrDefaultAsync(v => v.Id == verificationId, ct)
             ?? throw new TransactionException("VERIFICATION_NOT_FOUND", "Verification request not found.", 404);
         Require(verification.Project.CreatorId == profile.Id && verification.RequestByUserId == profile.Id,

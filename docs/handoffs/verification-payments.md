@@ -10,7 +10,7 @@ PayOS__ApiKey=<merchant API key>
 PayOS__ChecksumKey=<merchant checksum key>
 Payments__ReturnUrl=https://your-frontend.example/payment-return
 Payments__CancelUrl=https://your-frontend.example/payment-cancel
-Payments__LinkExpirationMinutes=30
+ProjectVerification__ReservationMinutes=30
 Payments__AllowUserReconciliation=true
 ```
 
@@ -31,16 +31,21 @@ All user routes require a Student JWT, an active account and ownership of the re
 | POST | `/api/project-verifications/{verificationId}/payments` | No request body. Creates an attempt using the verification's package; returns 201 and `Location`. Reuses an unresolved Pending attempt instead of creating another payment link. |
 | GET | `/api/project-verifications/{verificationId}/payments?page=1&pageSize=10` | Paginated history, including failed attempts. Page size 1–100; empty history returns 200. |
 | GET | `/api/project-verifications/{verificationId}/payments/{transactionId}` | Reads the locally persisted state and verifies the transaction belongs to that verification. Does not query PayOS. |
-| POST | `/api/payments/{transactionId}/reconcile` | Queries PayOS using the stored order code. No request body. Returns the updated transaction; disabled with `Payments__AllowUserReconciliation=false`. |
 | POST | `/api/webhooks/payos` | Accepts the original PayOS JSON payload, verifies HMAC-SHA256 over sorted data and applies the event idempotently. Maximum body size 64 KiB. |
 
 `TransactionResponse` contains `id`, `verificationId`, `packageId`, `amountVnd`, `currency`, `status`, provider/order/link identifiers, `checkoutUrl`, timestamps, `reconciliationRequired`, `requiresReview` and a safe `diagnosticCode`. Payment statuses use existing values: Pending=0, Success=1, Failed=2. No provider credentials or raw provider errors are returned.
 
+The public reconciliation route listed by older contracts is absent from the current controller;
+reconciliation remains a backend worker/service operation. See
+[batch C reservation workflow](../project-verification-reservations.md) for the current hold,
+expiry, confirmation and late-payment behavior. An expired hold cannot be renewed while a
+payment remains unresolved, and a payment Success with `requiresReview` does not confirm a booking.
+
 ## Business behavior
 
-- Checkout requires a Pending, unfinalized verification for a Completed project. The selected package must remain active, be `PackageType.Verification`, target Student, and have a positive whole-VND price supported by PayOS. `Transaction.Amount` snapshots `Package.Price`; the frontend cannot set price, payer, package or order code.
+- Checkout requires a live slot reservation and a Pending, unfinalized verification for a Completed project. The selected package must remain active, be `PackageType.Verification`, target Student, and have a positive whole-VND price supported by PayOS. `Transaction.Amount` snapshots `Package.Price`; the frontend cannot set price, payer, package or order code.
 - A transaction and `VerificationTransaction` association are committed before calling PayOS. Random order codes fit exactly within JavaScript numeric precision and are uniquely indexed for PayOS. One unresolved attempt is permitted by serializable database transactions across API instances.
-- Network timeout, cancellation, malformed response, duplicate-order error, undocumented provider error and provider unavailability keep the attempt unresolved. POST checkout returns the same attempt. Reconcile it; do not offer a fresh checkout solely because local `expiredAt` passed. An unresolved attempt with no link can remain Pending until operators safely resolve it; provider “not found” is not treated as proof that an earlier in-flight create cannot finish.
+- Network timeout, cancellation, malformed response, duplicate-order error, undocumented provider error and provider unavailability keep the attempt unresolved. POST checkout returns the same attempt while the reservation and link remain valid. Otherwise it blocks renewal. Reconcile it; do not offer a fresh checkout solely because local `expiredAt` passed. An unresolved attempt with no link can remain Pending until operators safely resolve it; provider “not found” is not treated as proof that an earlier in-flight create cannot finish.
 - Explicit HTTP authentication/validation rejection with a structured provider error and no created-payment data can mark creation Failed. Provider-confirmed cancellation/expiry permits another attempt only when `amountPaid=0`. Partial or unknown paid amount keeps it Pending and may require operational review.
 - A signed PayOS webhook or authenticated provider status is required for success. Order, amount, VND currency, payment-link ID, payer/package association and full payment (when amountPaid is available) are checked. Frontend return/cancel query parameters are never proof of payment.
 - Repeated success does not change `paidAt`/`updatedAt` or create assignments, refunds or entitlements. Stale Pending/Failed results never downgrade Success. Verification and project final statuses are independent of payment.

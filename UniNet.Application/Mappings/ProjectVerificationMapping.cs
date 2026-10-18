@@ -8,15 +8,13 @@ public static class ProjectVerificationMapping
     public static ProjectVerificationResponse ToResponse(ProjectVerification verification) => new(
         verification.Id, verification.ProjectId, verification.Project.Title, verification.Status,
         verification.SubmittedAt, verification.ScheduledStartAt, verification.ScheduledEndAt,
-        verification.CreatedAt, verification.UpdatedAt);
+        verification.CreatedAt, verification.UpdatedAt,
+        verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil <= DateTimeOffset.UtcNow
+            ? VerificationBookingStatus.Expired : verification.BookingStatus,
+        verification.ReservationId, verification.ReservedUntil, verification.BookingConfirmedAt, verification.AssignmentEligibleAt);
 
-    public static VerificationReportResponse ToReportResponse(VerificationReport report)
-    {
-        var latest = report.Versions.OrderByDescending(v => v.Version).FirstOrDefault();
-        return latest == null
-            ? new(report.Id, report.VerificationId, report.Summary, report.Findings, report.Recommendations, report.SubmittetAt)
-            : new(latest.Id, report.VerificationId, latest.Summary, latest.Findings, latest.Recommendations, latest.SubmittedAt);
-    }
+    public static VerificationReportResponse ToReportResponse(VerificationReport report) => new(
+        report.Id, report.AssignmentId, report.Summary, report.Findings, report.Recommendations, report.SubmittetAt);
 
     public static VerificationFinalResultResponse? ToFinalResponse(ProjectVerification verification)
     {
@@ -40,6 +38,8 @@ public static class ProjectVerificationMapping
                 v.Transaction.Status, v.Transaction.Amount, v.Transaction.PaidAt,
                 v.Transaction.RefundTransactions.OrderBy(r => r.CreatedAt).ThenBy(r => r.Id)
                     .Select(r => new VerificationRefundResponse(r.Id, r.Amount, r.Status, r.Reason,
-                        r.Status == PaymentStatus.Success ? r.CompletedAt : null)).ToList())).ToList(),
+                        r.Status == PaymentStatus.Success ? r.CompletedAt : null, r.RequestedByUserId, r.RequestedAt, r.RequestSource)).ToList(),
+                v.Transaction.FailureReason is TransactionMapping.LatePaymentReview or TransactionMapping.BookingPaymentReview or
+                    TransactionMapping.DuplicatePaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", v.Transaction.FailureReason)).ToList(),
         ToFinalResponse(verification), verification.CancellationReason, verification.CancelledAt);
 }
