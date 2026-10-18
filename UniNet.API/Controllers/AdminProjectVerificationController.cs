@@ -46,8 +46,4 @@ public sealed class AdminProjectVerificationController(IAdminProjectVerification
         CreateVerificationRefundRequest request, CancellationToken ct)
         => CreatedAtAction(nameof(Refunds), new { verificationId }, await service.CreateRefundAsync(verificationId, AccountId, request, ct));
 
-    [HttpPost("{verificationId:guid}/reviews")]
-    public async Task<ActionResult<VerificationAdminActionResponse>> Review(Guid verificationId,
-        ReviewVerificationRequest request, CancellationToken ct)
-        => CreatedAtAction(nameof(Detail), new { verificationId }, await service.ReviewAsync(verificationId, AccountId, request, ct));
 }

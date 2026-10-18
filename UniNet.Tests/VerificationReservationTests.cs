@@ -70,7 +70,7 @@ public sealed partial class ProjectVerificationTests
         (await f.Db.Transactions.SingleAsync()).PaidAt = DateTimeOffset.UtcNow.AddDays(-2);
         await f.Db.SaveChangesAsync();
         var now = DateTimeOffset.UtcNow;
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
+        var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
         await tasks.RefundTimeoutsAsync(now, default);
         Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
         Assert.Equal(ProjectVerificationStatus.Pending, (await f.Db.ProjectVerifications.SingleAsync()).Status);

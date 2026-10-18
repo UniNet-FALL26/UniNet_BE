@@ -1,4 +1,5 @@
 using System.Data;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -11,7 +12,7 @@ using UniNet.Infrastructure.Data;
 namespace UniNet.Application.Services;
 
 public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration configuration,
-    EvidenceModerationChecks checks, VerificationNotifications notifications)
+    EvidenceModerationChecks checks, ILogger<EvidenceModerationTasks>? logger = null)
 {
     // Reuse existing verification retry budget/backoff and project moderation's abandoned-work interval.
     private const int MaxAttempts = 5;
@@ -59,7 +60,7 @@ public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration c
                 abandoned.FinishedAt = now; abandoned.ErrorCode = "WORKER_LEASE_EXPIRED";
                 abandoned.Error = "Worker stopped before persisting its result."; abandoned.Transient = true;
                 m.LeaseToken = null; m.LeaseExpiresAt = null;
-                await FailAsync(m, abandoned.ErrorCode, abandoned.Error, true, now, ct);
+                Fail(m, abandoned.ErrorCode, abandoned.Error, true, now);
                 await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
                 return;
             }
@@ -113,7 +114,7 @@ public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration c
             if (problem != null)
             {
                 finished.ErrorCode = problem.Code; finished.Error = problem.Message; finished.Transient = problem.Transient;
-                await FailAsync(current, problem.Code, problem.Message, problem.Transient, finished.FinishedAt.Value, ct);
+                Fail(current, problem.Code, problem.Message, problem.Transient, finished.FinishedAt.Value);
             }
             else
             {
@@ -135,8 +136,8 @@ public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration c
         await db.SaveChangesAsync(ct); await persistence.CommitAsync(ct);
     }
 
-    private async Task FailAsync(ProjectEvidenceModeration m, string code, string message, bool transient,
-        DateTimeOffset now, CancellationToken ct)
+    private void Fail(ProjectEvidenceModeration m, string code, string message, bool transient,
+        DateTimeOffset now)
     {
         m.Status = EvidenceModerationStatus.Error; m.LastErrorCode = code; m.LastError = message;
         m.Summary = "Checks incomplete; no safety verdict was granted. File content was not inspected.";
@@ -144,8 +145,7 @@ public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration c
             ? now.AddMinutes(Math.Pow(2, m.AttemptCount - 1)) : null;
         m.CompletedAt = m.NextRetryAt == null ? now : null;
         if (m.NextRetryAt == null)
-            await notifications.EvidenceAdminsAsync(m.Id, $"evidence-attention:{m.Id}",
-                $"Project evidence moderation requires attention: {code}. {message}", now, ct);
+            logger?.LogWarning("Evidence moderation {ModerationId} requires attention: {Code}", m.Id, code);
     }
 
 }

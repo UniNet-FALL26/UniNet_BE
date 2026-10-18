@@ -19,7 +19,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         var assignment = await AssignmentQuery().AsNoTracking()
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
-            .Include(a => a.Report).ThenInclude(r => r!.Versions).AsSplitQuery()
+            .Include(a => a.Report).AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == assignmentId &&
                 (user.Account.Role == AccountRole.Admin || a.AssignedToUserId == user.Id), ct)
             ?? throw NotFound();
@@ -82,7 +82,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         Require(!string.IsNullOrWhiteSpace(request.Reason) && request.Reason.Trim().Length <= 2000,
             "INVALID_REPLACEMENT_REASON", "Replacement reason must contain 1 to 2000 characters.");
         Require(request.AssignedToUserId != old.AssignedToUserId, "SAME_VERIFICATOR", "Select a different verificator.");
-        var verification = await GetSchedulableVerificationAsync(old.ProjectVerificationId, ct);
+        var verification = await GetSchedulableVerificationAsync(old.ProjectVerificationId, ct, replacement: true);
         var user = await GetAvailableVerificatorAsync(request.AssignedToUserId, verification, old.Id, ct);
         var now = DateTimeOffset.UtcNow;
         var replacement = AddAssignment(verification, user, admin, now);
@@ -158,17 +158,20 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         return user;
     }
 
-    private async Task<ProjectVerification> GetSchedulableVerificationAsync(Guid id, CancellationToken ct)
+    private async Task<ProjectVerification> GetSchedulableVerificationAsync(Guid id, CancellationToken ct, bool replacement = false)
     {
         var verification = await db.ProjectVerifications.FirstOrDefaultAsync(v => v.Id == id, ct)
             ?? throw new AssignmentException("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
         Require(verification.Status == ProjectVerificationStatus.Pending && verification.FinalizedAt == null &&
-            verification.MeetingStartAt == null && verification.MeetingEndAt == null,
+            (replacement || (verification.MeetingStartAt == null && verification.MeetingEndAt == null)),
             "VERIFICATION_LOCKED", "Only pending verifications before the meeting starts can be assigned.", 409);
+        Require(!await db.VerificationReports.AnyAsync(r => r.VerificationAssignment.ProjectVerificationId == id, ct),
+            "REPORT_EXISTS", "A case with a submitted report cannot be assigned again.", 409);
         Require(verification.BookingStatus == VerificationBookingStatus.Confirmed && verification.BookingConfirmedAt.HasValue,
             "BOOKING_NOT_CONFIRMED", "Only a booking confirmed by payment can be assigned.", 409);
         Require(verification.ScheduledStartAt.HasValue && verification.ScheduledEndAt.HasValue &&
-            verification.ScheduledStartAt < verification.ScheduledEndAt && verification.ScheduledStartAt > DateTimeOffset.UtcNow,
+            verification.ScheduledStartAt < verification.ScheduledEndAt &&
+            (replacement || verification.ScheduledStartAt > DateTimeOffset.UtcNow),
             "INVALID_VERIFICATION_SCHEDULE", "A valid future meeting schedule is required.", 409);
         await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
         Require(await db.VerificationTransactions.AnyAsync(v => v.VerificationId == id &&
@@ -204,7 +207,8 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             Id = Guid.NewGuid(), ProjectVerificationId = v.Id, ProjectVerification = v,
             AssignedToUserId = user.Id, AssignedToUser = user, AdminId = admin.Id, AssignedByUser = admin,
             Status = VerificationAssignmentStatus.Assigned, AssignedAt = now,
-            AssignmentDueAt = v.ScheduledEndAt, CreatedAt = now, UpdatedAt = now
+            AssignmentDueAt = v.MeetingEndAt.HasValue ? now.AddHours(48) : v.ScheduledEndAt,
+            ReportDueAt = v.MeetingEndAt.HasValue ? now.AddHours(48) : null, CreatedAt = now, UpdatedAt = now
         };
         db.VerificationAssignments.Add(assignment);
         v.UpdatedAt = now;

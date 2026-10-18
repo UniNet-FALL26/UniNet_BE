@@ -23,7 +23,8 @@ public record VerificationPaymentResponse(Guid TransactionId, Guid PackageId, Pa
     decimal Amount, DateTimeOffset? PaidAt, List<VerificationRefundResponse> Refunds,
     bool RequiresManualReview = false, string? FailureReason = null);
 public record VerificationRefundResponse(Guid Id, decimal Amount, PaymentStatus Status, string Reason,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt, Guid? RequestedByUserId = null, DateTimeOffset? RequestedAt = null,
+    RefundRequestSource RequestSource = RefundRequestSource.LegacyUnknown);
 public record VerificationFinalResultResponse(ProjectVerificationStatus Status, DateTimeOffset? FinalizedAt,
     Guid? FinalizedByUserId, List<VerificationReportResponse> Reports);
 public record ProjectVerificationDetailResponse(ProjectVerificationResponse Verification,

@@ -183,10 +183,10 @@ public sealed partial class ProjectVerificationTests
         await PrepareOverdueAsync(f, id, now.AddHours(-48));
         f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Verificator));
         await f.Db.SaveChangesAsync();
-        var tasks = new VerificationDeadlineTasks(f.Db, new(f.Db), f.Configuration);
-        await tasks.RemindAndEscalateAsync(now, default);
+        var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
+        await tasks.MarkOverdueAndEscalateAsync(now, default);
         f.Configuration["EvidenceModeration:PolicyVersion"] = "changed";
-        await tasks.RemindAndEscalateAsync(now.AddHours(24), default);
+        await tasks.MarkOverdueAndEscalateAsync(now.AddHours(24), default);
         Assert.Single(await f.Db.VerificationAssignments.ToListAsync());
         Assert.Equal(PaymentStatus.Success, (await f.Db.Transactions.SingleAsync()).Status);
     }

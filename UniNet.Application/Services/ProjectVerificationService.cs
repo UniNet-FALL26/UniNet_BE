@@ -174,7 +174,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var profile = await GetActiveProfileAsync(accountId, ct);
         IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project)
             .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts).Include(v => v.Assignments).ThenInclude(a => a.Report)
-                .ThenInclude(r => r!.Versions)
+
             .Include(v => v.VerificationTransactions).ThenInclude(v => v.Transaction)
                 .ThenInclude(t => t.RefundTransactions).AsSplitQuery();
         if (!tracked) query = query.AsNoTracking();

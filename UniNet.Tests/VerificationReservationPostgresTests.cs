@@ -16,7 +16,7 @@ using Xunit;
 
 namespace UniNet.Tests;
 
-public sealed class VerificationReservationPostgresTests
+public sealed partial class VerificationReservationPostgresTests
 {
     private sealed class ReadBarrier(bool payment = false) : DbCommandInterceptor
     {

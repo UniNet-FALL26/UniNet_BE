@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -11,6 +11,9 @@ namespace UniNet.Domain.Entities
     {
         public Guid Id { get; set; }
         public Guid TransactionId { get; set; }
+        public Guid? RequestedByUserId { get; set; }
+        public DateTimeOffset? RequestedAt { get; set; }
+        public RefundRequestSource RequestSource { get; set; }
         public decimal Amount { get; set; }
         public PaymentStatus Status { get; set; }
         public string PaymentProvider { get; set; } = null!;

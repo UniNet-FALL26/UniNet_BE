@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -18,7 +18,7 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? CompletedAt { get; set; }
         public DateTimeOffset? ReportDueAt { get; set; }
         public DateTimeOffset? AssignmentDueAt { get; set; }
-        public DateTimeOffset? ReminderSentAt { get; set; }
+        public DateTimeOffset? OverdueMarkedAt { get; set; }
         public DateTimeOffset? EscalatedAt { get; set; }
         public DateTimeOffset? ReplacedAt { get; set; }
         public string? ReplacementReason { get; set; }

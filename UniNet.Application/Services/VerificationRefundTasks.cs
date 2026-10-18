@@ -1,4 +1,5 @@
 using System.Data;
+using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Application.Interfaces;
 using UniNet.Domain.Enums;
@@ -6,7 +7,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider provider, VerificationNotifications notifications)
+public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider provider, ILogger<VerificationRefundTasks>? logger = null)
 {
     public async Task RunAsync(DateTimeOffset now, CancellationToken ct)
     {
@@ -26,15 +27,13 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
             var refund = await db.RefundTransactions.Include(r => r.Transaction).ThenInclude(p => p.VerificationTransaction)
                 .SingleAsync(r => r.Id == id, ct);
             if (refund.Status != PaymentStatus.Pending || refund.NextReconciliationAt > now || refund.Transaction.VerificationTransaction == null) return;
-            var verificationId = refund.Transaction.VerificationTransaction.VerificationId;
             if (refund.Transaction.Status != PaymentStatus.Success)
                 throw new InvalidOperationException("A refund cannot be dispatched for an unsuccessful payment.");
             if (!provider.Supports(refund.PaymentProvider))
             {
                 refund.FailureReason = "MANUAL_REFUND_REQUIRED";
                 refund.NextReconciliationAt = now.AddHours(1); refund.UpdatedAt = now;
-                await notifications.AdminsAsync(verificationId, $"refund-manual:{id}",
-                    $"Refund {id} is reserved but requires manual execution: the payment provider has no configured refund adapter.", now, ct);
+                logger?.LogWarning("Refund {RefundId} requires operator review; inspect its persisted reconciliation status", id);
                 await db.SaveChangesAsync(ct);
                 await transaction.CommitAsync(ct);
                 return;
@@ -75,8 +74,7 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
             if (result.Status != PaymentStatus.Pending) current.NextReconciliationAt = null;
         }
         if (current.ReconciliationAttempts >= 5 || current.Status == PaymentStatus.Failed)
-            await notifications.AdminsAsync(current.Transaction.VerificationTransaction!.VerificationId,
-                $"refund-attention:{id}", $"Refund {id} needs attention; inspect its provider reconciliation state.", now, ct);
+            logger?.LogWarning("Refund {RefundId} requires operator review; inspect its persisted reconciliation status", id);
         await db.SaveChangesAsync(ct);
         await persistence.CommitAsync(ct);
     }
