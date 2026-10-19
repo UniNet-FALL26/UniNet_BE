@@ -158,6 +158,7 @@ public class CommunityService : ICommunityService
         return actionResult;
     }
 
+    // 1. LẤY DANH SÁCH BÌNH LUẬN (Bổ sung AuthorAvatarUrl)
     public async Task<List<CommentResponse>> GetCommentsAsync(Guid postId)
     {
         var allComments = await _context.CommunityPostComments
@@ -174,7 +175,8 @@ public class CommunityService : ICommunityService
             Id = root.Id,
             PostId = root.PostId,
             AuthorUserId = root.AuthorUserId,
-            AuthorName = root.AuthorUser.FullName ?? "Ẩn danh",
+            AuthorName = root.AuthorUser?.FullName ?? "Ẩn danh",
+            AuthorAvatarUrl = root.AuthorUser?.AvatarUrl,
             ParentCommentId = root.ParentCommentId,
             Content = root.Content,
             CreatedAt = root.CreatedAt,
@@ -185,7 +187,8 @@ public class CommunityService : ICommunityService
                     Id = reply.Id,
                     PostId = reply.PostId,
                     AuthorUserId = reply.AuthorUserId,
-                    AuthorName = reply.AuthorUser.FullName ?? "Ẩn danh",
+                    AuthorName = reply.AuthorUser?.FullName ?? "Ẩn danh",
+                    AuthorAvatarUrl = reply.AuthorUser?.AvatarUrl,
                     ParentCommentId = reply.ParentCommentId,
                     ReplyToUserId = reply.ReplyToUserId,
                     ReplyToUserName = reply.ReplyToUser?.FullName,
@@ -197,7 +200,8 @@ public class CommunityService : ICommunityService
         return response;
     }
 
-    public async Task<Guid> CreateCommentAsync(Guid postId, Guid currentUserId, CreateCommentRequest request)
+    // 2. TẠO BÌNH LUẬN GỐC
+    public async Task<CommentResponse> CreateCommentAsync(Guid postId, Guid currentUserId, CreateCommentRequest request)
     {
         var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId);
         if (userProfile == null)
@@ -207,38 +211,89 @@ public class CommunityService : ICommunityService
         if (post == null)
             throw new CommunityException("POST_NOT_FOUND", "Post not found.", 404);
 
+        var now = DateTimeOffset.UtcNow;
         var newComment = request.ToEntity(postId, userProfile.Id);
+        newComment.CreatedAt = now;
 
         _context.CommunityPostComments.Add(newComment);
         post.CommentCount += 1;
 
         await _context.SaveChangesAsync();
-        return newComment.Id;
+
+        return new CommentResponse
+        {
+            Id = newComment.Id,
+            PostId = postId,
+            AuthorUserId = userProfile.Id,
+            AuthorName = userProfile.FullName ?? "Ẩn danh",
+            AuthorAvatarUrl = userProfile.AvatarUrl,
+            ParentCommentId = null,
+            Content = newComment.Content,
+            CreatedAt = newComment.CreatedAt,
+            Replies = new List<CommentResponse>()
+        };
     }
 
-    public async Task<Guid> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request)
+    public async Task<CommentResponse> CreateReplyAsync(Guid targetCommentId, Guid currentUserId, CreateReplyRequest request)
     {
         var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId);
         if (userProfile == null)
             throw new CommunityException("USER_NOT_FOUND", "User profile not found.", 404);
 
-        var parentComment = await _context.CommunityPostComments.FirstOrDefaultAsync(c => c.Id == parentCommentId && !c.IsDeleted);
-        if (parentComment == null)
-            throw new CommunityException("COMMENT_NOT_FOUND", "Parent comment not found.", 404);
+        // 1. Tìm comment mà người dùng bấm "Trả lời"
+        var targetComment = await _context.CommunityPostComments
+            .Include(c => c.AuthorUser)
+            .FirstOrDefaultAsync(c => c.Id == targetCommentId && !c.IsDeleted);
 
-        var post = await _context.CommunityPosts.FirstOrDefaultAsync(p => p.Id == parentComment.PostId && !p.IsDeleted);
+        if (targetComment == null)
+            throw new CommunityException("COMMENT_NOT_FOUND", "Target comment not found.", 404);
+
+        var post = await _context.CommunityPosts.FirstOrDefaultAsync(p => p.Id == targetComment.PostId && !p.IsDeleted);
         if (post == null)
             throw new CommunityException("POST_NOT_FOUND", "Post not found.", 404);
 
-        var newReply = request.ToEntity(parentComment.PostId, parentComment.Id, userProfile.Id);
+        // 2. KỸ THUẬT PHẲNG HÓA (FLATTENING): 
+        // Nếu targetComment đã là một Reply (đã có ParentCommentId), thì ParentCommentId của Reply mới sẽ lấy theo ParentCommentId của nó (quy về Root).
+        // Nếu targetComment là Root Comment, thì lấy trực tiếp Id của targetComment.
+        Guid rootParentId = targetComment.ParentCommentId ?? targetComment.Id;
+
+        // 3. Xác định người được phản hồi (ReplyToUser)
+        Guid replyToUserId = targetComment.AuthorUserId;
+        string? replyToUserName = targetComment.AuthorUser?.FullName;
+
+        var now = DateTimeOffset.UtcNow;
+        var newReply = new CommunityPostComment
+        {
+            Id = Guid.NewGuid(),
+            PostId = targetComment.PostId,
+            ParentCommentId = rootParentId, // <-- Đã quy về Root Comment
+            AuthorUserId = userProfile.Id,
+            ReplyToUserId = replyToUserId,
+            Content = request.Content,
+            IsDeleted = false,
+            CreatedAt = now
+        };
 
         _context.CommunityPostComments.Add(newReply);
         post.CommentCount += 1;
 
         await _context.SaveChangesAsync();
-        return newReply.Id;
-    }
 
+        return new CommentResponse
+        {
+            Id = newReply.Id,
+            PostId = newReply.PostId,
+            ParentCommentId = rootParentId,
+            AuthorUserId = userProfile.Id,
+            AuthorName = userProfile.FullName ?? "Ẩn danh",
+            AuthorAvatarUrl = userProfile.AvatarUrl,
+            ReplyToUserId = replyToUserId,
+            ReplyToUserName = replyToUserName,
+            Content = newReply.Content,
+            CreatedAt = newReply.CreatedAt,
+            Replies = new List<CommentResponse>()
+        };
+    }
     public async Task ReportPostAsync(Guid postId, Guid currentUserId, CreateReportRequest request)
     {
         var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId);

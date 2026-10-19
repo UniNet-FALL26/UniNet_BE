@@ -90,8 +90,8 @@ public class CommunityController : ControllerBase
     {
         try
         {
-            var commentId = await _communityService.CreateCommentAsync(id, GetCurrentUserId(), request);
-            return Ok(new { message = "Comment added successfully", commentId = commentId });
+            var comment = await _communityService.CreateCommentAsync(id, GetCurrentUserId(), request);
+            return Ok(comment);
         }
         catch (CommunityException ex)
         {
@@ -104,8 +104,8 @@ public class CommunityController : ControllerBase
     {
         try
         {
-            var replyId = await _communityService.CreateReplyAsync(commentId, GetCurrentUserId(), request);
-            return Ok(new { message = "Reply added successfully", replyId = replyId });
+            var reply = await _communityService.CreateReplyAsync(commentId, GetCurrentUserId(), request);
+            return Ok(reply);
         }
         catch (CommunityException ex)
         {
