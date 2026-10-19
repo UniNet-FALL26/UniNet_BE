@@ -320,9 +320,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             await transaction.CommitAsync(ct);
             return result;
         }
-        catch (Exception ex) when (ex is DbUpdateConcurrencyException ||
-            ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } ||
-            ex is DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } })
+        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
         {
             throw new TransactionException("PAYMENT_CONFLICT", "Payment data changed concurrently. Reload and retry the same operation.", 409);
         }

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Reflection.Emit;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
+using UniNet.Domain.Enums;
 using UniNet.Domain.Entities.Community;
 
 namespace UniNet.Infrastructure.Data;
@@ -10,6 +11,18 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        foreach (var entry in ChangeTracker.Entries<ProjectModeration>())
+        {
+            if (entry.State == EntityState.Modified && entry.Property(x => x.Purpose).IsModified)
+                throw new InvalidOperationException("Moderation purpose cannot be changed.");
+            if (entry.Entity.Purpose != ProjectModerationPurpose.ProjectEvidence) continue;
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Evidence moderation history cannot be deleted.");
+            if (entry.State == EntityState.Modified && new[] { nameof(ProjectModeration.ProjectId), nameof(ProjectModeration.Version),
+                nameof(ProjectModeration.SourceHash), nameof(ProjectModeration.SnapshotJson), nameof(ProjectModeration.PolicyHash),
+                nameof(ProjectModeration.PolicyJson), nameof(ProjectModeration.CreatedAt) }.Any(p => entry.Property(p).IsModified))
+                throw new InvalidOperationException("Evidence moderation snapshots cannot be changed.");
+        }
         if (ChangeTracker.Entries().Any(e => (e.Entity is VerificationReportVersion or VerificationAdminAction) &&
             e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Verification report versions and Admin actions are historical storage only.");
@@ -48,7 +61,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ContributionResult> ContributionResults => Set<ContributionResult>();
     public DbSet<ContributionReview> ContributionReviews => Set<ContributionReview>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
-    public DbSet<ProjectEvidenceModeration> ProjectEvidenceModerations => Set<ProjectEvidenceModeration>();
     public DbSet<EvidenceModerationAttempt> EvidenceModerationAttempts => Set<EvidenceModerationAttempt>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -77,7 +89,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     {
         model.ApplyConfiguration(new VerificationAdminActionConfiguration());
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
-        model.ApplyConfiguration(new ProjectEvidenceModerationConfiguration());
+        model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
         model.Entity<PortraitAsset>(e =>
         {
@@ -736,7 +748,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             {
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_Status",
-                    "\"Status\" BETWEEN 0 AND 5");
+                    "(\"Purpose\" = 0 AND \"Status\" BETWEEN 0 AND 5) OR (\"Purpose\" = 1 AND \"Status\" IN (0,1,4,5,6,7))");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_ContentResult",
@@ -752,7 +764,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_AttemptNumber",
-                    "\"AttemptNumber\" > 0");
+                    "\"Purpose\" = 1 OR \"AttemptNumber\" > 0");
             });
 
             // Primary Key
@@ -822,7 +834,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasOne(x => x.Project)
                 .WithMany(x => x.Moderations)
                 .HasForeignKey(x => x.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
 
             // Moderator/UserProfile 1 : N ProjectModeration
             e.HasOne(x => x.ReviewedBy)
@@ -830,13 +842,13 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasForeignKey(x => x.ReviewedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Each project has unique moderation attempt numbers
+            // Submission attempt sequence is independent of evidence source versions
             e.HasIndex(x => new
             {
                 x.ProjectId,
                 x.AttemptNumber
             })
-            .IsUnique();
+            .IsUnique().HasFilter("\"Purpose\" = 0");
 
             // Useful for finding moderation history / latest attempt
             e.HasIndex(x => new
@@ -912,8 +924,11 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
+            e.Property<ProjectModerationPurpose>("EvidenceModerationPurpose").HasConversion<short>().HasDefaultValue(ProjectModerationPurpose.ProjectEvidence);
             e.HasOne(x => x.EvidenceModeration).WithMany()
-                .HasForeignKey(x => x.EvidenceModerationId).OnDelete(DeleteBehavior.Restrict);
+                .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
+                .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
+            e.ToTable("ProjectVerifications", t => t.HasCheckConstraint("CK_ProjectVerifications_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1"));
             e.Property(x => x.BookingStatus).HasConversion<short>();
             e.HasIndex(x => new { x.BookingStatus, x.ReservedUntil });
             e.HasIndex(x => x.ReservationId).IsUnique();

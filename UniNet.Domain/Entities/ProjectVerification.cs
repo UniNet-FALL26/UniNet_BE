@@ -13,7 +13,7 @@ namespace UniNet.Domain.Entities
         public Guid ProjectId { get; set; }
         // Nullable only for legacy cases. New cases pin a passed level-1 decision.
         public Guid? EvidenceModerationId { get; set; }
-        public ProjectEvidenceModeration? EvidenceModeration { get; set; }
+        public ProjectModeration? EvidenceModeration { get; set; }
         public Guid RequestByUserId { get; set; }
         public ProjectVerificationStatus Status { get; set; }
         public string? AiSummary { get; set; }

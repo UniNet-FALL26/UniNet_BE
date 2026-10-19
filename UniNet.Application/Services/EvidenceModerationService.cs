@@ -24,7 +24,7 @@ public sealed class EvidenceModerationService(UniNetDbContext db, IConfiguration
     public async Task<EvidenceModerationResponse> GetAsync(Guid projectId, Guid accountId, CancellationToken ct = default)
     {
         await AuthorizeAsync(projectId, accountId, ct);
-        var review = await db.ProjectEvidenceModerations.AsNoTracking().Include(m => m.Attempts)
+        var review = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectEvidence).AsNoTracking().Include(m => m.Attempts)
             .OrderByDescending(m => m.Version).FirstOrDefaultAsync(m => m.ProjectId == projectId, ct)
             ?? throw new ProjectVerificationException("LEVEL1_NOT_FOUND", "No level-1 review exists.", 404);
         var source = new EvidenceModerationSource(db, configuration);
@@ -45,13 +45,13 @@ public sealed class EvidenceModerationService(UniNetDbContext db, IConfiguration
             if (!await db.Projects.AnyAsync(p => p.Id == projectId && p.Status == ProjectStatus.Completed, ct))
                 throw new ProjectVerificationException("PROJECT_NOT_COMPLETED", "Complete the project before requesting level-1 review.", 409);
             var review = await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct, createInitial: true);
-            if (review!.Status == EvidenceModerationStatus.Error)
+            if (review!.Status == ProjectModerationStatus.Error)
             {
                 if (review.AttemptCount >= 5 || review.NextRetryAt == null)
                     throw new ProjectVerificationException("LEVEL1_RETRY_EXHAUSTED", "Correct the source or policy before requesting another review.", 409);
                 // Keep the scheduled backoff. Calling this endpoint never accelerates provider calls.
             }
-            else if (review.Status is EvidenceModerationStatus.Passed or EvidenceModerationStatus.Rejected or EvidenceModerationStatus.NeedsEvidence)
+            else if (review.Status is ProjectModerationStatus.Passed or ProjectModerationStatus.Rejected or ProjectModerationStatus.NeedsEvidence)
                 throw new ProjectVerificationException("LEVEL1_UNCHANGED", "Update task/report data before requesting a new review.", 409);
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);

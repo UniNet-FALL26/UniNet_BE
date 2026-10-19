@@ -429,10 +429,10 @@ public sealed partial class ProjectVerificationTests
             var source = new EvidenceModerationSource(Db, Configuration);
             var snapshot = JsonSerializer.Serialize(await source.CaptureAsync(projectId, default));
             var policy = JsonSerializer.Serialize(source.CapturePolicy());
-            Db.ProjectEvidenceModerations.Add(new() { ProjectId = projectId, Version = 1,
+            Db.ProjectModerations.Add(new() { Purpose = ProjectModerationPurpose.ProjectEvidence, ProjectId = projectId, Version = 1,
                 SnapshotJson = snapshot, SourceHash = EvidenceModerationSource.Hash(snapshot),
                 PolicyJson = policy, PolicyHash = EvidenceModerationSource.Hash(policy),
-                Status = EvidenceModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow });
+                Status = ProjectModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow });
             await Db.SaveChangesAsync();
         }
         public async Task PayAsync(Guid id, Account owner, PaymentStatus status = PaymentStatus.Success)

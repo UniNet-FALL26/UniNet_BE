@@ -38,7 +38,7 @@ public sealed partial class ProjectVerificationTests
         await service.RetryTransientErrorsAsync(now, default);
         await service.RetryTransientErrorsAsync(now, default);
         Assert.Equal(expectedCalls, probe.Calls);
-        Assert.Equal(1 + expectedCalls, await f.Db.ProjectModerations.CountAsync());
+        Assert.Equal(1 + expectedCalls, await f.Db.ProjectModerations.CountAsync(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission));
     }
 
     [Fact]
