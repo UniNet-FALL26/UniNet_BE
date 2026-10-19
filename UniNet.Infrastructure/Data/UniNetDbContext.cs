@@ -23,9 +23,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 nameof(ProjectModeration.PolicyJson), nameof(ProjectModeration.CreatedAt) }.Any(p => entry.Property(p).IsModified))
                 throw new InvalidOperationException("Evidence moderation snapshots cannot be changed.");
         }
-        if (ChangeTracker.Entries().Any(e => (e.Entity is VerificationReportVersion or VerificationAdminAction) &&
-            e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
-            throw new InvalidOperationException("Verification report versions and Admin actions are historical storage only.");
         if (ChangeTracker.Entries<VerificationReport>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Submitted verification reports cannot be changed or deleted.");
     }
@@ -87,7 +84,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
-        model.ApplyConfiguration(new VerificationAdminActionConfiguration());
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
@@ -1016,23 +1012,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => x.AssignmentId).IsUnique();
             foreach (var property in e.Metadata.GetProperties())
                 property.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Throw);
-        });
-        model.Entity<VerificationReportVersion>(e =>
-        {
-            e.ToTable("VerificationReportVersions", t =>
-            {
-                t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
-                t.HasCheckConstraint("CK_ReportVersions_Outcome", "\"Outcome\" IN (1, 2)");
-            });
-            e.HasKey(x => x.Id);
-            e.HasIndex(x => new { x.ReportId, x.Version }).IsUnique();
-            e.Property(x => x.Summary).HasColumnType("text").IsRequired();
-            e.Property(x => x.Findings).HasColumnType("text").IsRequired();
-            e.Property(x => x.Recommendations).HasColumnType("text").IsRequired();
-            e.Property(x => x.Reason).HasMaxLength(2000).IsRequired();
-            e.Property(x => x.Outcome).HasConversion<short>();
-            e.HasOne(x => x.Report).WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<ReportAuditLog>(e =>
         {
