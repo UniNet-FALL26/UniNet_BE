@@ -69,12 +69,11 @@ public class CommentResponse
     public Guid PostId { get; set; }
     public Guid AuthorUserId { get; set; }
     public string AuthorName { get; set; } = null!;
+    public string? AuthorAvatarUrl { get; set; } // <--- Bổ sung Avatar
     public Guid? ParentCommentId { get; set; }
     public Guid? ReplyToUserId { get; set; }
     public string? ReplyToUserName { get; set; }
     public string Content { get; set; } = null!;
-    public DateTimeOffset CreatedAt { get; set; }
-
-    // THÊM DÒNG NÀY ĐỂ CHỨA CÁC REPLY NHỎ BÊN TRONG
+    public DateTimeOffset CreatedAt { get; set; } // Định dạng ISO 8601 mặc định
     public List<CommentResponse> Replies { get; set; } = new();
 }

@@ -12,8 +12,11 @@ public interface ICommunityService
     Task<string> ToggleReactionAsync(Guid postId, Guid currentUserId);
     Task<string> ToggleBookmarkAsync(Guid postId, Guid currentUserId);
     Task<List<CommentResponse>> GetCommentsAsync(Guid postId);
-    Task<Guid> CreateCommentAsync(Guid postId, Guid currentUserId, CreateCommentRequest request);
-    Task<Guid> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request);
+
+    // Đổi kiểu trả về thành CommentResponse
+    Task<CommentResponse> CreateCommentAsync(Guid postId, Guid currentUserId, CreateCommentRequest request);
+    Task<CommentResponse> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request);
+
     Task ReportPostAsync(Guid postId, Guid currentUserId, CreateReportRequest request);
     Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request);
     Task DeletePostAsync(Guid postId, Guid currentUserId);
