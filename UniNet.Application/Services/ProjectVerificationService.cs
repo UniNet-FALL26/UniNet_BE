@@ -272,9 +272,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         }
     }
 
-    private static bool IsWriteConflict(Exception ex) => ex is DbUpdateConcurrencyException ||
-        ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } ||
-        ex is DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } };
+    private static bool IsWriteConflict(Exception ex) => EvidenceModerationSource.IsWriteConflict(ex);
 
     private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)
     {

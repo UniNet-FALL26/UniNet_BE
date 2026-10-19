@@ -13,6 +13,8 @@ namespace UniNet.Domain.Enums
         ReviewRequired = 2,
         Approved = 3,
         Rejected = 4,
-        Error = 5
+        Error = 5,
+        Passed = 6,
+        NeedsEvidence = 7
     }
 }

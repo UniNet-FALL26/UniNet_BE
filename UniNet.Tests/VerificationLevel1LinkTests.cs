@@ -13,15 +13,15 @@ namespace UniNet.Tests;
 public sealed partial class ProjectVerificationTests
 {
     [Theory]
-    [InlineData(EvidenceModerationStatus.Pending)]
-    [InlineData(EvidenceModerationStatus.Processing)]
-    [InlineData(EvidenceModerationStatus.Rejected)]
-    [InlineData(EvidenceModerationStatus.NeedsEvidence)]
-    [InlineData(EvidenceModerationStatus.Error)]
-    public async Task Level2CannotBypassNonPassedLevel1(EvidenceModerationStatus status)
+    [InlineData(ProjectModerationStatus.Pending)]
+    [InlineData(ProjectModerationStatus.Processing)]
+    [InlineData(ProjectModerationStatus.Rejected)]
+    [InlineData(ProjectModerationStatus.NeedsEvidence)]
+    [InlineData(ProjectModerationStatus.Error)]
+    public async Task Level2CannotBypassNonPassedLevel1(ProjectModerationStatus status)
     {
         await using var f = await Fixture.CreateAsync();
-        (await f.Db.ProjectEvidenceModerations.SingleAsync()).Status = status;
+        (await f.Db.ProjectModerations.SingleAsync()).Status = status;
         await f.Db.SaveChangesAsync();
         await Error("LEVEL1_REQUIRED", () => f.CreateVerificationAsync());
         Assert.Empty(await f.Db.ProjectVerifications.ToListAsync());
@@ -31,7 +31,7 @@ public sealed partial class ProjectVerificationTests
     public async Task MissingOrSupersededLevel1CannotAuthorizeCase()
     {
         await using var f = await Fixture.CreateAsync();
-        var review = await f.Db.ProjectEvidenceModerations.SingleAsync();
+        var review = await f.Db.ProjectModerations.SingleAsync();
         review.SupersededAt = DateTimeOffset.UtcNow;
         await f.Db.SaveChangesAsync();
         await Error("LEVEL1_REQUIRED", () => f.CreateVerificationAsync());
@@ -84,15 +84,15 @@ public sealed partial class ProjectVerificationTests
         var next = await service.RetryAsync(f.Project.Id, f.Owner.Id);
         Assert.Equal(2, next.Version);
         Assert.Equal(EvidenceModerationStatus.Pending, next.Status);
-        var latest = await f.Db.ProjectEvidenceModerations.SingleAsync(m => m.Id == next.Id);
-        latest.Status = EvidenceModerationStatus.Passed;
+        var latest = await f.Db.ProjectModerations.SingleAsync(m => m.Id == next.Id);
+        latest.Status = ProjectModerationStatus.Passed;
         await f.Db.SaveChangesAsync();
         await Error("LEVEL1_STALE", () => new VerificationEligibility(f.Db, f.Configuration)
             .RequireCaseAsync(f.Db.ProjectVerifications.Single(), default));
         var detail = await f.Service.GetDetailAsync(id, f.Owner.Id);
         Assert.Equal(pin, detail.EvidenceModeration!.Id);
         Assert.False(detail.EvidenceModeration.IsCurrent);
-        Assert.Equal(2, await f.Db.ProjectEvidenceModerations.CountAsync());
+        Assert.Equal(2, await f.Db.ProjectModerations.CountAsync());
     }
 
     [Fact]
@@ -103,8 +103,8 @@ public sealed partial class ProjectVerificationTests
         await Error("FORBIDDEN", () => service.GetAsync(f.Project.Id, f.Other.Id));
         await Error("FORBIDDEN", () => service.RetryAsync(f.Project.Id, f.Other.Id));
         await Error("LEVEL1_UNCHANGED", () => service.RetryAsync(f.Project.Id, f.Owner.Id));
-        var review = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        review.Status = EvidenceModerationStatus.Error;
+        var review = await f.Db.ProjectModerations.SingleAsync();
+        review.Status = ProjectModerationStatus.Error;
         review.AttemptCount = 5;
         await f.Db.SaveChangesAsync();
         await Error("LEVEL1_RETRY_EXHAUSTED", () => service.RetryAsync(f.Project.Id, f.Owner.Id));
@@ -168,7 +168,7 @@ public sealed partial class ProjectVerificationTests
         var duplicate = await service.RetryAsync(f.Project.Id, f.Owner.Id);
         Assert.Equal(first.Id, duplicate.Id);
         Assert.Equal(EvidenceModerationStatus.Pending, duplicate.Status);
-        Assert.Single(await f.Db.ProjectEvidenceModerations.ToListAsync());
+        Assert.Single(await f.Db.ProjectModerations.ToListAsync());
         Assert.Empty(await f.Db.ProjectVerifications.ToListAsync());
         Assert.Empty(await f.Db.Transactions.ToListAsync());
     }

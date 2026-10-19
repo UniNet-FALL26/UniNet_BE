@@ -786,6 +786,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("ModerationId")
                         .HasColumnType("uuid");
 
+                    b.Property<short>("ModerationPurpose")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1);
+
                     b.Property<int>("Number")
                         .HasColumnType("integer");
 
@@ -800,10 +805,15 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ModerationId", "ModerationPurpose");
+
                     b.HasIndex("ModerationId", "Number")
                         .IsUnique();
 
-                    b.ToTable("EvidenceModerationAttempts", (string)null);
+                    b.ToTable("EvidenceModerationAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_EvidenceModerationAttempts_Purpose", "\"ModerationPurpose\" = 1");
+                        });
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
@@ -1056,90 +1066,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceModeration", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LastError")
-                        .HasColumnType("text");
-
-                    b.Property<string>("LastErrorCode")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("LeaseToken")
-                        .IsConcurrencyToken()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("NextRetryAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("PolicyHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("PolicyJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("SnapshotJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<string>("SourceHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<short>("Status")
-                        .HasColumnType("smallint");
-
-                    b.Property<string>("Summary")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("SupersededAt")
-                        .IsConcurrencyToken()
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId")
-                        .IsUnique()
-                        .HasFilter("\"SupersededAt\" IS NULL");
-
-                    b.HasIndex("ProjectId", "Version")
-                        .IsUnique();
-
-                    b.HasIndex("Status", "NextRetryAt");
-
-                    b.ToTable("ProjectEvidenceModerations", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_EvidenceModeration_Status", "\"Status\" BETWEEN 0 AND 5");
-
-                            t.HasCheckConstraint("CK_EvidenceModeration_Version", "\"Version\" > 0");
-                        });
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectInvitation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1280,10 +1206,16 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
                     b.Property<int>("AttemptNumber")
                         .HasColumnType("integer");
 
                     b.Property<DateTimeOffset?>("CheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal?>("Confidence")
@@ -1305,11 +1237,37 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("LastError")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
                     b.Property<short>("LinkResult")
                         .HasColumnType("smallint");
 
+                    b.Property<DateTimeOffset?>("NextRetryAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PolicyHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PolicyJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
+
+                    b.Property<short>("Purpose")
+                        .HasColumnType("smallint");
 
                     b.Property<string>("ResultJson")
                         .HasColumnType("jsonb");
@@ -1328,35 +1286,67 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid?>("ReviewedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("SnapshotJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("SourceHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<short>("Status")
                         .HasColumnType("smallint");
 
+                    b.Property<string>("Summary")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SupersededAt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
 
                     b.Property<string>("ViolationReason")
                         .HasColumnType("text");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ProjectId")
+                        .IsUnique()
+                        .HasFilter("\"Purpose\" = 1 AND \"SupersededAt\" IS NULL");
+
                     b.HasIndex("ReviewedByUserId");
 
                     b.HasIndex("ProjectId", "AttemptNumber")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"Purpose\" = 0");
 
                     b.HasIndex("ProjectId", "CreatedAt");
 
+                    b.HasIndex("ProjectId", "Version")
+                        .IsUnique()
+                        .HasFilter("\"Purpose\" = 1");
+
+                    b.HasIndex("Purpose", "Status", "NextRetryAt");
+
                     b.ToTable("ProjectModerations", null, t =>
                         {
-                            t.HasCheckConstraint("CK_ProjectModerations_AttemptNumber", "\"AttemptNumber\" > 0");
+                            t.HasCheckConstraint("CK_ProjectModerations_AttemptNumber", "\"Purpose\" = 1 OR \"AttemptNumber\" > 0");
 
                             t.HasCheckConstraint("CK_ProjectModerations_Confidence", "\"Confidence\" IS NULL OR (\"Confidence\" >= 0 AND \"Confidence\" <= 1)");
 
                             t.HasCheckConstraint("CK_ProjectModerations_ContentResult", "\"ContentResult\" BETWEEN 0 AND 3");
 
+                            t.HasCheckConstraint("CK_ProjectModerations_EvidenceSnapshot", "\"Purpose\" = 0 OR (\"Version\" > 0 AND \"SourceHash\" IS NOT NULL AND \"SnapshotJson\" IS NOT NULL AND \"PolicyHash\" IS NOT NULL AND \"PolicyJson\" IS NOT NULL)");
+
                             t.HasCheckConstraint("CK_ProjectModerations_LinkResult", "\"LinkResult\" BETWEEN 0 AND 3");
 
-                            t.HasCheckConstraint("CK_ProjectModerations_Status", "\"Status\" BETWEEN 0 AND 5");
+                            t.HasCheckConstraint("CK_ProjectModerations_Purpose", "\"Purpose\" IN (0,1)");
+
+                            t.HasCheckConstraint("CK_ProjectModerations_Status", "(\"Purpose\" = 0 AND \"Status\" BETWEEN 0 AND 5) OR (\"Purpose\" = 1 AND \"Status\" IN (0,1,4,5,6,7))");
                         });
                 });
 
@@ -1540,6 +1530,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid?>("EvidenceModerationId")
                         .HasColumnType("uuid");
 
+                    b.Property<short>("EvidenceModerationPurpose")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1);
+
                     b.Property<DateTimeOffset?>("FinalizedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1584,8 +1579,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EvidenceModerationId");
-
                     b.HasIndex("FinalizedByUserId");
 
                     b.HasIndex("PackageId");
@@ -1600,6 +1593,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("BookingStatus", "ReservedUntil");
 
+                    b.HasIndex("EvidenceModerationId", "EvidenceModerationPurpose");
+
                     b.HasIndex("ProjectId", "Status");
 
                     b.HasIndex("RequestByUserId", "SubmittedAt");
@@ -1609,6 +1604,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_ProjectVerifications_BookingStatus", "\"BookingStatus\" BETWEEN 0 AND 5");
 
                             t.HasCheckConstraint("CK_ProjectVerifications_ConfirmedBooking", "\"BookingStatus\" <> 2 OR (\"BookingConfirmedAt\" IS NOT NULL AND \"AssignmentEligibleAt\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProjectVerifications_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1");
 
                             t.HasCheckConstraint("CK_ProjectVerifications_Reservation", "\"BookingStatus\" NOT IN (1, 2) OR (\"ReservationId\" IS NOT NULL AND \"ReservedUntil\" IS NOT NULL AND \"ScheduledStartAt\" IS NOT NULL AND \"ScheduledEndAt\" IS NOT NULL AND \"ScheduledEndAt\" > \"ScheduledStartAt\")");
 
@@ -2187,6 +2184,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid?>("EvidenceModerationId")
                         .HasColumnType("uuid");
 
+                    b.Property<short>("EvidenceModerationPurpose")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1);
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasMaxLength(2000)
@@ -2203,8 +2205,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EvidenceModerationId");
-
                     b.HasIndex("UserVerificationId");
 
                     b.HasIndex("VerificationId");
@@ -2212,10 +2212,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("EventKey", "RecipientUserId")
                         .IsUnique();
 
+                    b.HasIndex("EvidenceModerationId", "EvidenceModerationPurpose");
+
                     b.HasIndex("RecipientUserId", "CreatedAt");
 
                     b.ToTable("VerificationNotification", null, t =>
                         {
+                            t.HasCheckConstraint("CK_VerificationNotification_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1");
+
                             t.HasCheckConstraint("CK_VerificationNotification_Target", "(CASE WHEN \"VerificationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"EvidenceModerationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"UserVerificationId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
                         });
                 });
@@ -2961,9 +2965,10 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.EvidenceModerationAttempt", b =>
                 {
-                    b.HasOne("UniNet.Domain.Entities.ProjectEvidenceModeration", null)
+                    b.HasOne("UniNet.Domain.Entities.ProjectModeration", null)
                         .WithMany("Attempts")
-                        .HasForeignKey("ModerationId")
+                        .HasForeignKey("ModerationId", "ModerationPurpose")
+                        .HasPrincipalKey("Id", "Purpose")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -3026,15 +3031,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Creator");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceModeration", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.Project", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectInvitation", b =>
@@ -3107,7 +3103,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasOne("UniNet.Domain.Entities.Project", "Project")
                         .WithMany("Moderations")
                         .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("UniNet.Domain.UserProfile", "ReviewedBy")
@@ -3190,11 +3186,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectVerification", b =>
                 {
-                    b.HasOne("UniNet.Domain.Entities.ProjectEvidenceModeration", "EvidenceModeration")
-                        .WithMany()
-                        .HasForeignKey("EvidenceModerationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("UniNet.Domain.UserProfile", "FinalizedByUser")
                         .WithMany("FinalizedVerifications")
                         .HasForeignKey("FinalizedByUserId")
@@ -3217,6 +3208,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasForeignKey("RequestByUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectModeration", "EvidenceModeration")
+                        .WithMany()
+                        .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
+                        .HasPrincipalKey("Id", "Purpose")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("EvidenceModeration");
 
@@ -3474,11 +3471,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationNotification", b =>
                 {
-                    b.HasOne("UniNet.Domain.Entities.ProjectEvidenceModeration", null)
-                        .WithMany()
-                        .HasForeignKey("EvidenceModerationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("UniNet.Domain.UserProfile", null)
                         .WithMany()
                         .HasForeignKey("RecipientUserId")
@@ -3493,6 +3485,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasOne("UniNet.Domain.Entities.ProjectVerification", null)
                         .WithMany()
                         .HasForeignKey("VerificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectModeration", null)
+                        .WithMany()
+                        .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
+                        .HasPrincipalKey("Id", "Purpose")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -3690,7 +3688,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Verifications");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceModeration", b =>
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectModeration", b =>
                 {
                     b.Navigation("Attempts");
                 });

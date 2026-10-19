@@ -10,13 +10,13 @@ namespace UniNet.Application.Services;
 // Recompute both hashes at every transition; never silently rebind an existing case.
 public sealed class VerificationEligibility(UniNetDbContext db, IConfiguration configuration)
 {
-    public async Task<ProjectEvidenceModeration> RequirePassedAsync(Guid projectId, Guid? pinnedId, CancellationToken ct)
+    public async Task<ProjectModeration> RequirePassedAsync(Guid projectId, Guid? pinnedId, CancellationToken ct)
     {
         if (!await db.Projects.AnyAsync(p => p.Id == projectId && p.Status == ProjectStatus.Completed, ct))
             throw new ProjectVerificationException("PROJECT_NOT_COMPLETED", "Only completed projects are eligible.", 409);
-        var current = await db.ProjectEvidenceModerations.Include(m => m.Attempts)
+        var current = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectEvidence).Include(m => m.Attempts)
             .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.SupersededAt == null, ct);
-        if (current == null || current.Status != EvidenceModerationStatus.Passed)
+        if (current == null || current.Status != ProjectModerationStatus.Passed)
             throw new ProjectVerificationException("LEVEL1_REQUIRED", "A current passed level-1 review is required.", 409);
         var source = new EvidenceModerationSource(db, configuration);
         if ((pinnedId.HasValue && current.Id != pinnedId) ||

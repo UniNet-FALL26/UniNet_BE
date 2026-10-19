@@ -102,7 +102,7 @@ public sealed class EvidenceModerationPostgresTests
         var outcomes = await Task.WhenAll(Complete(), Complete());
         Assert.Single(outcomes, v => v);
         await using var check = database.Open();
-        Assert.Single(await check.ProjectEvidenceModerations.ToListAsync());
+        Assert.Single(await check.ProjectModerations.ToListAsync());
         Assert.Equal(ProjectStatus.Completed, (await check.Projects.SingleAsync()).Status);
     }
 
@@ -127,6 +127,6 @@ public sealed class EvidenceModerationPostgresTests
         finally { content.Release.TrySetResult(); await running; }
         await using var check = database.Open();
         Assert.Single(await check.EvidenceModerationAttempts.ToListAsync());
-        Assert.Equal(EvidenceModerationStatus.Passed, (await check.ProjectEvidenceModerations.SingleAsync()).Status);
+        Assert.Equal(ProjectModerationStatus.Passed, (await check.ProjectModerations.SingleAsync()).Status);
     }
 }

@@ -117,8 +117,8 @@ public sealed partial class ProjectVerificationTests
         var now = DateTimeOffset.UtcNow;
         await worker.RunAsync(now, default); await worker.RunAsync(now.AddMinutes(2), default);
         Assert.Equal(2, content.Calls);
-        var moderation = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Error, moderation.Status); Assert.NotNull(moderation.NextRetryAt);
+        var moderation = await f.Db.ProjectModerations.SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Error, moderation.Status); Assert.NotNull(moderation.NextRetryAt);
         Assert.Equal(2, await f.Db.EvidenceModerationAttempts.CountAsync());
     }
 

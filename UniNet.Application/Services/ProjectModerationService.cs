@@ -22,9 +22,9 @@ public sealed class ProjectModerationService(
         if (page < 1 || pageSize < 1 || pageSize > 100 || (long)(page - 1) * pageSize > int.MaxValue)
             throw new ProjectException("INVALID_PAGINATION", "Page must be positive and pageSize must be between 1 and 100.");
 
-        var query = db.ProjectModerations.AsNoTracking()
+        var query = db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AsNoTracking()
             .Where(m => m.Status == ProjectModerationStatus.ReviewRequired &&
-                !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId &&
+                !db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Any(other => other.ProjectId == m.ProjectId &&
                     other.AttemptNumber > m.AttemptNumber));
         var total = await query.CountAsync(ct);
         var pending = await query
@@ -62,16 +62,16 @@ public sealed class ProjectModerationService(
         var reviewerId = await db.UserProfiles.Where(p => p.AccountId == accountId)
             .Select(p => (Guid?)p.Id).FirstOrDefaultAsync(ct)
             ?? throw new ProjectException("PROFILE_NOT_FOUND", "Moderator profile not found.", 403);
-        var latest = await db.ProjectModerations.AsNoTracking().Where(m => m.ProjectId == projectId)
+        var latest = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AsNoTracking().Where(m => m.ProjectId == projectId)
             .OrderByDescending(m => m.AttemptNumber).FirstOrDefaultAsync(ct);
         if (latest == null || latest.Status != ProjectModerationStatus.ReviewRequired)
             throw new ProjectException("INVALID_MODERATION_STATE", "The latest moderation attempt must require review.", 409);
 
         var now = DateTimeOffset.UtcNow;
         // Compare and update in one statement so concurrent reviewers cannot both succeed.
-        var updated = await db.ProjectModerations
+        var updated = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission)
             .Where(m => m.Id == latest.Id && m.Status == ProjectModerationStatus.ReviewRequired &&
-                !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId &&
+                !db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Any(other => other.ProjectId == m.ProjectId &&
                     other.AttemptNumber > m.AttemptNumber))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(m => m.Status, decision)
@@ -102,16 +102,16 @@ public sealed class ProjectModerationService(
     public async Task RetryTransientErrorsAsync(DateTimeOffset now, CancellationToken ct)
     {
         var abandoned = now.AddMinutes(-10);
-        await db.ProjectModerations.Where(m => m.Status == ProjectModerationStatus.Processing && m.UpdatedAt <= abandoned &&
-                m.RetryCount < 5 && !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
+        await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Where(m => m.Status == ProjectModerationStatus.Processing && m.UpdatedAt <= abandoned &&
+                m.RetryCount < 5 && !db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, ProjectModerationStatus.Error)
                 .SetProperty(m => m.ResultJson, "{\"flags\":[\"TRANSIENT_ERROR\"],\"reason\":\"Abandoned AI attempt\"}"), ct);
         var cutoff = now.AddMinutes(-5);
-        var attempts = await db.ProjectModerations.AsNoTracking()
+        var attempts = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AsNoTracking()
             .Where(m => m.Status == ProjectModerationStatus.Error && m.RetryCount < 5 && m.UpdatedAt <= cutoff &&
                 m.ResultJson != null && m.ResultJson.Contains("TRANSIENT_ERROR") &&
                 (m.Project.Status == ProjectStatus.Pending || m.Project.Status == ProjectStatus.Rejected) &&
-                !db.ProjectModerations.Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
+                !db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
             .OrderBy(m => m.UpdatedAt).Select(m => new { m.ProjectId, m.Project.Creator.AccountId }).Take(25).ToListAsync(ct);
         foreach (var attempt in attempts)
         {
@@ -137,13 +137,13 @@ public sealed class ProjectModerationService(
             project = await LoadAuthorizedProjectAsync(projectId, accountId, ct);
             if (project.Status is not (ProjectStatus.Pending or ProjectStatus.Rejected))
                 throw new ProjectException("INVALID_PROJECT_STATE", "Chỉ có thể gửi duyệt dự án Pending hoặc Rejected.", 400);
-            if (await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+            if (await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct))
                 throw new ProjectException("MODERATION_IN_PROGRESS", "Dự án đang được kiểm duyệt.", 409);
 
             input = BuildInput(project);
             var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input))));
-            var latest = await db.ProjectModerations.Where(m => m.ProjectId == projectId)
+            var latest = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Where(m => m.ProjectId == projectId)
                 .OrderByDescending(m => m.AttemptNumber).FirstOrDefaultAsync(ct);
             if (isInitialAttempt && latest != null)
                 throw new ProjectException("MODERATION_ALREADY_EXISTS", "Dự án đã có lần kiểm duyệt đầu tiên.", 409);
@@ -163,7 +163,7 @@ public sealed class ProjectModerationService(
             moderation = new ProjectModeration
             {
                 RetryCount = retry ? (latest?.RetryCount ?? 0) + 1 : 0,
-                Id = Guid.NewGuid(), ProjectId = projectId,
+                Id = Guid.NewGuid(), ProjectId = projectId, Purpose = ProjectModerationPurpose.ProjectSubmission,
                 AttemptNumber = (latest?.AttemptNumber ?? 0) + 1,
                 Status = ProjectModerationStatus.Pending,
                 ContentResult = ModerationCheckResult.Pending, LinkResult = ModerationCheckResult.Pending,
@@ -229,7 +229,7 @@ public sealed class ProjectModerationService(
     public async Task<ProjectModerationResponse> GetLatestProjectModerationAsync(Guid projectId, Guid accountId, CancellationToken ct)
     {
         await LoadAuthorizedProjectAsync(projectId, accountId, ct);
-        var latest = await db.ProjectModerations.AsNoTracking().Where(m => m.ProjectId == projectId)
+        var latest = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AsNoTracking().Where(m => m.ProjectId == projectId)
             .OrderByDescending(m => m.AttemptNumber).FirstOrDefaultAsync(ct)
             ?? throw new ProjectException("MODERATION_NOT_FOUND", "Dự án chưa có kết quả kiểm duyệt.", 404);
         return ToResponse(latest);

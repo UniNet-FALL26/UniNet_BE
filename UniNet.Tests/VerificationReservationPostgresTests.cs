@@ -62,7 +62,7 @@ public sealed partial class VerificationReservationPostgresTests
         {
             await using var admin = new NpgsqlConnection(connection); await admin.OpenAsync();
             await using var command = new NpgsqlCommand($"CREATE SCHEMA {schema}", admin); await command.ExecuteNonQueryAsync();
-            await using var db = Open(); await db.Database.EnsureCreatedAsync();
+            await using var db = Open(); await db.Database.ExecuteSqlRawAsync(db.Database.GenerateCreateScript());
             foreach (var day in Enum.GetValues<DayOfWeek>()) Config[$"ProjectVerification:WorkingDays:{(int)day}"] = day.ToString();
             Account User(string name, AccountRole role = AccountRole.Student) => new() { Email = name + "@test.com", Role = role,
                 Profile = new() { FullName = name, Nickname = name } };
@@ -79,9 +79,9 @@ public sealed partial class VerificationReservationPostgresTests
                 var source = new EvidenceModerationSource(db, Config);
                 var snapshot = JsonSerializer.Serialize(await source.CaptureAsync(project.Id, default));
                 var policy = JsonSerializer.Serialize(source.CapturePolicy());
-                db.ProjectEvidenceModerations.Add(new() { ProjectId = project.Id, Version = 1, SnapshotJson = snapshot,
+                db.ProjectModerations.Add(new() { Purpose = ProjectModerationPurpose.ProjectEvidence, ProjectId = project.Id, Version = 1, SnapshotJson = snapshot,
                     SourceHash = EvidenceModerationSource.Hash(snapshot), PolicyJson = policy,
-                    PolicyHash = EvidenceModerationSource.Hash(policy), Status = EvidenceModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow });
+                    PolicyHash = EvidenceModerationSource.Hash(policy), Status = ProjectModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow });
             }
             await db.SaveChangesAsync();
             Owner = owner.Id; Other = other.Id;
