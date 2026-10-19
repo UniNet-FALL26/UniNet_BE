@@ -2,12 +2,13 @@
 param(
     [string]$PostgresBin = 'C:\Program Files\PostgreSQL\18\bin',
     [int]$Port = 55449,
+    [ValidateSet('g1','g2')][string]$Stage = 'g1',
     [string]$Filter = 'FullyQualifiedName~Postgres',
     [string]$ArchiveDirectory
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$run = Join-Path $repo ('artifacts/verification-g1/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
+$run = Join-Path $repo ('artifacts/verification-' + $Stage + '/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
 New-Item -ItemType Directory -Path $run -Force | Out-Null
 $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 $pwfile = Join-Path $run 'init-password.txt'
@@ -29,7 +30,7 @@ try {
     & (Join-Path $PostgresBin 'createdb.exe') -w g1_test
     if ($LASTEXITCODE -ne 0) { throw 'Test database creation failed.' }
     $env:UNINET_TEST_POSTGRES="Host=127.0.0.1;Port=$Port;Database=g1_test;Username=g1_test;Password=$password;SSL Mode=Disable"
-    & dotnet test (Join-Path $repo 'UniNet.Tests/UniNet.Tests.csproj') --no-build --no-restore --filter $Filter --logger "trx;LogFileName=g1-postgres.trx" --results-directory $run
+    & dotnet test (Join-Path $repo 'UniNet.Tests/UniNet.Tests.csproj') --no-build --no-restore --filter $Filter --logger "trx;LogFileName=$Stage-postgres.trx" --results-directory $run
     if ($LASTEXITCODE -ne 0) { throw "PostgreSQL tests failed; evidence: $run" }
     if ($ArchiveDirectory) {
         # A clone only. Never read source .env or apply migrations to the source database.
@@ -42,8 +43,9 @@ try {
         & (Join-Path $PostgresBin 'pg_restore.exe') -w --exit-on-error --no-owner --no-privileges --dbname=g1_clone (Join-Path $archive 'database.dump') > (Join-Path $run 'clone-restore.log') 2>&1
         if ($LASTEXITCODE -ne 0) { throw 'Clone restore failed.' }
         $env:ConnectionStrings__UniNet="Host=127.0.0.1;Port=$Port;Database=g1_clone;Username=g1_test;Password=$password;SSL Mode=Disable"
-        & dotnet ef database update --no-build --project (Join-Path $repo 'UniNet.Infrastructure') --startup-project (Join-Path $repo 'UniNet.Infrastructure') > (Join-Path $run 'clone-migration.log') 2>&1
-        if ($LASTEXITCODE -ne 0) { throw 'G1 migration on restored clone failed.' }
+        $targetMigration = if ($Stage -eq 'g2') { '20261019131816_ArchiveVerificationHistory' } else { '20261019072056_UnifyProjectModerationPurposes' }
+        & dotnet ef database update $targetMigration --no-build --project (Join-Path $repo 'UniNet.Infrastructure') --startup-project (Join-Path $repo 'UniNet.Infrastructure') > (Join-Path $run 'clone-migration.log') 2>&1
+        if ($LASTEXITCODE -ne 0) { throw 'Migration on restored clone failed.' }
         & (Join-Path $repo 'scripts/verification-g0/Invoke-Inventory.ps1') -EnvironmentName g1-clone -OutputRoot $run -PostgresBin $PostgresBin | Out-Null
         $baseline = @(Get-Content (Join-Path $archive 'inventory.jsonl') | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
         $columns = ($baseline | Where-Object section -eq columns).data
@@ -57,6 +59,9 @@ try {
             }
             $projection = ($columns | Where-Object { $_.table_schema -ceq $parts[0] -and $_.table_name -ceq $parts[1] } | Sort-Object ordinal_position | ForEach-Object { '"' + $_.column_name.Replace('"','""') + '"' }) -join ','
             $qualified = '"' + $parts[0].Replace('"','""') + '"."' + $parts[1].Replace('"','""') + '"'
+            if ($Stage -eq 'g2' -and $parts[1] -in @('VerificationAdminAction','VerificationReportVersions')) {
+                $qualified = '"verification_archive"."' + $parts[1] + '"'
+            }
             $sql = "SELECT jsonb_build_object('count',count(*),'keys',coalesce(jsonb_agg(jsonb_build_object('id',to_jsonb(t)->'Id','row_md5',md5(to_jsonb(t)::text)) ORDER BY to_jsonb(t)->>'Id'),'[]'::jsonb)) FROM (SELECT $projection FROM $qualified) t;"
             $env:PGDATABASE='g1_clone'
             $json = & (Join-Path $PostgresBin 'psql.exe') -X -w -q -A -t --set=ON_ERROR_STOP=1 -c $sql
@@ -72,7 +77,11 @@ try {
         $cloneSummary = Get-Content (Join-Path $cloneInventory.FullName 'summary.json') -Raw | ConvertFrom-Json
         if ($cloneSummary.OrphanChecksFailed -ne 0) { throw 'Clone has FK orphans.' }
         $comparisons | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $run 'clone-comparison.json') -Encoding utf8
-        Write-Output "G1 migration on restored G0 archive: PASS. Evidence: $run"
+        if ($Stage -eq 'g2') {
+            & dotnet ef database update 20261019072056_UnifyProjectModerationPurposes --no-build --project (Join-Path $repo 'UniNet.Infrastructure') --startup-project (Join-Path $repo 'UniNet.Infrastructure') > (Join-Path $run 'clone-g2-rollback.log') 2>&1
+            if ($LASTEXITCODE -ne 0) { throw 'G2 rollback on restored clone failed.' }
+        }
+        Write-Output "$Stage migration on restored G0 archive: PASS. Evidence: $run"
     }
     Write-Output "Isolated PostgreSQL verification: PASS. Evidence: $run"
 } finally {
