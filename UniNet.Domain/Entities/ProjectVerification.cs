@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -11,11 +11,19 @@ namespace UniNet.Domain.Entities
     {
         public Guid Id { get; set; }
         public Guid ProjectId { get; set; }
+        // Nullable only for legacy cases. New cases pin a passed level-1 decision.
+        public Guid? EvidenceModerationId { get; set; }
+        public ProjectModeration? EvidenceModeration { get; set; }
         public Guid RequestByUserId { get; set; }
         public ProjectVerificationStatus Status { get; set; }
         public string? AiSummary { get; set; }
         public decimal? AiScore { get; set; }
         public DateTimeOffset SubmittedAt { get; set; }
+        public VerificationBookingStatus BookingStatus { get; set; }
+        public Guid? ReservationId { get; set; }
+        public DateTimeOffset? ReservedUntil { get; set; }
+        public DateTimeOffset? BookingConfirmedAt { get; set; }
+        public DateTimeOffset? AssignmentEligibleAt { get; set; }
         public DateTimeOffset? ScheduledStartAt { get; set; }
         public DateTimeOffset? ScheduledEndAt { get; set; }
         public DateTimeOffset? MeetingStartAt { get; set; }

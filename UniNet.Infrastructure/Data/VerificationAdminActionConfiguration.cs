@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using UniNet.Domain.Entities;
 using UniNet.Domain;
+using UniNet.Domain.Enums;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -29,9 +30,13 @@ public sealed class VerificationNotificationConfiguration : IEntityTypeConfigura
         e.HasIndex(n => new { n.EventKey, n.RecipientUserId }).IsUnique();
         e.HasIndex(n => new { n.RecipientUserId, n.CreatedAt });
         e.HasOne<ProjectVerification>().WithMany().HasForeignKey(n => n.VerificationId).OnDelete(DeleteBehavior.Restrict);
-        e.HasOne<ProjectEvidenceModeration>().WithMany().HasForeignKey(n => n.EvidenceModerationId).OnDelete(DeleteBehavior.Restrict);
+        e.Property<ProjectModerationPurpose>("EvidenceModerationPurpose").HasConversion<short>().HasDefaultValue(ProjectModerationPurpose.ProjectEvidence);
+        e.HasOne<ProjectModeration>().WithMany().HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
+            .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
+        e.ToTable("VerificationNotification", t => t.HasCheckConstraint("CK_VerificationNotification_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1"));
+        e.HasOne<UserVerification>().WithMany().HasForeignKey(n => n.UserVerificationId).OnDelete(DeleteBehavior.Restrict);
         e.ToTable("VerificationNotification", t => t.HasCheckConstraint("CK_VerificationNotification_Target",
-            "(\"VerificationId\" IS NOT NULL AND \"EvidenceModerationId\" IS NULL) OR (\"VerificationId\" IS NULL AND \"EvidenceModerationId\" IS NOT NULL)"));
+            "(CASE WHEN \"VerificationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"EvidenceModerationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"UserVerificationId\" IS NOT NULL THEN 1 ELSE 0 END) = 1"));
         e.HasOne<UserProfile>().WithMany().HasForeignKey(n => n.RecipientUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

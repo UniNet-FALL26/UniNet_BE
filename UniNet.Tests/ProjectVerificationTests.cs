@@ -38,15 +38,16 @@ public sealed partial class ProjectVerificationTests
         f.Other.Role = AccountRole.Admin;
         await f.Db.SaveChangesAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
+        await f.PayAsync(id, f.Owner);
         var service = new AdminProjectVerificationService(f.Db);
         Assert.Equal(id, Assert.Single((await service.ListAsync(f.Other.Id, pendingAssignment: true)).Verifications).Id);
         Assert.Empty((await service.ListAsync(f.Other.Id, overdue: true)).Verifications);
         var verification = await f.Db.ProjectVerifications.SingleAsync();
+        verification.ScheduledStartAt = DateTimeOffset.UtcNow.AddHours(-2);
         verification.ScheduledEndAt = DateTimeOffset.UtcNow.AddHours(-1);
         await f.Db.SaveChangesAsync();
         Assert.Equal(id, Assert.Single((await service.ListAsync(f.Other.Id, overdue: true)).Verifications).Id);
-        Assert.Single((await service.GetDetailAsync(id, f.Other.Id)).Detail.EvidenceSubmissions);
-        await Error("REPORT_REQUIRED", () => service.ReviewAsync(id, f.Other.Id, new(VerificationReviewDecision.Uphold, "Reviewed")));
+        Assert.NotNull((await service.GetDetailAsync(id, f.Other.Id)).Detail.EvidenceModeration);
     }
 
     [Fact]
@@ -65,35 +66,11 @@ public sealed partial class ProjectVerificationTests
         Assert.Null(refund.CompletedAt);
         await Error("INVALID_REFUND_AMOUNT", () => service.CreateRefundAsync(id, f.Other.Id, new(payment.Id, 1, "Duplicate")));
         var detail = await service.GetDetailAsync(id, f.Other.Id);
-        Assert.Equal(f.Other.Profile!.Id, Assert.Single(detail.Actions).ActorUserId);
+        Assert.Equal(f.Other.Profile!.Id, refund.RequestedByUserId);
+        Assert.Equal(RefundRequestSource.Admin, refund.RequestSource);
+        Assert.NotNull(refund.RequestedAt);
         Assert.Equal(ProjectVerificationStatus.Pending, detail.Detail.Verification.Status);
         Assert.Single(await service.GetRefundsAsync(id, f.Other.Id));
-    }
-
-    [Fact]
-    public async Task AdminReviewRecordsDecisionWithoutEditingReportOrRefunding()
-    {
-        await using var f = await Fixture.CreateAsync();
-        f.Other.Role = AccountRole.Admin;
-        await f.Db.SaveChangesAsync();
-        var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Verificator);
-        var now = DateTimeOffset.UtcNow;
-        f.Db.VerificationAssignments.Add(new()
-        {
-            Id = Guid.NewGuid(), ProjectVerificationId = id, AssignedToUserId = staff.Id,
-            AdminId = f.Other.Profile!.Id, Status = VerificationAssignmentStatus.Completed,
-            AssignedAt = now, CreatedAt = now, UpdatedAt = now,
-            Report = new() { Id = Guid.NewGuid(), Summary = "Failed assessment", Outcome = ProjectVerificationStatus.Failed,
-                SubmittetAt = now, CreatedAt = now, UpdatedAt = now }
-        });
-        await f.Db.SaveChangesAsync();
-        var service = new AdminProjectVerificationService(f.Db);
-        var result = await service.ReviewAsync(id, f.Other.Id, new(VerificationReviewDecision.ReassessmentRequired, "Evidence was overlooked"));
-        Assert.Equal("ReassessmentRequired", result.Decision);
-        Assert.Equal(f.Other.Profile.Id, result.ActorUserId);
-        Assert.Equal("Failed assessment", Assert.Single(await service.GetReportsAsync(id, f.Other.Id)).Summary);
-        Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
     }
 
     [Fact]
@@ -108,8 +85,8 @@ public sealed partial class ProjectVerificationTests
         Assert.Equal(f.Package.Id, stored.PackageId);
         Assert.Equal(ProjectStatus.Completed, (await f.Db.Projects.SingleAsync()).Status);
         Assert.Empty(await f.Db.Transactions.ToListAsync());
-        Assert.Empty(result.EvidenceSubmissions);
-        Assert.False(result.AiPreCheck.HasResult);
+        Assert.NotNull(result.EvidenceModeration);
+        Assert.Empty(await f.Db.ProjectVerificationEvidence.ToListAsync());
     }
 
     [Fact]
@@ -163,84 +140,13 @@ public sealed partial class ProjectVerificationTests
     }
 
     [Fact]
-    public async Task ConfiguredInitialEvidenceAndTypesAreRequired()
-    {
-        await using var f = await Fixture.CreateAsync();
-        f.Configuration["ProjectVerification:RequireEvidenceOnCreate"] = "true";
-        f.Configuration["ProjectVerification:RequiredEvidenceTypes:0"] = "source";
-        await Error("EVIDENCE_REQUIRED", () => f.CreateVerificationAsync());
-        await Error("EVIDENCE_REQUIRED", () => f.Service.CreateAsync(f.Project.Id, f.Owner.Id,
-            new(f.Package.Id, [new("demo", "Demo", "https://example.com/demo")])));
-        var result = await f.CreateVerificationAsync(true);
-        Assert.Single(result.EvidenceSubmissions);
-    }
-
-    [Fact]
-    public async Task EvidenceResubmissionPreservesHistoryAndMarksAiResultStale()
-    {
-        await using var f = await Fixture.CreateAsync();
-        var id = (await f.CreateVerificationAsync()).Verification.Id;
-        var initial = await f.Service.SubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence()));
-        var verification = await f.Db.ProjectVerifications.SingleAsync();
-        verification.AiSummary = "Need an additional demo.";
-        verification.AiScore = 55;
-        verification.AiReviewedAt = DateTimeOffset.UtcNow;
-        verification.AiEvidenceVersion = 1;
-        verification.AiAdditionalEvidenceJson = JsonSerializer.Serialize(new[] { "demo" });
-        await f.Db.SaveChangesAsync();
-        Assert.True((await f.Service.GetAiPreCheckAsync(id, f.Owner.Id)).IsCurrent);
-        var revision = await f.Service.ResubmitEvidenceAsync(id, f.Owner.Id,
-            new([new("source", "Updated", "https://example.com/new")]));
-        f.Db.ChangeTracker.Clear();
-        var detail = await f.Service.GetDetailAsync(id, f.Owner.Id);
-        Assert.Equal(1, initial.Version);
-        Assert.Equal(2, revision.Version);
-        Assert.Equal(2, detail.EvidenceSubmissions.Count);
-        Assert.Equal("https://example.com/source", detail.EvidenceSubmissions[0].Evidence[0].Url);
-        Assert.Equal("https://example.com/new", detail.EvidenceSubmissions[1].Evidence[0].Url);
-        Assert.False(detail.AiPreCheck.IsCurrent);
-        Assert.Equal("Need an additional demo.", detail.AiPreCheck.Summary);
-        Assert.Equal(new[] { "demo" }, detail.AiPreCheck.AdditionalEvidenceRequired);
-        Assert.Equal(ProjectVerificationStatus.Pending, detail.Verification.Status);
-        await Error("EVIDENCE_ALREADY_SUBMITTED", () => f.Service.SubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence())));
-    }
-
-    [Theory]
-    [InlineData("http://example.com/file")]
-    [InlineData("javascript:alert(1)")]
-    [InlineData("/relative/file")]
-    [InlineData("https://user:password@example.com/file")]
-    public async Task InvalidEvidenceUrlsAreRejectedWithoutSaving(string url)
-    {
-        await using var f = await Fixture.CreateAsync();
-        var id = (await f.CreateVerificationAsync()).Verification.Id;
-        await Error("INVALID_EVIDENCE_URL", () => f.Service.SubmitEvidenceAsync(id, f.Owner.Id,
-            new([new("source", "Source", url)])));
-        Assert.Empty(await f.Db.ProjectVerificationEvidence.ToListAsync());
-    }
-
-    [Fact]
-    public async Task EvidenceMethodSequenceAndDuplicateUrlsAreValidated()
-    {
-        await using var f = await Fixture.CreateAsync();
-        var id = (await f.CreateVerificationAsync()).Verification.Id;
-        await Error("EVIDENCE_NOT_SUBMITTED", () => f.Service.ResubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence())));
-        await Error("DUPLICATE_EVIDENCE", () => f.Service.SubmitEvidenceAsync(id, f.Owner.Id,
-            new([Fixture.Evidence()[0], Fixture.Evidence()[0]])));
-        await Error("INVALID_EVIDENCE", () => f.Service.SubmitEvidenceAsync(id, f.Owner.Id, new([])));
-    }
-
-    [Fact]
     public async Task AllReadsAndMutationsRejectAnotherLeader()
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync()).Verification.Id;
         var slot = Fixture.Slot();
         await Error("FORBIDDEN", () => f.Service.GetDetailAsync(id, f.Other.Id));
-        await Error("FORBIDDEN", () => f.Service.GetAiPreCheckAsync(id, f.Other.Id));
         await Error("FORBIDDEN", () => f.Service.GetFinalResultAsync(id, f.Other.Id));
-        await Error("FORBIDDEN", () => f.Service.SubmitEvidenceAsync(id, f.Other.Id, new(Fixture.Evidence())));
-        await Error("FORBIDDEN", () => f.Service.ResubmitEvidenceAsync(id, f.Other.Id, new(Fixture.Evidence())));
         await Error("FORBIDDEN", () => f.Service.GetAvailableMeetingSlotsAsync(id, f.Other.Id, slot.StartAt, slot.EndAt));
         await Error("FORBIDDEN", () => f.Service.ScheduleMeetingAsync(id, f.Other.Id, slot));
         await Error("FORBIDDEN", () => f.Service.CancelAsync(id, f.Other.Id, new("Cancel")));
@@ -269,18 +175,17 @@ public sealed partial class ProjectVerificationTests
     }
 
     [Fact]
-    public async Task SchedulingRequiresEvidenceAndActualSuccessfulPayment()
+    public async Task SchedulingHoldsSlotBeforePaymentWithoutExtendingDuplicateHold()
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync()).Verification.Id;
-        await Error("EVIDENCE_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
-        await f.Service.SubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence()));
-        await Error("PAYMENT_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
-        await f.PayAsync(id, f.Owner, PaymentStatus.Pending);
-        await Error("PAYMENT_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
-        (await f.Db.Transactions.SingleAsync()).Status = PaymentStatus.Success;
-        await f.Db.SaveChangesAsync();
-        await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot());
+        var held = await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot());
+        Assert.Equal(VerificationBookingStatus.Held, held.Verification.BookingStatus);
+        Assert.Empty(await f.Db.Transactions.ToListAsync());
+        var repeated = await f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot());
+        Assert.Equal(held.Verification.ReservationId, repeated.Verification.ReservationId);
+        Assert.Equal(held.Verification.ReservedUntil, repeated.Verification.ReservedUntil);
+        Assert.InRange((held.Verification.ReservedUntil!.Value - DateTimeOffset.UtcNow).TotalMinutes, 29, 30);
     }
 
     [Fact]
@@ -288,7 +193,6 @@ public sealed partial class ProjectVerificationTests
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(id, f.Owner);
         f.Configuration["ProjectVerification:TimeZoneId"] = null;
         await Error("MEETING_POLICY_NOT_CONFIGURED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
     }
@@ -309,7 +213,7 @@ public sealed partial class ProjectVerificationTests
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow
         });
         await f.Db.SaveChangesAsync();
-        await Error("PAYMENT_REQUIRED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
+        await Error("BOOKING_ALREADY_PAID", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
         var payment = Assert.Single((await f.Service.GetDetailAsync(id, f.Owner.Id)).Payments);
         Assert.Equal(PaymentStatus.Success, payment.Status);
         var refund = Assert.Single(payment.Refunds);
@@ -323,8 +227,6 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         var first = (await f.CreateVerificationAsync(true)).Verification.Id;
         var second = (await f.CreateOtherVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(first, f.Owner);
-        await f.PayAsync(second, f.Other);
         var slot = Fixture.Slot();
         var offered = await f.Service.GetAvailableMeetingSlotsAsync(second, f.Other.Id, slot.StartAt, slot.EndAt);
         Assert.Single(offered.Slots);
@@ -345,7 +247,6 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         f.Configuration["ProjectVerification:Capacity"] = "5";
         var first = (await f.CreateVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(first, f.Owner);
         var staff = await f.Db.Accounts.SingleAsync(a => a.Role == AccountRole.Verificator);
         staff.Status = AccountStatus.Suspended;
         await f.Db.SaveChangesAsync();
@@ -355,8 +256,8 @@ public sealed partial class ProjectVerificationTests
         var secondProject = Fixture.ProjectFor(f.Owner);
         f.Db.Projects.Add(secondProject);
         await f.Db.SaveChangesAsync();
-        var second = (await f.Service.CreateAsync(secondProject.Id, f.Owner.Id, new(f.Package.Id, Fixture.Evidence()))).Verification.Id;
-        await f.PayAsync(second, f.Owner);
+        await f.SeedPassedAsync(secondProject.Id);
+        var second = (await f.Service.CreateAsync(secondProject.Id, f.Owner.Id, new(f.Package.Id))).Verification.Id;
         await f.Service.ScheduleMeetingAsync(first, f.Owner.Id, Fixture.Slot());
         await Error("MEETING_SLOT_UNAVAILABLE", () => f.Service.ScheduleMeetingAsync(second, f.Owner.Id, Fixture.Slot()));
     }
@@ -366,7 +267,6 @@ public sealed partial class ProjectVerificationTests
     {
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
-        await f.PayAsync(id, f.Owner);
         var slot = Fixture.Slot();
         await Error("INVALID_MEETING_SLOT", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id,
             new(slot.StartAt.AddMinutes(15), slot.EndAt.AddMinutes(15))));
@@ -394,7 +294,6 @@ public sealed partial class ProjectVerificationTests
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
         (await f.Db.ProjectVerifications.SingleAsync()).Status = status;
         await f.Db.SaveChangesAsync();
-        await Error("INVALID_VERIFICATION_STATE", () => f.Service.ResubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence())));
         await Error("INVALID_VERIFICATION_STATE", () => f.Service.CancelAsync(id, f.Owner.Id, new("Cancel")));
         await Error("INVALID_VERIFICATION_STATE", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
     }
@@ -412,7 +311,6 @@ public sealed partial class ProjectVerificationTests
         };
         f.Db.VerificationAssignments.Add(assignment);
         await f.Db.SaveChangesAsync();
-        await Error("VERIFICATION_LOCKED", () => f.Service.ResubmitEvidenceAsync(id, f.Owner.Id, new(Fixture.Evidence())));
         await Error("VERIFICATION_LOCKED", () => f.Service.CancelAsync(id, f.Owner.Id, new("Cancel")));
         f.Db.VerificationAssignments.Remove(assignment);
         await f.Db.SaveChangesAsync();
@@ -451,7 +349,7 @@ public sealed partial class ProjectVerificationTests
         };
         assignment.Report = new VerificationReport
         {
-            Id = Guid.NewGuid(), VerificationId = assignment.Id, Summary = "Insufficient result",
+            Id = Guid.NewGuid(), AssignmentId = assignment.Id, ProjectVerificationId = id, Summary = "Insufficient result",
             Findings = "Reviewed", SubmittetAt = DateTimeOffset.UtcNow,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         };
@@ -511,32 +409,55 @@ public sealed partial class ProjectVerificationTests
             CreatorId = account.Profile!.Id, Title = "Project", Description = "Completed project",
             ProjectField = "IT", MemberTarget = 2, Status = ProjectStatus.Completed
         };
-        public static List<VerificationEvidenceRequest> Evidence() => [new("source", "Source", "https://example.com/source")];
         public static ScheduleProjectVerificationRequest Slot()
         {
             var start = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(2).AddHours(10), TimeSpan.Zero);
             return new(start, start.AddHours(1));
         }
         public Task<ProjectVerificationDetailResponse> CreateVerificationAsync(bool evidence = false) =>
-            Service.CreateAsync(Project.Id, Owner.Id, new(Package.Id, evidence ? Evidence() : null));
+            Service.CreateAsync(Project.Id, Owner.Id, new(Package.Id));
         public async Task<ProjectVerificationDetailResponse> CreateOtherVerificationAsync(bool evidence = false)
         {
             var project = ProjectFor(Other);
             Db.Projects.Add(project);
             await Db.SaveChangesAsync();
-            return await Service.CreateAsync(project.Id, Other.Id, new(Package.Id, evidence ? Evidence() : null));
+            await SeedPassedAsync(project.Id);
+            return await Service.CreateAsync(project.Id, Other.Id, new(Package.Id));
+        }
+        public async Task SeedPassedAsync(Guid projectId)
+        {
+            var source = new EvidenceModerationSource(Db, Configuration);
+            var snapshot = JsonSerializer.Serialize(await source.CaptureAsync(projectId, default));
+            var policy = JsonSerializer.Serialize(source.CapturePolicy());
+            Db.ProjectModerations.Add(new() { Purpose = ProjectModerationPurpose.ProjectEvidence, ProjectId = projectId, Version = 1,
+                SnapshotJson = snapshot, SourceHash = EvidenceModerationSource.Hash(snapshot),
+                PolicyJson = policy, PolicyHash = EvidenceModerationSource.Hash(policy),
+                Status = ProjectModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow });
+            await Db.SaveChangesAsync();
         }
         public async Task PayAsync(Guid id, Account owner, PaymentStatus status = PaymentStatus.Success)
         {
+            var verification = await Db.ProjectVerifications.SingleAsync(v => v.Id == id);
+            if (status == PaymentStatus.Success && verification.Status == ProjectVerificationStatus.Pending &&
+                verification.BookingStatus != VerificationBookingStatus.Confirmed)
+            {
+                verification.ReservationId ??= Guid.NewGuid();
+                verification.ScheduledStartAt ??= Slot().StartAt;
+                verification.ScheduledEndAt ??= Slot().EndAt;
+                verification.ReservedUntil ??= DateTimeOffset.UtcNow.AddMinutes(30);
+                verification.BookingStatus = VerificationBookingStatus.Confirmed;
+                verification.BookingConfirmedAt = DateTimeOffset.UtcNow;
+                verification.AssignmentEligibleAt = verification.BookingConfirmedAt;
+            }
             Db.Transactions.Add(new()
             {
                 Id = Guid.NewGuid(), UserId = owner.Profile!.Id, PackageId = Package.Id, Amount = Package.Price,
                 Status = status, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-                VerificationTransaction = new() { VerificationId = id, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow }
+                VerificationTransaction = new() { VerificationId = id, ReservationId = verification.ReservationId, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow }
             });
             await Db.SaveChangesAsync();
         }
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool passed = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -556,11 +477,13 @@ public sealed partial class ProjectVerificationTests
             {
                 ["ProjectVerification:TimeZoneId"] = "UTC", ["ProjectVerification:WorkdayStart"] = "09:00:00",
                 ["ProjectVerification:WorkdayEnd"] = "17:00:00", ["ProjectVerification:SlotMinutes"] = "60",
-                ["ProjectVerification:Capacity"] = "1", ["ProjectVerification:MinimumNoticeMinutes"] = "60",
+                ["ProjectVerification:Capacity"] = "1", ["ProjectVerification:ReservationMinutes"] = "30", ["ProjectVerification:MinimumNoticeMinutes"] = "60",
                 ["ProjectVerification:MaxAdvanceDays"] = "30"
             };
             foreach (var day in Enum.GetValues<DayOfWeek>()) settings[$"ProjectVerification:WorkingDays:{(int)day}"] = day.ToString();
-            return new(connection, db, new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), owner, other, project, package);
+            var fixture = new Fixture(connection, db, new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), owner, other, project, package);
+            if (passed) await fixture.SeedPassedAsync(project.Id);
+            return fixture;
         }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await connection.DisposeAsync(); }
     }

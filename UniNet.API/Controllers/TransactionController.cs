@@ -13,7 +13,7 @@ public sealed class TransactionController(ITransactionService transactions) : Co
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
         ? id : throw new TransactionException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401);
 
-    /// <summary>Tạo checkout hoặc trả lại giao dịch Pending hiện có. Giá lấy từ package của verification.</summary>
+    /// <summary>Tạo checkout cho reservation còn hạn, hoặc trả lại attempt Pending cùng reservation. Hạn link bằng hạn giữ slot.</summary>
     [HttpPost]
     public async Task<ActionResult<TransactionResponse>> Create(Guid verificationId, CancellationToken ct)
     {

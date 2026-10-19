@@ -7,7 +7,7 @@ using UniNet.Domain.Entities;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Admin,Verificator"), Route("api/verification-notifications")]
+[ApiController, Authorize(Roles = "Admin,Verificator,Student"), Route("api/verification-notifications")]
 public sealed class VerificationNotificationsController(VerificationNotifications notifications) : ControllerBase
 {
     [HttpGet]

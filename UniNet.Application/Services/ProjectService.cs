@@ -197,7 +197,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             var ongoingCount = await db.Projects.AsNoTracking()
                 .Where(p => p.CreatorId == userProfile.Id)
                 .Where(p => p.Status == ProjectStatus.Pending || p.Status == ProjectStatus.Active ||
-                    (p.Status == ProjectStatus.Rejected && p.Moderations
+                    (p.Status == ProjectStatus.Rejected && p.Moderations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission)
                         .OrderByDescending(m => m.AttemptNumber)
                         .Select(m => m.Status == ProjectModerationStatus.Pending ||
                             m.Status == ProjectModerationStatus.Processing ||
@@ -256,7 +256,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Require(project.Status is ProjectStatus.Pending or ProjectStatus.Rejected ||
                 (project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Open),
             "INVALID_PROJECT_STATE", "Only projects with Pending, Rejected, or Active (with open recruitment) status can be updated.", 400);
-        Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+        Require(!await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
             "MODERATION_IN_PROGRESS", "Cannot edit project while it is under moderation.", 409);
 
@@ -336,12 +336,14 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Require(canDelete, "CANNOT_DELETE_PROJECT", reason ?? "Cannot delete project.", 400);
 
         // Delete related data
-        Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+        Require(!await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
             "MODERATION_IN_PROGRESS", "Cannot delete project while it is under moderation.", 409);
         db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
         db.ProjectSkills.RemoveRange(project.ProjectSkills);
         db.ProjectMembers.RemoveRange(project.Members);
+        db.ProjectModerations.RemoveRange(await db.ProjectModerations
+            .Where(m => m.ProjectId == projectId && m.Purpose == ProjectModerationPurpose.ProjectSubmission).ToListAsync(ct));
         db.Projects.Remove(project);
 
         await db.SaveChangesAsync(ct);
@@ -421,7 +423,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
         // Apply every eligibility filter before counting or paginating.
         query = query.Where(p => p.Visibility == ProjectVisibility.Public && p.Status == ProjectStatus.Active);
-        query = query.Where(p => p.Moderations
+        query = query.Where(p => p.Moderations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission)
             .OrderByDescending(m => m.AttemptNumber)
             .Select(m => (ProjectModerationStatus?)m.Status)
             .FirstOrDefault() == ProjectModerationStatus.Approved);

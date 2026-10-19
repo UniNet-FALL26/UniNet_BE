@@ -14,11 +14,11 @@ public sealed class VerificationBackgroundWorker(IServiceScopeFactory scopes, IC
     {
         if (!configuration.GetValue("VerificationWorker:Enabled", true)) return Task.CompletedTask;
         return Task.WhenAll(
+            LoopAsync(70108, "Slot reservation expiry", (s, now, ct) => s.GetRequiredService<VerificationReservationTasks>().ExpireAsync(now, ct), stoppingToken),
             LoopAsync(70101, "Payment reconciliation", (s, now, ct) => s.GetRequiredService<TransactionService>().ReconcilePendingInBackgroundAsync(now, ct), stoppingToken),
             LoopAsync(70102, "Assignment and replacement timeouts", (s, now, ct) => s.GetRequiredService<VerificationDeadlineTasks>().RefundTimeoutsAsync(now, ct), stoppingToken),
-            LoopAsync(70103, "Report deadline and escalation", (s, now, ct) => s.GetRequiredService<VerificationDeadlineTasks>().RemindAndEscalateAsync(now, ct), stoppingToken),
+            LoopAsync(70103, "Report deadline and escalation", (s, now, ct) => s.GetRequiredService<VerificationDeadlineTasks>().MarkOverdueAndEscalateAsync(now, ct), stoppingToken),
             LoopAsync(70104, "Refund reconciliation", (s, now, ct) => s.GetRequiredService<VerificationRefundTasks>().RunAsync(now, ct), stoppingToken),
-            LoopAsync(70105, "Verification AI review retry", (s, now, ct) => s.GetRequiredService<VerificationAiTasks>().RunAsync(now, ct), stoppingToken),
             LoopAsync(70106, "Project moderation AI retry", (s, now, ct) => s.GetRequiredService<ProjectModerationService>().RetryTransientErrorsAsync(now, ct), stoppingToken),
             LoopAsync(70107, "Project evidence content and URL moderation", (s, now, ct) => s.GetRequiredService<EvidenceModerationTasks>().RunAsync(now, ct), stoppingToken));
     }

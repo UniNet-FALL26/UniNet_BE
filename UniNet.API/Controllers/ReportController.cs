@@ -27,15 +27,4 @@ public sealed class ReportController(IReportService reports) : ControllerBase
     public Task<ReportResponse> GetDetail(Guid reportId, CancellationToken ct)
         => reports.GetDetailAsync(reportId, AccountId, ct);
 
-    [HttpGet("api/reports/{reportId:guid}/versions"), Authorize(Roles = "Verificator,Admin")]
-    public Task<List<ReportResponse>> GetVersions(Guid reportId, CancellationToken ct)
-        => reports.GetVersionsAsync(reportId, AccountId, ct);
-
-    [HttpPost("api/reports/{reportId:guid}/versions"), Authorize(Roles = "Verificator")]
-    public async Task<ActionResult<ReportResponse>> CreateVersion(Guid reportId,
-        [FromBody] CreateReportVersionRequest request, CancellationToken ct)
-    {
-        var report = await reports.CreateVersionAsync(reportId, AccountId, request, ct);
-        return CreatedAtAction(nameof(GetDetail), new { reportId = report.Id }, report);
-    }
 }

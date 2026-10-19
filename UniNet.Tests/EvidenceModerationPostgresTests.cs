@@ -102,7 +102,7 @@ public sealed class EvidenceModerationPostgresTests
         var outcomes = await Task.WhenAll(Complete(), Complete());
         Assert.Single(outcomes, v => v);
         await using var check = database.Open();
-        Assert.Single(await check.ProjectEvidenceModerations.ToListAsync());
+        Assert.Single(await check.ProjectModerations.ToListAsync());
         Assert.Equal(ProjectStatus.Completed, (await check.Projects.SingleAsync()).Status);
     }
 
@@ -114,8 +114,8 @@ public sealed class EvidenceModerationPostgresTests
         await new ProjectService(seed, null!, config).UpdateStatusAsync(ids.AccountId, new(ids.ProjectId, ProjectStatus.Completed), default);
         var content = new BlockedContent(); var now = DateTimeOffset.UtcNow;
         await using var firstDb = database.Open(); await using var secondDb = database.Open();
-        var first = new EvidenceModerationTasks(firstDb, config, new(content, new SafeUrls()), new(firstDb));
-        var second = new EvidenceModerationTasks(secondDb, config, new(content, new SafeUrls()), new(secondDb));
+        var first = new EvidenceModerationTasks(firstDb, config, new(content, new SafeUrls()));
+        var second = new EvidenceModerationTasks(secondDb, config, new(content, new SafeUrls()));
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var running = first.RunAsync(now, deadline.Token);
         try
@@ -127,6 +127,6 @@ public sealed class EvidenceModerationPostgresTests
         finally { content.Release.TrySetResult(); await running; }
         await using var check = database.Open();
         Assert.Single(await check.EvidenceModerationAttempts.ToListAsync());
-        Assert.Equal(EvidenceModerationStatus.Passed, (await check.ProjectEvidenceModerations.SingleAsync()).Status);
+        Assert.Equal(ProjectModerationStatus.Passed, (await check.ProjectModerations.SingleAsync()).Status);
     }
 }

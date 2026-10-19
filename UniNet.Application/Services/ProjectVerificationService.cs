@@ -1,6 +1,5 @@
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -32,18 +31,15 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
             (leader.Account.Role == AccountRole.Partner && package.Role == TargetRole.Company),
             "INVALID_PACKAGE_ROLE", "The package is not available for your account role.");
 
-        var policy = ProjectVerificationPolicy.Load(configuration);
-        Require(!policy.RequireEvidenceOnCreate || request.Evidence is { Count: > 0 },
-            "EVIDENCE_REQUIRED", "Evidence must be supplied when creating a verification request.");
-        var evidence = request.Evidence == null ? null : ValidateEvidence(request.Evidence, policy);
+        var moderation = await new VerificationEligibility(db, configuration).RequirePassedAsync(projectId, null, ct);
         var now = DateTimeOffset.UtcNow;
         var verification = new ProjectVerification
         {
             Id = Guid.NewGuid(), ProjectId = project.Id, Project = project,
             RequestByUserId = leader.Id, RequestByUser = leader, PackageId = package.Id, Package = package,
+            EvidenceModerationId = moderation.Id, EvidenceModeration = moderation,
             Status = ProjectVerificationStatus.Pending, SubmittedAt = now, CreatedAt = now, UpdatedAt = now
         };
-        if (evidence != null) AppendEvidence(verification, leader.Id, evidence, now);
         db.ProjectVerifications.Add(verification);
         // The project remains Completed; AI/payment/final decisions are separate operations.
         return ProjectVerificationMapping.ToDetailResponse(verification);
@@ -72,37 +68,11 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         CancellationToken ct = default) => ProjectVerificationMapping.ToDetailResponse(
             await GetOwnedVerificationAsync(verificationId, accountId, false, ct));
 
-    public Task<VerificationEvidenceSubmissionResponse> SubmitEvidenceAsync(Guid verificationId, Guid accountId,
-        SubmitVerificationEvidenceRequest request, CancellationToken ct = default) =>
-        SaveEvidenceAsync(verificationId, accountId, request, false, ct);
-
-    public Task<VerificationEvidenceSubmissionResponse> ResubmitEvidenceAsync(Guid verificationId, Guid accountId,
-        SubmitVerificationEvidenceRequest request, CancellationToken ct = default) =>
-        SaveEvidenceAsync(verificationId, accountId, request, true, ct);
-
-    private Task<VerificationEvidenceSubmissionResponse> SaveEvidenceAsync(Guid verificationId, Guid accountId,
-        SubmitVerificationEvidenceRequest request, bool resubmission, CancellationToken ct) => MutateAsync(async () =>
-    {
-        var verification = await GetOwnedVerificationAsync(verificationId, accountId, true, ct);
-        RequireMutable(verification);
-        Require(resubmission == (verification.EvidenceSubmissions.Count > 0),
-            resubmission ? "EVIDENCE_NOT_SUBMITTED" : "EVIDENCE_ALREADY_SUBMITTED",
-            resubmission ? "Submit initial evidence before resubmitting." : "Use resubmission to update existing evidence.", 409);
-        var evidence = ValidateEvidence(request.Evidence, ProjectVerificationPolicy.Load(configuration));
-        var submission = AppendEvidence(verification, verification.Project.CreatorId, evidence, DateTimeOffset.UtcNow);
-        db.ProjectVerificationEvidence.Add(submission);
-        // Keep the prior AI output and its version for audit; the response marks it stale after a new submission.
-        return ProjectVerificationMapping.ToEvidenceResponse(submission);
-    }, ct);
-
-    public async Task<VerificationAiPreCheckResponse> GetAiPreCheckAsync(Guid verificationId, Guid accountId,
-        CancellationToken ct = default) => ProjectVerificationMapping.ToAiResponse(
-            await GetOwnedVerificationAsync(verificationId, accountId, false, ct));
-
     public async Task<VerificationMeetingSlotsResponse> GetAvailableMeetingSlotsAsync(Guid verificationId, Guid accountId,
         DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
         var verification = await GetOwnedVerificationAsync(verificationId, accountId, false, ct);
+        await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
         RequireSchedulable(verification);
         from = from.ToUniversalTime();
         to = to.ToUniversalTime();
@@ -124,6 +94,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         ScheduleProjectVerificationRequest request, CancellationToken ct = default) => MutateAsync(async () =>
     {
         var verification = await GetOwnedVerificationAsync(verificationId, accountId, true, ct);
+        await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
         RequireSchedulable(verification);
         var start = request.StartAt.ToUniversalTime();
         var end = request.EndAt.ToUniversalTime();
@@ -131,12 +102,25 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var policy = ProjectVerificationPolicy.Load(configuration);
         var zone = policy.RequireMeetingPolicy();
         var now = DateTimeOffset.UtcNow;
+        var holdMinutes = policy.RequireReservationMinutes();
+        Require(!verification.VerificationTransactions.Any(t => t.Transaction.Status == PaymentStatus.Pending),
+            "PAYMENT_PENDING", "Reconcile the existing checkout before changing or renewing a reservation.", 409);
         Require(policy.GenerateSlots(start, end, now, zone).Any(s => s.Start == start && s.End == end),
             "INVALID_MEETING_SLOT", "The interval does not match an available slot in the meeting policy.");
         var capacity = await GetCapacityAsync(policy, ct);
         var bookings = await GetBookingsAsync(verification.Id, start, end, ct);
         Require(RemainingCapacity(bookings, verification.Project.CreatorId, start, end, capacity) > 0,
             "MEETING_SLOT_UNAVAILABLE", "The slot is full or conflicts with another meeting of this leader.", 409);
+        // Repeating the same active hold cannot extend its deadline indefinitely.
+        if (verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil > now &&
+            verification.ScheduledStartAt == start && verification.ScheduledEndAt == end)
+            return ProjectVerificationMapping.ToDetailResponse(verification);
+        verification.ReservationId = Guid.NewGuid();
+        verification.BookingStatus = VerificationBookingStatus.Held;
+        var expires = now.AddMinutes(holdMinutes);
+        verification.ReservedUntil = DateTimeOffset.FromUnixTimeSeconds((expires < start ? expires : start).ToUnixTimeSeconds());
+        verification.BookingConfirmedAt = null;
+        verification.AssignmentEligibleAt = null;
         verification.ScheduledStartAt = start;
         verification.ScheduledEndAt = end;
         verification.UpdatedAt = now;
@@ -150,6 +134,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         RequireMutable(verification);
         Require(!string.IsNullOrWhiteSpace(request.Reason) && request.Reason.Trim().Length <= 2000,
             "INVALID_CANCELLATION_REASON", "Cancellation reason must be between 1 and 2000 characters.");
+        verification.BookingStatus = VerificationBookingStatus.Cancelled;
         verification.Status = ProjectVerificationStatus.Cancelled;
         verification.CancellationReason = request.Reason.Trim();
         verification.CancelledAt = DateTimeOffset.UtcNow;
@@ -188,8 +173,8 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
     {
         var profile = await GetActiveProfileAsync(accountId, ct);
         IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project)
-            .Include(v => v.EvidenceSubmissions).Include(v => v.Assignments).ThenInclude(a => a.Report)
-                .ThenInclude(r => r!.Versions)
+            .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts).Include(v => v.Assignments).ThenInclude(a => a.Report)
+
             .Include(v => v.VerificationTransactions).ThenInclude(v => v.Transaction)
                 .ThenInclude(t => t.RefundTransactions).AsSplitQuery();
         if (!tracked) query = query.AsNoTracking();
@@ -205,19 +190,32 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
             "INVALID_VERIFICATION_STATE", "Only pending, unfinalized verifications can be changed.", 409);
         Require(verification.Assignments.Count == 0 && !verification.MeetingStartAt.HasValue &&
             !verification.MeetingEndAt.HasValue &&
-            (!verification.ScheduledStartAt.HasValue || verification.ScheduledStartAt > DateTimeOffset.UtcNow),
+            (!verification.ScheduledStartAt.HasValue || verification.ScheduledStartAt > DateTimeOffset.UtcNow ||
+             verification.BookingStatus is VerificationBookingStatus.Expired ||
+             (verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil <= DateTimeOffset.UtcNow)),
             "VERIFICATION_LOCKED", "The verification cannot be changed after assignment or the scheduled meeting begins.", 409);
     }
 
     private static void RequireSchedulable(ProjectVerification verification)
     {
         RequireMutable(verification);
-        Require(verification.EvidenceSubmissions.Count > 0, "EVIDENCE_REQUIRED", "Submit evidence before scheduling.", 409);
-        Require(verification.VerificationTransactions.Any(v => v.Transaction.Status == PaymentStatus.Success &&
-            v.Transaction.FailureReason != TransactionMapping.DuplicatePaymentReview &&
-            v.Transaction.PackageId == verification.PackageId && v.Transaction.UserId == verification.RequestByUserId &&
-            !v.Transaction.RefundTransactions.Any(r => r.Status is PaymentStatus.Pending or PaymentStatus.Success)), "PAYMENT_REQUIRED",
-            "A confirmed successful verification payment is required before booking a meeting.", 409);
+        Require(verification.BookingStatus != VerificationBookingStatus.Legacy, "LEGACY_BOOKING_REVIEW_REQUIRED",
+            "Review the historical booking before changing its schedule.", 409);
+        Require(verification.BookingStatus != VerificationBookingStatus.Confirmed &&
+            !verification.VerificationTransactions.Any(v => v.Transaction.Status == PaymentStatus.Success),
+            "BOOKING_ALREADY_PAID", "The schedule cannot be changed after payment.", 409);
+    }
+
+    // Run inside payment's Serializable transaction as well: another holder can win at expiry.
+    internal async Task<bool> HasConfirmationCapacityAsync(ProjectVerification verification, CancellationToken ct)
+    {
+        var policy = ProjectVerificationPolicy.Load(configuration);
+        policy.RequireMeetingPolicy();
+        var leaderId = await db.Projects.Where(p => p.Id == verification.ProjectId).Select(p => p.CreatorId).SingleAsync(ct);
+        var bookings = await GetBookingsAsync(verification.Id, verification.ScheduledStartAt!.Value,
+            verification.ScheduledEndAt!.Value, ct);
+        return RemainingCapacity(bookings, leaderId, verification.ScheduledStartAt.Value,
+            verification.ScheduledEndAt.Value, await GetCapacityAsync(policy, ct)) > 0;
     }
 
     private async Task<int> GetCapacityAsync(ProjectVerificationPolicy policy, CancellationToken ct)
@@ -229,11 +227,16 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
 
     private sealed record Booking(Guid LeaderId, DateTimeOffset Start, DateTimeOffset End);
 
-    private async Task<List<Booking>> GetBookingsAsync(Guid excludeId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct) =>
-        await db.ProjectVerifications.AsNoTracking().Where(v => v.Id != excludeId &&
-            v.Status != ProjectVerificationStatus.Cancelled && v.ScheduledStartAt.HasValue && v.ScheduledEndAt.HasValue &&
+    private async Task<List<Booking>> GetBookingsAsync(Guid excludeId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return await db.ProjectVerifications.AsNoTracking().Where(v => v.Id != excludeId &&
+            v.Status != ProjectVerificationStatus.Cancelled &&
+            (v.BookingStatus == VerificationBookingStatus.Confirmed || v.BookingStatus == VerificationBookingStatus.Legacy ||
+             (v.BookingStatus == VerificationBookingStatus.Held && v.ReservedUntil > now)) && v.ScheduledStartAt.HasValue && v.ScheduledEndAt.HasValue &&
             v.ScheduledStartAt < to && v.ScheduledEndAt > from)
             .Select(v => new Booking(v.Project.CreatorId, v.ScheduledStartAt!.Value, v.ScheduledEndAt!.Value)).ToListAsync(ct);
+    }
 
     private static int RemainingCapacity(List<Booking> bookings, Guid leaderId,
         DateTimeOffset start, DateTimeOffset end, int capacity)
@@ -252,52 +255,11 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         return Math.Max(0, capacity - peak);
     }
 
-    private static List<VerificationEvidenceRequest> ValidateEvidence(List<VerificationEvidenceRequest>? evidence,
-        ProjectVerificationPolicy policy)
-    {
-        Require(evidence is { Count: > 0 and <= 50 }, "INVALID_EVIDENCE", "Submit between 1 and 50 evidence items.");
-        var normalized = new List<VerificationEvidenceRequest>();
-        var urls = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var item in evidence)
-        {
-            Require(item != null && !string.IsNullOrWhiteSpace(item.Type) && item.Type.Trim().Length <= 100 &&
-                !string.IsNullOrWhiteSpace(item.Title) && item.Title.Trim().Length <= 255 &&
-                (item.Description == null || item.Description.Trim().Length <= 4000),
-                "INVALID_EVIDENCE", "Evidence requires a type, title and a valid description.");
-            Require(!string.IsNullOrWhiteSpace(item.Url) && item.Url.Trim().Length <= 2048 &&
-                Uri.TryCreate(item.Url.Trim(), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps &&
-                !string.IsNullOrWhiteSpace(uri.Host) && string.IsNullOrEmpty(uri.UserInfo),
-                "INVALID_EVIDENCE_URL", "Evidence URLs must be absolute HTTPS URLs without credentials.");
-            var url = new Uri(item.Url.Trim()).AbsoluteUri;
-            Require(urls.Add(url), "DUPLICATE_EVIDENCE", "Evidence URLs must not be duplicated in a submission.");
-            normalized.Add(new(item.Type.Trim(), item.Title.Trim(), url,
-                string.IsNullOrWhiteSpace(item.Description) ? null : item.Description.Trim()));
-        }
-        foreach (var requiredType in policy.RequiredEvidenceTypes)
-            Require(normalized.Any(e => string.Equals(e.Type, requiredType, StringComparison.OrdinalIgnoreCase)),
-                "EVIDENCE_REQUIRED", $"Required evidence type is missing: {requiredType}.");
-        return normalized;
-    }
-
-    private static ProjectVerificationEvidence AppendEvidence(ProjectVerification verification, Guid userId,
-        List<VerificationEvidenceRequest> evidence, DateTimeOffset now)
-    {
-        var submission = new ProjectVerificationEvidence
-        {
-            Id = Guid.NewGuid(), ProjectVerificationId = verification.Id, ProjectVerification = verification,
-            Version = verification.EvidenceSubmissions.Select(e => e.Version).DefaultIfEmpty().Max() + 1,
-            SubmittedByUserId = userId, EvidenceJson = JsonSerializer.Serialize(evidence), SubmittedAt = now
-        };
-        verification.EvidenceSubmissions.Add(submission);
-        verification.UpdatedAt = now;
-        return submission;
-    }
-
     private async Task<T> MutateAsync<T>(Func<Task<T>> action, CancellationToken ct)
     {
         try
         {
-            // Serializable protects duplicate creation, evidence versions and capacity checks across API instances.
+            // Serializable protects duplicate creation, eligibility and capacity checks across API instances.
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             var result = await action();
             await db.SaveChangesAsync(ct);
@@ -310,9 +272,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         }
     }
 
-    private static bool IsWriteConflict(Exception ex) => ex is DbUpdateConcurrencyException ||
-        ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } ||
-        ex is DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } };
+    private static bool IsWriteConflict(Exception ex) => EvidenceModerationSource.IsWriteConflict(ex);
 
     private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)
     {

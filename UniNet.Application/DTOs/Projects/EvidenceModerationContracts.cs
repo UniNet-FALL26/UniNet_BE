@@ -23,6 +23,7 @@ public sealed record EvidenceCheckResult(Guid ProjectTaskId, Guid TaskReportId, 
 public sealed record EvidenceModerationResponse(Guid Id, Guid ProjectId, int Version, string SourceHash,
     string PolicyHash, EvidenceModerationStatus Status, bool IsCurrent, DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt, string? Summary, string? LastErrorCode, string? LastError,
-    EvidenceSourceSnapshot Source, EvidencePolicySnapshot Policy, List<EvidenceAttemptResponse> Attempts);
+    EvidenceSourceSnapshot Source, EvidencePolicySnapshot Policy, List<EvidenceAttemptResponse> Attempts,
+    string ScopeLimitation = "Only report text and URL reputation are checked; file contents are not read.");
 public sealed record EvidenceAttemptResponse(int Number, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt,
     string? ErrorCode, string? Error, bool Transient, List<EvidenceCheckResult> Results);

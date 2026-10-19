@@ -7,7 +7,7 @@ using UniNet.Application.Services;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Moderator"), Route("api/moderator/projects")]
+[ApiController, Authorize(Roles = "Moderator"), Route("api/projects")]
 public sealed class ProjectModerationController(ProjectModerationService moderation) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var accountId)

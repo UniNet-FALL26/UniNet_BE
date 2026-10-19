@@ -11,5 +11,4 @@ public interface IAdminProjectVerificationService
     Task<List<VerificationReportResponse>> GetReportsAsync(Guid id, Guid accountId, CancellationToken ct = default);
     Task<List<VerificationRefundResponse>> GetRefundsAsync(Guid id, Guid accountId, CancellationToken ct = default);
     Task<VerificationRefundResponse> CreateRefundAsync(Guid id, Guid accountId, CreateVerificationRefundRequest request, CancellationToken ct = default);
-    Task<VerificationAdminActionResponse> ReviewAsync(Guid id, Guid accountId, ReviewVerificationRequest request, CancellationToken ct = default);
 }

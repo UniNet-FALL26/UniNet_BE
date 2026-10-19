@@ -15,7 +15,7 @@ public sealed class EvidenceModerationSource(UniNetDbContext db, IConfiguration 
 {
     public static bool IsWriteConflict(Exception ex) => ex is DbUpdateConcurrencyException ||
         ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } ||
-        ex is DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected } };
+        (ex is DbUpdateException or InvalidOperationException && ex.InnerException != null && IsWriteConflict(ex.InnerException));
 
     public static string Hash(string json) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
 
@@ -49,12 +49,12 @@ public sealed class EvidenceModerationSource(UniNetDbContext db, IConfiguration 
         .Order(StringComparer.Ordinal).ToArray();
 
     // Caller owns a Serializable transaction including the source write, invalidation and new snapshot.
-    public async Task<ProjectEvidenceModeration?> RefreshAsync(Guid projectId, DateTimeOffset now,
+    public async Task<ProjectModeration?> RefreshAsync(Guid projectId, DateTimeOffset now,
         CancellationToken ct, bool createInitial = false)
     {
         if (db.Database.CurrentTransaction == null) throw new InvalidOperationException("A source transaction is required.");
         if (!await db.Projects.AsNoTracking().AnyAsync(p => p.Id == projectId && p.Status == ProjectStatus.Completed, ct)) return null;
-        var latest = await db.ProjectEvidenceModerations.OrderByDescending(m => m.Version)
+        var latest = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectEvidence).OrderByDescending(m => m.Version)
             .FirstOrDefaultAsync(m => m.ProjectId == projectId, ct);
         // No automatic backfill of pre-existing completed projects in phases 1–2.
         if (latest == null && !createInitial) return null;
@@ -70,12 +70,12 @@ public sealed class EvidenceModerationSource(UniNetDbContext db, IConfiguration 
             // Free the unique current-version index before inserting the next version.
             await db.SaveChangesAsync(ct);
         }
-        var next = new ProjectEvidenceModeration
+        var next = new ProjectModeration
         {
-            ProjectId = projectId, Version = (latest?.Version ?? 0) + 1, SourceHash = hash, SnapshotJson = snapshot,
-            PolicyHash = policyHash, PolicyJson = policy, CreatedAt = now, Status = EvidenceModerationStatus.Pending
+            Purpose = ProjectModerationPurpose.ProjectEvidence, ProjectId = projectId, Version = (latest?.Version ?? 0) + 1, SourceHash = hash, SnapshotJson = snapshot,
+            PolicyHash = policyHash, PolicyJson = policy, CreatedAt = now, UpdatedAt = now, Status = ProjectModerationStatus.Pending
         };
-        db.ProjectEvidenceModerations.Add(next);
+        db.ProjectModerations.Add(next);
         await db.SaveChangesAsync(ct);
         return next;
     }

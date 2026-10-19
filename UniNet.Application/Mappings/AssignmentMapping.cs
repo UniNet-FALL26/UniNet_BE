@@ -15,7 +15,6 @@ public static class AssignmentMapping
         new(a.ProjectVerification.Project.Id, a.ProjectVerification.Project.Title,
             a.ProjectVerification.Project.ProjectField, a.ProjectVerification.Project.Description,
             a.ProjectVerification.Project.Status, a.ProjectVerification.Project.CreatorId),
-        a.ProjectVerification.EvidenceSubmissions.OrderBy(e => e.Version)
-            .Select(ProjectVerificationMapping.ToEvidenceResponse).ToList(),
+        a.ProjectVerification.EvidenceModeration == null ? null : EvidenceModerationMapping.ToResponse(a.ProjectVerification.EvidenceModeration),
         a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report));
 }

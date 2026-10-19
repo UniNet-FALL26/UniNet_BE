@@ -5,8 +5,7 @@ namespace UniNet.Application.Services;
 // No meeting hours/capacity are assumed until the deployment supplies its approved policy.
 public sealed class ProjectVerificationPolicy
 {
-    public bool RequireEvidenceOnCreate { get; set; }
-    public string[] RequiredEvidenceTypes { get; set; } = [];
+    public int? ReservationMinutes { get; set; }
     public string? TimeZoneId { get; set; }
     public DayOfWeek[] WorkingDays { get; set; } = [];
     public TimeOnly? WorkdayStart { get; set; }
@@ -20,6 +19,14 @@ public sealed class ProjectVerificationPolicy
     {
         try { return configuration.GetSection("ProjectVerification").Get<ProjectVerificationPolicy>() ?? new(); }
         catch (InvalidOperationException) { throw MissingPolicy(); }
+    }
+
+    public int RequireReservationMinutes()
+    {
+        if (ReservationMinutes is null or < 1 or > 1440)
+            throw new ProjectVerificationException("RESERVATION_POLICY_NOT_CONFIGURED",
+                "Configure the approved slot hold duration.", 503);
+        return ReservationMinutes.Value;
     }
 
     public TimeZoneInfo RequireMeetingPolicy()

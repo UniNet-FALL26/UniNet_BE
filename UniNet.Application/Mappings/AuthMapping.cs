@@ -18,6 +18,6 @@ public static class AuthMapping
         return new(account.Id, account.Email, account.Role, account.Status, account.EmailVerified,
             p is null ? null : new(p.Id, p.FullName, p.Nickname, p.OrganizationName, p.AvatarUrl, p.CoverUrl, p.Bio,
                 p.UniversityName, p.Major, p.StudentCode, p.PartnerType, p.Industry, p.Website,
-                p.ContactEmail, p.Phone, p.Address, p.IsVerified), ProfileComplete(account));
+                p.ContactEmail, p.Phone, p.Address, p.IsVerified), ProfileComplete(account)) { CreatedAt = account.CreatedAt };
     }
 }

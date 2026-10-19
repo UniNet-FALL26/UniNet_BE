@@ -72,12 +72,12 @@ public sealed partial class ProjectVerificationTests
         new ProjectService(f.Db, null!, f.Configuration).UpdateStatusAsync(f.Owner.Id, new(f.Project.Id, ProjectStatus.Completed), default);
 
     private static EvidenceModerationTasks EvidenceWorker(Fixture f, ContentChecker content, UrlChecker urls) =>
-        new(f.Db, f.Configuration, new(content, urls), new(f.Db));
+        new(f.Db, f.Configuration, new(content, urls));
 
     [Fact]
     public async Task CompletionSnapshotsLatestReportPerGroupIncludingUnapprovedAndCancelledTasks()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await Fixture.CreateAsync(passed: false);
         var old = await SeedEvidenceAsync(f);
         var revised = new TaskReport { ProjectTaskId = old.ProjectTaskId, SubmittedById = old.SubmittedById,
             ReportGroupId = old.ReportGroupId, ParentReportId = old.Id,
@@ -88,9 +88,9 @@ public sealed partial class ProjectVerificationTests
             Evidence = [new() { FileUrl = "https://example.com/other" }] };
         f.Db.TaskReports.AddRange(revised, another); await f.Db.SaveChangesAsync();
         await CompleteAsync(f);
-        var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Pending, m.Status);
-        Assert.Equal(1, m.Version); Assert.Equal(64, m.SourceHash.Length);
+        var m = await f.Db.ProjectModerations.SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Pending, m.Status);
+        Assert.Equal(1, m.Version); Assert.Equal(64, m.SourceHash!.Length);
         var snapshot = EvidenceModerationMapping.ToResponse(m).Source;
         var task = Assert.Single(snapshot.Tasks);
         Assert.Equal(ProjectTaskStatus.Cancelled, task.Status);
@@ -102,7 +102,7 @@ public sealed partial class ProjectVerificationTests
         await using var tx = await f.Db.Database.BeginTransactionAsync();
         await new EvidenceModerationSource(f.Db, f.Configuration).RefreshAsync(f.Project.Id, DateTimeOffset.UtcNow, default);
         await tx.CommitAsync();
-        Assert.Single(await f.Db.ProjectEvidenceModerations.ToListAsync());
+        Assert.Single(await f.Db.ProjectModerations.ToListAsync());
         Assert.Empty(await f.Db.ProjectVerifications.ToListAsync());
         Assert.Empty(await f.Db.Transactions.ToListAsync());
     }
@@ -110,12 +110,12 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task SnapshotFailureRollsBackCompletedTransition()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f);
-        await f.Db.Database.ExecuteSqlRawAsync("CREATE TRIGGER FailSnapshot BEFORE INSERT ON ProjectEvidenceModerations BEGIN SELECT RAISE(ABORT, 'snapshot failed'); END;");
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
+        await f.Db.Database.ExecuteSqlRawAsync("CREATE TRIGGER FailSnapshot BEFORE INSERT ON ProjectModerations BEGIN SELECT RAISE(ABORT, 'snapshot failed'); END;");
         await Assert.ThrowsAsync<DbUpdateException>(() => CompleteAsync(f));
         f.Db.ChangeTracker.Clear();
         Assert.Equal(ProjectStatus.Active, (await f.Db.Projects.SingleAsync()).Status);
-        Assert.Empty(await f.Db.ProjectEvidenceModerations.ToListAsync());
+        Assert.Empty(await f.Db.ProjectModerations.ToListAsync());
         Assert.Empty(await f.Db.ContributionCycles.ToListAsync());
         Assert.Null((await f.Db.Projects.SingleAsync()).CompletedAt);
     }
@@ -123,21 +123,21 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task EmptyEvidenceNeverPassesOrCallsProviders()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f, file: false); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f, file: false); await CompleteAsync(f);
         var content = new ContentChecker(); var urls = new UrlChecker();
         await EvidenceWorker(f, content, urls).RunAsync(DateTimeOffset.UtcNow, default);
-        Assert.Equal(EvidenceModerationStatus.NeedsEvidence, (await f.Db.ProjectEvidenceModerations.SingleAsync()).Status);
+        Assert.Equal(ProjectModerationStatus.NeedsEvidence, (await f.Db.ProjectModerations.SingleAsync()).Status);
         Assert.Equal(0, content.Calls); Assert.Empty(urls.Seen);
     }
 
     [Fact]
     public async Task PassedOnlyCoversTextAndUrlsWithExplicitFileExclusion()
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await Fixture.CreateAsync(passed: false);
         var report = await SeedEvidenceAsync(f, text: "Work is at https://example.com/demo."); await CompleteAsync(f);
         var content = new ContentChecker(); var urls = new UrlChecker();
         await EvidenceWorker(f, content, urls).RunAsync(DateTimeOffset.UtcNow, default);
-        var m = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync();
+        var m = await f.Db.ProjectModerations.Include(m => m.Attempts).SingleAsync();
         var dto = EvidenceModerationMapping.ToResponse(m); var attempt = Assert.Single(dto.Attempts);
         Assert.Equal(EvidenceModerationStatus.Passed, dto.Status);
         Assert.Equal(2, urls.Seen.Count); Assert.Equal(1, content.Calls);
@@ -157,24 +157,24 @@ public sealed partial class ProjectVerificationTests
     [InlineData("cấmabc", "FormC", false, false)]
     public async Task ForbiddenTermsFollowExplicitCaseAccentAndWordPolicy(string text, string normalization, bool caseSensitive, bool rejected)
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f, text: text);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f, text: text);
         f.Configuration["EvidenceModeration:TextNormalization"] = normalization;
         f.Configuration["EvidenceModeration:CaseSensitive"] = caseSensitive.ToString();
         await CompleteAsync(f);
         var content = new ContentChecker();
         await EvidenceWorker(f, content, new()).RunAsync(DateTimeOffset.UtcNow, default);
-        var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        Assert.Equal(rejected ? EvidenceModerationStatus.Rejected : EvidenceModerationStatus.Passed, m.Status);
+        var m = await f.Db.ProjectModerations.SingleAsync();
+        Assert.Equal(rejected ? ProjectModerationStatus.Rejected : ProjectModerationStatus.Passed, m.Status);
         Assert.Equal(rejected ? 0 : 1, content.Calls);
     }
 
     [Fact]
     public async Task UnsafeUrlAndContextualContentViolationsAreRecordedAgainstTheirSource()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
         await EvidenceWorker(f, new() { Pass = false }, new() { Pass = false }).RunAsync(DateTimeOffset.UtcNow, default);
-        var m = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Rejected, m.Status);
+        var m = await f.Db.ProjectModerations.Include(m => m.Attempts).SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Rejected, m.Status);
         var results = EvidenceModerationMapping.ToResponse(m).Attempts.Single().Results;
         Assert.Contains(results, r => r.Kind == "ReportText" && r.Status == EvidenceCheckStatus.Rejected);
         Assert.Contains(results, r => r.Kind == "Url" && r.Status == EvidenceCheckStatus.Rejected && r.TaskEvidenceId == report.Evidence.Single().Id);
@@ -183,27 +183,27 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task TransientProviderErrorsRetryWithHistoryAndNeverBecomePassedPrematurely()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
         var content = new ContentChecker { Error = new("Timeout", true, "AI_TIMEOUT") }; var urls = new UrlChecker();
         var worker = EvidenceWorker(f, content, urls); var now = DateTimeOffset.UtcNow;
         await worker.RunAsync(now, default); await worker.RunAsync(now, default);
         Assert.Equal(1, content.Calls);
-        var first = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Error, first.Status); Assert.NotNull(first.NextRetryAt);
+        var first = await f.Db.ProjectModerations.SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Error, first.Status); Assert.NotNull(first.NextRetryAt);
         content.Error = null; await worker.RunAsync(first.NextRetryAt!.Value.AddSeconds(1), default);
-        var result = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Passed, result.Status); Assert.Equal(2, result.Attempts.Count);
+        var result = await f.Db.ProjectModerations.Include(m => m.Attempts).SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Passed, result.Status); Assert.Equal(2, result.Attempts.Count);
         Assert.Contains(result.Attempts, a => a.ErrorCode == "AI_TIMEOUT" && a.Transient);
     }
 
     [Fact]
     public async Task UrlProviderFailureLeavesSuccessfulContentCheckButBlocksPassing()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
         await EvidenceWorker(f, new(), new() { Error = new("No URL credentials", false, "URL_NOT_CONFIGURED") })
             .RunAsync(DateTimeOffset.UtcNow, default);
-        var m = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Error, m.Status); Assert.Null(m.NextRetryAt);
+        var m = await f.Db.ProjectModerations.Include(m => m.Attempts).SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Error, m.Status); Assert.Null(m.NextRetryAt);
         var results = EvidenceModerationMapping.ToResponse(m).Attempts.Single().Results;
         Assert.Contains(results, r => r.Kind == "ReportText" && r.Status == EvidenceCheckStatus.Passed);
         Assert.Contains(results, r => r.Kind == "Url" && r.Status == EvidenceCheckStatus.Error && r.ErrorCode == "URL_NOT_CONFIGURED");
@@ -215,63 +215,62 @@ public sealed partial class ProjectVerificationTests
     [InlineData("[Proof](relative-evidence.pdf)", "relative-evidence.pdf")]
     public async Task ExplicitUncheckableLinksAreNotSilentlyOmitted(string text, string expected)
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f, text: text); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f, text: text); await CompleteAsync(f);
         var urls = new UrlChecker { Error = new("Unsupported URL", false, "URL_NOT_CHECKABLE") };
         await EvidenceWorker(f, new(), urls).RunAsync(DateTimeOffset.UtcNow, default);
         Assert.Contains(expected, urls.Seen);
-        Assert.Equal(EvidenceModerationStatus.Error, (await f.Db.ProjectEvidenceModerations.SingleAsync()).Status);
+        Assert.Equal(ProjectModerationStatus.Error, (await f.Db.ProjectModerations.SingleAsync()).Status);
     }
 
     [Fact]
     public async Task MissingPolicyStopsAndNotifiesAdminsWithoutInventingDefaults()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync();
         f.Configuration["EvidenceModeration:PolicyVersion"] = null; await CompleteAsync(f);
         var content = new ContentChecker(); var worker = EvidenceWorker(f, content, new());
         await worker.RunAsync(DateTimeOffset.UtcNow, default); await worker.RunAsync(DateTimeOffset.UtcNow.AddDays(1), default);
-        var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        Assert.Equal(EvidenceModerationStatus.Error, m.Status); Assert.Null(m.NextRetryAt); Assert.Equal(0, content.Calls);
-        var notification = Assert.Single(await f.Db.Set<VerificationNotification>().ToListAsync());
-        Assert.Equal(m.Id, notification.EvidenceModerationId); Assert.Null(notification.VerificationId);
+        var m = await f.Db.ProjectModerations.SingleAsync();
+        Assert.Equal(ProjectModerationStatus.Error, m.Status); Assert.Null(m.NextRetryAt); Assert.Equal(0, content.Calls);
+        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
         f.Configuration["EvidenceModeration:PolicyVersion"] = "fixed-v2";
         await worker.RunAsync(DateTimeOffset.UtcNow.AddDays(2), default);
-        Assert.Equal(2, await f.Db.ProjectEvidenceModerations.CountAsync());
-        Assert.Equal(EvidenceModerationStatus.Passed, (await f.Db.ProjectEvidenceModerations.SingleAsync(m => m.SupersededAt == null)).Status);
+        Assert.Equal(2, await f.Db.ProjectModerations.CountAsync());
+        Assert.Equal(ProjectModerationStatus.Passed, (await f.Db.ProjectModerations.SingleAsync(m => m.SupersededAt == null)).Status);
     }
 
     [Fact]
-    public async Task RetryBudgetExhaustionNotifiesOnceAndPreservesAllAttempts()
+    public async Task RetryBudgetExhaustionStopsWithoutNotificationsAndPreservesAllAttempts()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync(); await CompleteAsync(f);
         var content = new ContentChecker { Error = new("Unavailable", true) }; var worker = EvidenceWorker(f, content, new());
         var now = DateTimeOffset.UtcNow;
         for (var i = 0; i < 5; i++)
         {
             await worker.RunAsync(now, default);
-            var current = await f.Db.ProjectEvidenceModerations.SingleAsync();
+            var current = await f.Db.ProjectModerations.SingleAsync();
             now = current.NextRetryAt?.AddSeconds(1) ?? now.AddDays(1);
         }
         await worker.RunAsync(now, default);
         Assert.Equal(5, content.Calls); Assert.Equal(5, await f.Db.EvidenceModerationAttempts.CountAsync());
-        Assert.Single(await f.Db.Set<VerificationNotification>().ToListAsync());
-        Assert.Null((await f.Db.ProjectEvidenceModerations.SingleAsync()).NextRetryAt);
+        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Null((await f.Db.ProjectModerations.SingleAsync()).NextRetryAt);
     }
 
     [Fact]
     public async Task AbandonedProcessingIsRecoveredWithAuditAndBackoff()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
-        var now = DateTimeOffset.UtcNow; var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
-        m.Status = EvidenceModerationStatus.Processing; m.LeaseToken = Guid.NewGuid();
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        var now = DateTimeOffset.UtcNow; var m = await f.Db.ProjectModerations.SingleAsync();
+        m.Status = ProjectModerationStatus.Processing; m.LeaseToken = Guid.NewGuid();
         m.LeaseExpiresAt = now.AddTicks(-1); m.AttemptCount = 1;
         f.Db.EvidenceModerationAttempts.Add(new() { ModerationId = m.Id, Number = 1, StartedAt = now.AddMinutes(-11) });
         await f.Db.SaveChangesAsync();
         var content = new ContentChecker(); var worker = EvidenceWorker(f, content, new());
         await worker.RunAsync(now, default);
         Assert.Equal(0, content.Calls);
-        var recovered = await f.Db.ProjectEvidenceModerations.SingleAsync();
+        var recovered = await f.Db.ProjectModerations.SingleAsync();
         Assert.Equal("WORKER_LEASE_EXPIRED", recovered.LastErrorCode);
         await worker.RunAsync(recovered.NextRetryAt!.Value.AddSeconds(1), default);
         Assert.Equal(1, content.Calls);
@@ -281,7 +280,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task SourceChangeDuringProviderCallRetainsOldResultWithoutApplyingIt()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
         var content = new ContentChecker { DuringCall = async () =>
         {
             f.Db.TaskReports.Add(new() { ProjectTaskId = report.ProjectTaskId, SubmittedById = report.SubmittedById,
@@ -290,45 +289,45 @@ public sealed partial class ProjectVerificationTests
             await f.Db.SaveChangesAsync();
         } };
         await EvidenceWorker(f, content, new()).RunAsync(DateTimeOffset.UtcNow, default);
-        var old = await f.Db.ProjectEvidenceModerations.Include(m => m.Attempts).SingleAsync(m => m.Version == 1);
-        var current = await f.Db.ProjectEvidenceModerations.SingleAsync(m => m.Version == 2);
-        Assert.NotNull(old.SupersededAt); Assert.NotEqual(EvidenceModerationStatus.Passed, old.Status);
+        var old = await f.Db.ProjectModerations.Include(m => m.Attempts).SingleAsync(m => m.Version == 1);
+        var current = await f.Db.ProjectModerations.SingleAsync(m => m.Version == 2);
+        Assert.NotNull(old.SupersededAt); Assert.NotEqual(ProjectModerationStatus.Passed, old.Status);
         Assert.Equal("SOURCE_SUPERSEDED", old.Attempts.Single().ErrorCode);
-        Assert.Equal(EvidenceModerationStatus.Pending, current.Status);
+        Assert.Equal(ProjectModerationStatus.Pending, current.Status);
         Assert.DoesNotContain("Changed", old.SnapshotJson); Assert.Contains("Changed", current.SnapshotJson);
     }
 
     [Fact]
     public async Task TaskReportRevisionAutomaticallyInvalidatesCompletedProjectSnapshot()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f);
         report.Status = TaskReportStatus.RevisionRequested; await f.Db.SaveChangesAsync(); await CompleteAsync(f);
         await EvidenceWorker(f, new(), new()).RunAsync(DateTimeOffset.UtcNow, default);
-        var oldJson = (await f.Db.ProjectEvidenceModerations.SingleAsync()).SnapshotJson;
+        var oldJson = (await f.Db.ProjectModerations.SingleAsync()).SnapshotJson;
         await new ProjectTaskService(f.Db, f.Configuration).ReviseTaskReportAsync(f.Project.Id, report.ProjectTaskId,
             report.Id, f.Owner.Id, new("Corrected", [new("https://example.com/corrected")]), default);
-        var versions = await f.Db.ProjectEvidenceModerations.OrderBy(m => m.Version).ToListAsync();
+        var versions = await f.Db.ProjectModerations.OrderBy(m => m.Version).ToListAsync();
         Assert.Equal(2, versions.Count); Assert.NotNull(versions[0].SupersededAt);
-        Assert.Equal(oldJson, versions[0].SnapshotJson); Assert.Equal(EvidenceModerationStatus.Pending, versions[1].Status);
+        Assert.Equal(oldJson, versions[0].SnapshotJson); Assert.Equal(ProjectModerationStatus.Pending, versions[1].Status);
     }
 
     [Fact]
     public async Task DeletingTaskRetainsItsAuditSnapshotAndQueuesEmptySource()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
-        var oldJson = (await f.Db.ProjectEvidenceModerations.SingleAsync()).SnapshotJson;
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f); await CompleteAsync(f);
+        var oldJson = (await f.Db.ProjectModerations.SingleAsync()).SnapshotJson;
         await new ProjectTaskService(f.Db, f.Configuration).DeleteProjectTaskAsync(f.Project.Id, report.ProjectTaskId, f.Owner.Id);
-        Assert.Equal(oldJson, (await f.Db.ProjectEvidenceModerations.SingleAsync(m => m.Version == 1)).SnapshotJson);
+        Assert.Equal(oldJson, (await f.Db.ProjectModerations.SingleAsync(m => m.Version == 1)).SnapshotJson);
         Assert.Empty(await f.Db.TaskEvidence.ToListAsync());
         await EvidenceWorker(f, new(), new()).RunAsync(DateTimeOffset.UtcNow, default);
-        Assert.Equal(EvidenceModerationStatus.NeedsEvidence, (await f.Db.ProjectEvidenceModerations.SingleAsync(m => m.SupersededAt == null)).Status);
+        Assert.Equal(ProjectModerationStatus.NeedsEvidence, (await f.Db.ProjectModerations.SingleAsync(m => m.SupersededAt == null)).Status);
     }
 
     [Fact]
     public async Task SnapshotColumnsCannotBeRewrittenThroughEf()
     {
-        await using var f = await Fixture.CreateAsync(); await SeedEvidenceAsync(f); await CompleteAsync(f);
-        var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
+        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
+        var m = await f.Db.ProjectModerations.SingleAsync();
         f.Db.Entry(m).Property(x => x.SnapshotJson).CurrentValue = "{}";
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
     }
@@ -336,7 +335,7 @@ public sealed partial class ProjectVerificationTests
     [Fact]
     public async Task MergeKeepsEveryReportGroupIncludingDraftWithdrawnAndSoftDeletedEvidence()
     {
-        await using var f = await Fixture.CreateAsync(); var report = await SeedEvidenceAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var report = await SeedEvidenceAsync(f);
         foreach (var state in new[] { TaskReportStatus.Draft, TaskReportStatus.Withdrawn, TaskReportStatus.Approved })
         {
             var deleted = state == TaskReportStatus.Approved;
@@ -347,7 +346,7 @@ public sealed partial class ProjectVerificationTests
                 Evidence = [new() { FileUrl = $"https://example.com/{state}" }] });
         }
         await f.Db.SaveChangesAsync(); await CompleteAsync(f);
-        var m = await f.Db.ProjectEvidenceModerations.SingleAsync();
+        var m = await f.Db.ProjectModerations.SingleAsync();
         var dto = EvidenceModerationMapping.ToResponse(m);
         var reports = dto.Source.Tasks.Single().Reports;
         Assert.Equal(4, reports.Count); Assert.Equal(4, reports.Select(r => r.ReportGroupId).Distinct().Count());
