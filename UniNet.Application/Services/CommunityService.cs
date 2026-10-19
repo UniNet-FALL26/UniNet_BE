@@ -24,6 +24,20 @@ public class CommunityService : ICommunityService
 
     public async Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize)
     {
+        // 1. Ánh xạ từ AccountId (currentUserId) sang UserProfile.Id (actualUserId)
+        Guid actualUserId = Guid.Empty;
+        if (currentUserId != Guid.Empty)
+        {
+            var userProfile = await _context.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.AccountId == currentUserId);
+
+            if (userProfile != null)
+            {
+                actualUserId = userProfile.Id;
+            }
+        }
+
         var postsQuery = _context.CommunityPosts
             .Include(p => p.AuthorUser)
             .Include(p => p.Media)
@@ -42,8 +56,9 @@ public class CommunityService : ICommunityService
             MediaUrls = p.Media.OrderBy(m => m.DisplayOrder).Select(m => m.FileUrl).ToList(),
             FavoriteCount = p.FavoriteCount,
             CommentCount = p.CommentCount,
-            IsFavorited = _context.CommunityPostReactions.Any(r => r.PostId == p.Id && r.UserId == currentUserId),
-            IsSaved = _context.CommunityPostBookmarks.Any(b => b.PostId == p.Id && b.UserId == currentUserId),
+            // 2. Sử dụng actualUserId (UserProfile.Id) để kiểm tra trạng thái Favorited & Saved
+            IsFavorited = actualUserId != Guid.Empty && _context.CommunityPostReactions.Any(r => r.PostId == p.Id && r.UserId == actualUserId),
+            IsSaved = actualUserId != Guid.Empty && _context.CommunityPostBookmarks.Any(b => b.PostId == p.Id && b.UserId == actualUserId),
             CreatedAt = p.CreatedAt,
             UpdatedAt = p.UpdatedAt
         }).ToListAsync();
