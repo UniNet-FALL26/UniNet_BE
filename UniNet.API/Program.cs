@@ -73,6 +73,28 @@ builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.
 builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
 builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+var figmaOrigins = new[]
+{
+    "http://localhost:3000",
+    "https://ta-01m551rnn4dyqsyrf74mnkz5vv-1380-2pwdyx71k1tz10bigm5fnvcgc.makeproxy-m.figma.site"
+};
+
+var allowedOrigins = origins
+    .Concat(figmaOrigins)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Frontend", policy =>
+    {
+        policy
+            .WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddCors(options =>
 {
@@ -223,9 +245,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     context.Response.StatusCode = 500;
     await context.Response.WriteAsJsonAsync(new { code = "INTERNAL_ERROR", message = "Có lỗi xảy ra. Vui lòng thử lại." });
 }));
-app.UseHttpsRedirection();
-app.UseCors("MobileWeb");
-app.UseCors("UniNetDashboard");
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+app.UseCors("Frontend");
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
