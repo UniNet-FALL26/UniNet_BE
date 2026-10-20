@@ -920,12 +920,15 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
-            e.Property<ProjectModerationPurpose>("EvidenceModerationPurpose").HasConversion<short>().HasDefaultValue(ProjectModerationPurpose.ProjectEvidence);
+            e.Property<ProjectModerationPurpose?>("EvidenceModerationPurpose").IsRequired().HasConversion<short>()
+                .HasDefaultValue(ProjectModerationPurpose.ProjectEvidence).HasSentinel(null);
             e.HasOne(x => x.EvidenceModeration).WithMany()
                 .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
                 .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
             e.ToTable("ProjectVerifications", t => t.HasCheckConstraint("CK_ProjectVerifications_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1"));
             e.Property(x => x.BookingStatus).HasConversion<short>();
+            e.Property(x => x.MeetingRoomName).HasMaxLength(200);
+            e.HasIndex(x => x.MeetingRoomName).IsUnique();
             e.HasIndex(x => new { x.BookingStatus, x.ReservedUntil });
             e.HasIndex(x => x.ReservationId).IsUnique();
             e.Property(x => x.AiSummary).HasColumnType("text");

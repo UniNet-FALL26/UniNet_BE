@@ -36,7 +36,8 @@ public sealed class EvidenceModerationAttemptConfiguration : IEntityTypeConfigur
     {
         e.ToTable("EvidenceModerationAttempts", t => t.HasCheckConstraint("CK_EvidenceModerationAttempts_Purpose", "\"ModerationPurpose\" = 1"));
         e.HasKey(x => x.Id);
-        e.Property<ProjectModerationPurpose>("ModerationPurpose").HasConversion<short>().HasDefaultValue(ProjectModerationPurpose.ProjectEvidence);
+        e.Property<ProjectModerationPurpose?>("ModerationPurpose").IsRequired().HasConversion<short>()
+            .HasDefaultValue(ProjectModerationPurpose.ProjectEvidence).HasSentinel(null);
         e.HasOne<ProjectModeration>().WithMany(x => x.Attempts)
             .HasForeignKey("ModerationId", "ModerationPurpose").HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
         e.HasIndex(x => new { x.ModerationId, x.Number }).IsUnique();

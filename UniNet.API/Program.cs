@@ -47,6 +47,7 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IAssignmentService, AssignmentService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IMeetingService, MeetingService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IReportService, ReportService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
@@ -177,6 +178,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = joinRequestError.Status;
         await context.Response.WriteAsJsonAsync(new { code = joinRequestError.Code, message = joinRequestError.Message });
+        return;
+    }
+    if (error is MeetingException meetingError)
+    {
+        context.Response.StatusCode = meetingError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = meetingError.Code, message = meetingError.Message });
         return;
     }
     if (error is AssignmentException assignmentError)

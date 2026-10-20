@@ -1544,6 +1544,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("MeetingEndAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("MeetingRoomName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<DateTimeOffset?>("MeetingStartAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1580,6 +1584,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FinalizedByUserId");
+
+                    b.HasIndex("MeetingRoomName")
+                        .IsUnique();
 
                     b.HasIndex("PackageId");
 

@@ -107,9 +107,16 @@ public sealed class ProjectModerationService(
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, ProjectModerationStatus.Error)
                 .SetProperty(m => m.ResultJson, "{\"flags\":[\"TRANSIENT_ERROR\"],\"reason\":\"Abandoned AI attempt\"}"), ct);
         var cutoff = now.AddMinutes(-5);
-        var attempts = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AsNoTracking()
+        var retryable = db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AsNoTracking();
+        // ResultJson is jsonb on PostgreSQL: string.Contains would emit an invalid LIKE.
+        // AI results use Flags; abandoned attempts and older records use flags.
+        retryable = db.Database.IsNpgsql()
+            ? retryable.Where(m => m.ResultJson != null &&
+                (EF.Functions.JsonContains(m.ResultJson, "{\"Flags\":[\"TRANSIENT_ERROR\"]}") ||
+                 EF.Functions.JsonContains(m.ResultJson, "{\"flags\":[\"TRANSIENT_ERROR\"]}")))
+            : retryable.Where(m => m.ResultJson != null && m.ResultJson.Contains("TRANSIENT_ERROR"));
+        var attempts = await retryable
             .Where(m => m.Status == ProjectModerationStatus.Error && m.RetryCount < 5 && m.UpdatedAt <= cutoff &&
-                m.ResultJson != null && m.ResultJson.Contains("TRANSIENT_ERROR") &&
                 (m.Project.Status == ProjectStatus.Pending || m.Project.Status == ProjectStatus.Rejected) &&
                 !db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).Any(other => other.ProjectId == m.ProjectId && other.AttemptNumber > m.AttemptNumber))
             .OrderBy(m => m.UpdatedAt).Select(m => new { m.ProjectId, m.Project.Creator.AccountId }).Take(25).ToListAsync(ct);
