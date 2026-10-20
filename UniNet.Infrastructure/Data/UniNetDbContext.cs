@@ -920,7 +920,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
-            e.Property<ProjectModerationPurpose>("EvidenceModerationPurpose").HasConversion<short>().HasDefaultValue(ProjectModerationPurpose.ProjectEvidence);
+            e.Property<ProjectModerationPurpose?>("EvidenceModerationPurpose").IsRequired().HasConversion<short>()
+                .HasDefaultValue(ProjectModerationPurpose.ProjectEvidence).HasSentinel(null);
             e.HasOne(x => x.EvidenceModeration).WithMany()
                 .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
                 .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
