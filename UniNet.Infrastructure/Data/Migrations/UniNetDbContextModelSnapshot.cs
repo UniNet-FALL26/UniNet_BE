@@ -916,6 +916,10 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("StudentUserId", "AppliedAt");
 
+                    b.HasIndex("StudentUserId", "JobId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" <> 4");
+
                     b.ToTable("JobApplications", (string)null);
                 });
 

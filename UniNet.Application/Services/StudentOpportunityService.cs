@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using UniNet.Application.Common;
 using UniNet.Application.DTOs.Partner;
 using UniNet.Application.Interfaces;
@@ -10,7 +11,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class StudentOpportunityService(UniNetDbContext db) : IStudentOpportunityService
+public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioService portfolios) : IStudentOpportunityService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -49,8 +50,9 @@ public sealed class StudentOpportunityService(UniNetDbContext db) : IStudentOppo
         var ids = jobs.Select(x => x.Id).ToArray();
         var savedIds = (await db.StudentSavedJobs.AsNoTracking().Where(x => x.StudentUserId == student.Id && ids.Contains(x.JobId))
             .Select(x => x.JobId).ToListAsync(ct)).ToHashSet();
-        var applications = await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == student.Id && ids.Contains(x.JobId))
-            .ToDictionaryAsync(x => x.JobId, ct);
+        var applications = (await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == student.Id && ids.Contains(x.JobId))
+            .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id).ToListAsync(ct))
+            .GroupBy(x => x.JobId).ToDictionary(group => group.Key, group => group.First());
         var applicantCounts = await db.JobApplications.AsNoTracking().Where(x => ids.Contains(x.JobId)).GroupBy(x => x.JobId)
             .Select(g => new { JobId = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.JobId, x => x.Count, ct);
         return new(page, pageSize, totalItems, (int)(((long)totalItems + pageSize - 1) / pageSize),
@@ -67,9 +69,24 @@ public sealed class StudentOpportunityService(UniNetDbContext db) : IStudentOppo
                  db.JobApplications.Any(app => app.StudentUserId == student.Id && app.JobId == x.Id)), ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Không tìm thấy cơ hội đang tuyển.", 404);
         var saved = await db.StudentSavedJobs.AnyAsync(x => x.StudentUserId == student.Id && x.JobId == jobId, ct);
-        var application = await db.JobApplications.AsNoTracking().FirstOrDefaultAsync(x => x.StudentUserId == student.Id && x.JobId == jobId, ct);
+        var application = await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == student.Id && x.JobId == jobId)
+            .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id).FirstOrDefaultAsync(ct);
         var applicantCount = await db.JobApplications.CountAsync(x => x.JobId == jobId, ct);
         return ToResponse(job, saved, application, applicantCount);
+    }
+
+    public async Task<IReadOnlyList<StudentSubmittedApplicationResponse>> GetOwnApplicationsAsync(Guid accountId, Guid jobId, CancellationToken ct)
+    {
+        var student = await GetStudentAsync(accountId, ct);
+        var applications = await db.JobApplications.AsNoTracking()
+            .Where(x => x.StudentUserId == student.Id && x.JobId == jobId)
+            .OrderBy(x => x.AppliedAt).ThenBy(x => x.Id).ToListAsync(ct);
+        if (applications.Count == 0)
+            throw new PartnerException("APPLICATION_NOT_FOUND", "Chưa có hồ sơ ứng tuyển cho cơ hội này.", 404);
+
+        return applications.Select((application, index) => new StudentSubmittedApplicationResponse(
+            application.Id, index + 1, application.AppliedAt, application.Status,
+            ReadSubmittedPortfolio(application.ProfileSnapshot))).ToList();
     }
 
     public async Task SaveAsync(Guid accountId, Guid jobId, CancellationToken ct)
@@ -95,12 +112,15 @@ public sealed class StudentOpportunityService(UniNetDbContext db) : IStudentOppo
         var student = await GetStudentAsync(accountId, ct);
         if (coverMessage?.Length > 300) throw new PartnerException("INVALID_COVER_MESSAGE", "Lời nhắn không được vượt quá 300 ký tự.");
         var job = await RequireOpenJobAsync(jobId, ct);
-        if (await db.JobApplications.AnyAsync(x => x.StudentUserId == student.Id && x.JobId == jobId, ct))
-            throw new PartnerException("ALREADY_APPLIED", "Bạn đã ứng tuyển cơ hội này rồi.", 409);
+        var latestApplication = await db.JobApplications.Where(x => x.StudentUserId == student.Id && x.JobId == jobId)
+            .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id).FirstOrDefaultAsync(ct);
+        if (latestApplication is not null && latestApplication.Status != (short)JobApplicationStatus.Rejected)
+            throw new PartnerException("ALREADY_APPLIED", "Hồ sơ của bạn chưa bị từ chối nên chưa thể nộp lại.", 409);
+        var submittedPortfolio = await portfolios.ApplicationSnapshot(accountId, ct);
         var snapshot = JsonSerializer.Serialize(new
         {
             studentId = student.Id, student.FullName, student.Nickname, student.UniversityName, student.Major,
-            student.AvatarUrl, capturedAt = DateTimeOffset.UtcNow
+            student.AvatarUrl, portfolio = submittedPortfolio, capturedAt = DateTimeOffset.UtcNow
         }, JsonOptions);
         db.JobApplications.Add(new JobApplication
         {
@@ -109,7 +129,12 @@ public sealed class StudentOpportunityService(UniNetDbContext db) : IStudentOppo
             ProfileSnapshot = snapshot, Status = (short)JobApplicationStatus.Pending,
             AppliedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         });
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_JobApplications_StudentUserId_JobId" })
+        {
+            throw new PartnerException("ALREADY_APPLIED", "Hồ sơ của bạn chưa bị từ chối nên chưa thể nộp lại.", 409);
+        }
     }
 
     private async Task<UserProfile> GetStudentAsync(Guid accountId, CancellationToken ct) =>
@@ -142,7 +167,21 @@ public sealed class StudentOpportunityService(UniNetDbContext db) : IStudentOppo
                 .Select(x => new JobSkillResponse(x.SkillId, x.Skill.Name, x.Skill.Category is { } category ? (short)category : null,
                     (JobSkillRequirementType)x.RequirementType)).ToList(), benefits,
             profile.OrganizationName ?? profile.FullName, profile.AvatarUrl, profile.Industry, profile.IsVerified,
-            applicantCount, saved, application is not null, application?.Status, application?.AppliedAt, job.CreatedAt);
+            applicantCount, saved, application is not null, application?.Status, application?.AppliedAt, job.CreatedAt,
+            profile.Bio, profile.Address, profile.Website, profile.ContactEmail, profile.Phone);
+    }
+
+    private static UniNet.Application.PortfolioResponse? ReadSubmittedPortfolio(string? snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(snapshot)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(snapshot);
+            return document.RootElement.TryGetProperty("portfolio", out var portfolio)
+                ? JsonSerializer.Deserialize<UniNet.Application.PortfolioResponse>(portfolio.GetRawText(), JsonOptions)
+                : null;
+        }
+        catch (JsonException) { return null; }
     }
 
     private static void Require(bool condition, string code, string message)

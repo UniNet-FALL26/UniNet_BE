@@ -98,7 +98,12 @@ public sealed record OpportunityJobResponse(
     bool IsApplied,
     short? ApplicationStatus,
     DateTimeOffset? AppliedAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? CompanyBio,
+    string? CompanyAddress,
+    string? CompanyWebsite,
+    string? CompanyContactEmail,
+    string? CompanyPhone);
 
 public sealed record OpportunityJobsResponse(
     int Page,
@@ -106,6 +111,13 @@ public sealed record OpportunityJobsResponse(
     int TotalItems,
     int TotalPages,
     IReadOnlyList<OpportunityJobResponse> Jobs);
+
+public sealed record StudentSubmittedApplicationResponse(
+    Guid Id,
+    int ApplicationRound,
+    DateTimeOffset AppliedAt,
+    short Status,
+    UniNet.Application.PortfolioResponse? SubmittedPortfolio);
 
 public sealed record ApplyToJobRequest(string? CoverMessage);
 
@@ -122,6 +134,8 @@ public sealed record PartnerApplicantResponse(
     decimal? AiMatchScore,
     JobApplicationStatus Status,
     DateTimeOffset AppliedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    UniNet.Application.PortfolioResponse? SubmittedPortfolio,
+    int ApplicationRound);
 
 public sealed record UpdateJobApplicationStatusRequest(JobApplicationStatus Status);

@@ -123,6 +123,10 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
+        var startTimeChanged = job.StartAt?.ToUnixTimeSeconds() / 60 != request.StartAt?.ToUnixTimeSeconds() / 60;
+        if (job.Status == (short)PartnerJobStatus.Published &&
+            (job.StartAt is null || job.StartAt <= DateTimeOffset.UtcNow.AddMinutes(5)) && startTimeChanged)
+            throw new PartnerException("JOB_START_TIME_LOCKED", "Thời gian bắt đầu đã được khóa vì bài đăng còn không quá 5 phút để bắt đầu nhận hồ sơ.", 409);
         var skills = await LoadSkillsAsync(request.Skills, request.Status == PartnerJobStatus.Published, ct);
         var requestedSkills = skills.ToDictionary(x => x.skill.Id);
         foreach (var existing in job.JobSkills.ToList())
@@ -183,7 +187,11 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             throw new PartnerException("JOB_NOT_FOUND", "Không tìm thấy bài đăng.", 404);
         var applications = await db.JobApplications.AsNoTracking().Where(x => x.JobId == jobId)
             .Include(x => x.Student).OrderByDescending(x => x.AppliedAt).ThenBy(x => x.Id).ToListAsync(ct);
-        return applications.Select(ToApplicant).ToList();
+        var rounds = applications.GroupBy(x => x.StudentUserId).SelectMany(group => group
+            .OrderBy(x => x.AppliedAt).ThenBy(x => x.Id)
+            .Select((application, index) => new { application.Id, Round = index + 1 }))
+            .ToDictionary(x => x.Id, x => x.Round);
+        return applications.Select(application => ToApplicant(application, rounds[application.Id])).ToList();
     }
 
     public async Task<PartnerApplicantResponse> UpdateApplicantStatusAsync(Guid accountId, Guid jobId,
@@ -194,10 +202,18 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         var application = await db.JobApplications.Include(x => x.Student)
             .FirstOrDefaultAsync(x => x.Id == applicationId && x.JobId == jobId && x.Job.PartnerId == profile.Id, ct)
             ?? throw new PartnerException("APPLICATION_NOT_FOUND", "Không tìm thấy hồ sơ ứng tuyển.", 404);
+        var latestApplicationId = await db.JobApplications.AsNoTracking()
+            .Where(x => x.JobId == jobId && x.StudentUserId == application.StudentUserId)
+            .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id)
+            .Select(x => x.Id).FirstAsync(ct);
+        if (latestApplicationId != application.Id)
+            throw new PartnerException("APPLICATION_SUPERSEDED", "Lượt nộp cũ được giữ để đối chiếu và không thể cập nhật trạng thái.", 409);
         application.Status = (short)status;
         application.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return ToApplicant(application);
+        var roundIds = await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == application.StudentUserId && x.JobId == jobId)
+            .OrderBy(x => x.AppliedAt).ThenBy(x => x.Id).Select(x => x.Id).ToListAsync(ct);
+        return ToApplicant(application, roundIds.IndexOf(application.Id) + 1);
     }
 
     public async Task DeleteJobAsync(Guid accountId, Guid jobId, CancellationToken ct)
@@ -291,11 +307,25 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             DeserializeBenefits(job.BenefitsJson), applicantCount, job.CreatedAt, job.UpdatedAt);
     }
 
-    private static PartnerApplicantResponse ToApplicant(JobApplication application) => new(
+    private static PartnerApplicantResponse ToApplicant(JobApplication application, int applicationRound) => new(
         application.Id, application.JobId, application.StudentUserId, application.Student.FullName,
         application.Student.Nickname, application.Student.UniversityName, application.Student.Major,
         application.Student.AvatarUrl, application.CoverMessage, application.AiMatchScore,
-        (JobApplicationStatus)application.Status, application.AppliedAt, application.UpdatedAt);
+        (JobApplicationStatus)application.Status, application.AppliedAt, application.UpdatedAt,
+        ReadSubmittedPortfolio(application.ProfileSnapshot), applicationRound);
+
+    private static UniNet.Application.PortfolioResponse? ReadSubmittedPortfolio(string? snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(snapshot)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(snapshot);
+            return document.RootElement.TryGetProperty("portfolio", out var portfolio)
+                ? JsonSerializer.Deserialize<UniNet.Application.PortfolioResponse>(portfolio.GetRawText(), JsonOptions)
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
 
     private static PartnerJobStatus GetStatus(Job job) => job.Status == (short)PartnerJobStatus.Published &&
         job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow ? PartnerJobStatus.Expired : (PartnerJobStatus)job.Status;

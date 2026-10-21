@@ -908,6 +908,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasOne(x => x.Student).WithMany(x => x.JobApplications).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.JobId, x.Status });
             e.HasIndex(x => new { x.StudentUserId, x.AppliedAt });
+            e.HasIndex(x => new { x.StudentUserId, x.JobId }).IsUnique().HasFilter("\"Status\" <> 4");
         });
         model.Entity<ProjectVerification>(e =>
         {
