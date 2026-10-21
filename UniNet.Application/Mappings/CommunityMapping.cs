@@ -11,36 +11,20 @@ public static class CommunityMapping
 {
     public static CommunityPost ToEntity(this CreatePostRequest request, Guid authorId, short actorType)
     {
-        var post = new CommunityPost
+        return new CommunityPost
         {
             Id = Guid.NewGuid(),
             AuthorUserId = authorId,
             AuthorActorType = actorType,
-            Description = request.Description,
+            Description = request.Description?.Trim(),
             Status = (short)CommunityContentStatus.Published,
+            FavoriteCount = 0,
+            CommentCount = 0,
+            IsDeleted = false,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
-
-        if (request.MediaUrls != null && request.MediaUrls.Any())
-        {
-            int order = 0;
-            foreach (var url in request.MediaUrls)
-            {
-                post.Media.Add(new CommunityPostMedia
-                {
-                    Id = Guid.NewGuid(),
-                    PostId = post.Id,
-                    FileUrl = url,
-                    MediaType = (short)MediaType.Image,
-                    DisplayOrder = order++,
-                    CreatedAt = DateTimeOffset.UtcNow
-                });
-            }
-        }
-        return post;
     }
-
     // Cho Comment gốc
     public static CommunityPostComment ToEntity(this CreateCommentRequest request, Guid postId, Guid authorId)
     {

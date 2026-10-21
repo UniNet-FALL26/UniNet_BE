@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Application.Common;
 using UniNet.Application.DTOs.Community;
+using UniNet.Application.Interfaces;
 using UniNet.Application.Mappings;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Entities.Community;
@@ -16,10 +17,12 @@ namespace UniNet.Application.Services;
 public class CommunityService : ICommunityService
 {
     private readonly UniNetDbContext _context;
+    private readonly ICloudImageStorage _imageStorage;
 
-    public CommunityService(UniNetDbContext context)
+    public CommunityService(UniNetDbContext context, ICloudImageStorage imageStorage)
     {
         _context = context;
+        _imageStorage = imageStorage;
     }
 
     public async Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize)
@@ -66,22 +69,64 @@ public class CommunityService : ICommunityService
         return posts;
     }
 
-    public async Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request)
+    public async Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request, CancellationToken ct = default)
     {
-        var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId);
+        var userProfile = await _context.UserProfiles
+            .FirstOrDefaultAsync(u => u.AccountId == currentUserId, ct);
+
         if (userProfile == null)
-            throw new CommunityException("USER_NOT_FOUND", "User profile not found.", 404);
+            throw new CommunityException("USER_NOT_FOUND", "Không tìm thấy hồ sơ người dùng.", 404);
 
-        short actorType = userProfile.PartnerType.HasValue
-            ? (short)CommunityActorType.Company
-            : (short)CommunityActorType.Student;
+        bool hasDescription = !string.IsNullOrWhiteSpace(request.Description);
+        bool hasFiles = request.Files != null && request.Files.Count > 0;
 
-        var newPost = request.ToEntity(userProfile.Id, actorType);
+        if (!hasDescription && !hasFiles)
+            throw new CommunityException("INVALID_POST", "Bài viết phải có mô tả hoặc ít nhất 1 hình ảnh.", 400);
 
-        _context.CommunityPosts.Add(newPost);
-        await _context.SaveChangesAsync();
+        // 1. Tạo entity post từ extension ToEntity()
+        var post = request.ToEntity(userProfile.Id, (short)CommunityActorType.Student);
 
-        return newPost.Id;
+        // 2. Upload file lên Cloudinary và gắn vào post.Media
+        if (hasFiles)
+        {
+            int displayOrder = 0;
+            foreach (var file in request.Files!)
+            {
+                if (file.Length == 0) continue;
+
+                var extension = Path.GetExtension(file.FileName).ToLowerInvariant().TrimStart('.');
+                if (extension is not ("png" or "jpg" or "jpeg" or "webp"))
+                {
+                    throw new CommunityException("INVALID_IMAGE_FORMAT", $"Định dạng ảnh .{extension} không hợp lệ.", 400);
+                }
+
+                using var memoryStream = new MemoryStream();
+                await file.CopyToAsync(memoryStream, ct);
+
+                var publicId = $"community/posts/{post.Id}/{Guid.NewGuid():N}";
+                var format = extension == "jpeg" ? "jpg" : extension;
+
+                var uploadResult = await _imageStorage.Upload(
+                    new ImageUploadRequest(memoryStream.ToArray(), publicId, format, "image"),
+                    ct
+                );
+
+                post.Media.Add(new CommunityPostMedia
+                {
+                    Id = Guid.NewGuid(),
+                    PostId = post.Id,
+                    MediaType = (short)MediaType.Image,
+                    FileUrl = uploadResult.ImageUrl,
+                    DisplayOrder = displayOrder++,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+            }
+        }
+
+        _context.CommunityPosts.Add(post);
+        await _context.SaveChangesAsync(ct);
+
+        return post.Id;
     }
 
     public async Task<string> ToggleReactionAsync(Guid postId, Guid currentUserId)
