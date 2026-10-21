@@ -2011,12 +2011,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+            modelBuilder.Entity("UniNet.Domain.Entities.UserBookmark", b =>
                 {
-                    b.Property<Guid>("UserBookmarkId")
+                    b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("UserId")
+                    b.Property<Guid>("BookmarkedUserId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Note")
@@ -2025,11 +2025,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("SavedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.HasKey("UserBookmarkId", "UserId");
+                    b.HasKey("UserId", "BookmarkedUserId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("BookmarkedUserId");
 
-                    b.ToTable("User1SavedUser2", (string)null);
+                    b.ToTable("UserBookmarks", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -3292,23 +3292,23 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+            modelBuilder.Entity("UniNet.Domain.Entities.UserBookmark", b =>
                 {
-                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
-                        .WithMany("SavedUsers")
-                        .HasForeignKey("UserBookmarkId")
+                    b.HasOne("UniNet.Domain.UserProfile", "BookmarkedUser")
+                        .WithMany("BookmarkedBy")
+                        .HasForeignKey("BookmarkedUserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.HasOne("UniNet.Domain.UserProfile", "User")
-                        .WithMany("SavedByUsers")
+                        .WithMany("Bookmarks")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("User");
+                    b.Navigation("BookmarkedUser");
 
-                    b.Navigation("UserBookmark");
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -3621,6 +3621,10 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.UserProfile", b =>
                 {
+                    b.Navigation("BookmarkedBy");
+
+                    b.Navigation("Bookmarks");
+
                     b.Navigation("CareerProfile");
 
                     b.Navigation("FinalizedVerifications");
@@ -3637,11 +3641,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Navigation("RequestedVerifications");
 
-                    b.Navigation("SavedByUsers");
-
                     b.Navigation("SavedJobs");
-
-                    b.Navigation("SavedUsers");
 
                     b.Navigation("SentInvitations");
 

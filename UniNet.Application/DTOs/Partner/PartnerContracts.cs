@@ -72,3 +72,56 @@ public sealed record PartnerJobsResponse(
     int DraftJobs,
     int ClosingSoonJobs,
     IReadOnlyList<PartnerJobResponse> Jobs);
+
+public sealed record OpportunityJobResponse(
+    Guid Id,
+    string Title,
+    JobWorkType WorkType,
+    decimal? MinSalaryVnd,
+    decimal? MaxSalaryVnd,
+    string? Location,
+    string? Description,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? Deadline,
+    IReadOnlyList<string> Responsibilities,
+    IReadOnlyList<string> RequiredQualifications,
+    IReadOnlyList<string> PreferredQualifications,
+    IReadOnlyList<string> ProjectAreas,
+    IReadOnlyList<JobSkillResponse> Skills,
+    IReadOnlyList<JobBenefitInput> Benefits,
+    string CompanyName,
+    string? CompanyAvatarUrl,
+    string? CompanyIndustry,
+    bool CompanyIsVerified,
+    int ApplicantCount,
+    bool IsSaved,
+    bool IsApplied,
+    short? ApplicationStatus,
+    DateTimeOffset? AppliedAt,
+    DateTimeOffset CreatedAt);
+
+public sealed record OpportunityJobsResponse(
+    int Page,
+    int PageSize,
+    int TotalItems,
+    int TotalPages,
+    IReadOnlyList<OpportunityJobResponse> Jobs);
+
+public sealed record ApplyToJobRequest(string? CoverMessage);
+
+public sealed record PartnerApplicantResponse(
+    Guid Id,
+    Guid JobId,
+    Guid StudentUserId,
+    string FullName,
+    string Nickname,
+    string? UniversityName,
+    string? Major,
+    string? AvatarUrl,
+    string? CoverMessage,
+    decimal? AiMatchScore,
+    JobApplicationStatus Status,
+    DateTimeOffset AppliedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record UpdateJobApplicationStatusRequest(JobApplicationStatus Status);

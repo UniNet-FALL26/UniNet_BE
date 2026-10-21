@@ -13,7 +13,7 @@ Nguồn thiết kế lõi: `UniNet_Database_Design_v2.docx`; các bảng nghiệ
 | Skills | Id, Name/Slug varchar(100) bắt buộc, Slug unique; IconUrl, Category smallint, Description, DisplayOrder integer, IsActive, CreatedAt, UpdatedAt. |
 | RefreshTokens | Id, AccountId FK → Accounts (1:N), TokenHash unique, ExpiresAt, RevokedAt, DeviceId/DeviceName varchar(255), CreatedAt. Chỉ lưu hash token. |
 
-'Các bảng nghiệp vụ tuyển dụng hiện tại: `Jobs` tham chiếu `Users.Id` qua `PartnerId`; `JobSkills`, `JobApplications`, `StudentSavedJobs` tiếp tục dùng khóa ngoại hiện có; `User1SavedUser2` lưu quan hệ người dùng với `UserBookmarkId` (người lưu), `UserId` (người được lưu), `Note`, `SavedAt`. Không còn bảng `Company` hoặc `CompanySavedStudents`. Vai trò Partner được kiểm tra qua `Accounts.Role`; `PartnerType` chỉ phân loại hồ sơ, không quyết định quyền tuyển dụng.
+Các bảng nghiệp vụ tuyển dụng hiện tại: `Jobs` tham chiếu `Users.Id` qua `PartnerId`; `JobSkills`, `JobApplications`, `StudentSavedJobs` tiếp tục dùng khóa ngoại hiện có; `UserBookmarks` lưu quan hệ giữa `UserId` (người lưu) và `BookmarkedUserId` (người được lưu), cùng `Note` và `SavedAt`. Khóa chính ghép là (`UserId`, `BookmarkedUserId`). Không còn bảng `Company` hoặc `CompanySavedStudents`. Vai trò Partner được kiểm tra qua `Accounts.Role`; `PartnerType` chỉ phân loại hồ sơ, không quyết định quyền tuyển dụng.
 
 'PK/FK dùng uuid; timestamp dùng timestamptz; các chuỗi không nêu giới hạn dùng text. Cột hồ sơ theo loại người dùng là nullable; boolean/trạng thái và thời điểm tạo/cập nhật là bắt buộc. UserVerification.DocumentUrls và VerificationData không nằm trong DTO hồ sơ.
 
@@ -23,7 +23,7 @@ Enum mới: VerificationType (Student=0, Partner=1), VerificationStatus (Pending
 
 SkillsJson dùng skillId, level, yearsOfExperience theo thiết kế cuối mục 7.1; không dùng mẫu skillKey ở mục 6.1. API ghi JSON trong tương lai phải kiểm tra schema/version và tham chiếu skillId. Đổi template chỉ cập nhật AppearanceJson.
 
-Migration giữ ID/account/token, đổi UserProfiles → Users và DisplayName → FullName. Nickname lấy tối đa 100 ký tự tên cũ; OrganizationName lấy tên cũ của Partner. TaxCode cũ và trạng thái verified cũ được giữ trong snapshot pending; cờ IsVerified cũ chuyển false để xác minh lại có lịch sử duyệt. Xem [handoff database v2](handoffs/database-v2.md) về hợp đồng API và nâng cấp/rollback. Migration `20261011163648_ReplaceCompanyWithPartnerUsers` thay bảng `Company`/`CompanySavedStudents` bằng hồ sơ `Users`, đổi `Jobs.CompanyUserId` thành `Jobs.PartnerId`, và tạo `User1SavedUser2`. Migration giả định các bảng tuyển dụng cũ không có dữ liệu cần giữ; các bảng ngoài phạm vi này không bị xóa.
+Migration giữ ID/account/token, đổi UserProfiles → Users và DisplayName → FullName. Nickname lấy tối đa 100 ký tự tên cũ; OrganizationName lấy tên cũ của Partner. TaxCode cũ và trạng thái verified cũ được giữ trong snapshot pending; cờ IsVerified cũ chuyển false để xác minh lại có lịch sử duyệt. Xem [handoff database v2](handoffs/database-v2.md) về hợp đồng API và nâng cấp/rollback. Migration `20261011163648_ReplaceCompanyWithPartnerUsers` thay bảng `Company`/`CompanySavedStudents` bằng hồ sơ `Users`, đổi `Jobs.CompanyUserId` thành `Jobs.PartnerId`, và ban đầu tạo `User1SavedUser2`; migration `RenameUserBookmarks` đổi tên bảng đó thành `UserBookmarks` cùng các cột tương ứng, giữ dữ liệu.
 
 ## Schema v1 — lưu để đối chiếu lịch sử
 

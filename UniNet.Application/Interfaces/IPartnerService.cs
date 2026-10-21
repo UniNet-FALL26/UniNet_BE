@@ -11,5 +11,7 @@ public interface IPartnerService
     Task<PartnerJobResponse> CreateJobAsync(Guid accountId, SavePartnerJobRequest request, CancellationToken ct);
     Task<PartnerJobResponse> UpdateJobAsync(Guid accountId, Guid jobId, SavePartnerJobRequest request, CancellationToken ct);
     Task<PartnerJobResponse> UpdateJobStatusAsync(Guid accountId, Guid jobId, PartnerJobStatus status, CancellationToken ct);
+    Task<IReadOnlyList<PartnerApplicantResponse>> ListApplicantsAsync(Guid accountId, Guid jobId, CancellationToken ct);
+    Task<PartnerApplicantResponse> UpdateApplicantStatusAsync(Guid accountId, Guid jobId, Guid applicationId, JobApplicationStatus status, CancellationToken ct);
     Task DeleteJobAsync(Guid accountId, Guid jobId, CancellationToken ct);
 }
