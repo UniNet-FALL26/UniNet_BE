@@ -28,6 +28,10 @@ public sealed class StudentOpportunitiesController(IStudentOpportunityService op
     public Task<OpportunityJobResponse> Get(Guid jobId, CancellationToken ct)
         => opportunities.GetAsync(AccountId, jobId, ct);
 
+    [HttpGet("{jobId:guid}/applications")]
+    public Task<IReadOnlyList<StudentSubmittedApplicationResponse>> GetOwnApplications(Guid jobId, CancellationToken ct)
+        => opportunities.GetOwnApplicationsAsync(AccountId, jobId, ct);
+
     [HttpPut("{jobId:guid}/saved")]
     public async Task<IActionResult> Save(Guid jobId, CancellationToken ct)
     {
