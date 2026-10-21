@@ -59,13 +59,13 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
     public async Task<IActionResult> TrackImpression(Guid campaignId, CancellationToken ct)
     {
         await adService.TrackImpressionAsync(campaignId, ct);
-        return Ok();
+        return NoContent(); // Trả về HTTP 204 No Content (khớp với dòng 189 ở Frontend)
     }
 
     [HttpPost("campaigns/{campaignId:guid}/click"), AllowAnonymous]
     public async Task<IActionResult> TrackClick(Guid campaignId, CancellationToken ct)
     {
         await adService.TrackClickAsync(campaignId, ct);
-        return Ok();
+        return NoContent(); // Trả về HTTP 204 No Content
     }
 }

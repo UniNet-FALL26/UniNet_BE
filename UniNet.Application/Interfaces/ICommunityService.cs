@@ -8,7 +8,7 @@ namespace UniNet.Application.Services;
 public interface ICommunityService
 {
     Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize);
-    Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request);
+    Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request, CancellationToken ct = default);
     Task<string> ToggleReactionAsync(Guid postId, Guid currentUserId);
     Task<string> ToggleBookmarkAsync(Guid postId, Guid currentUserId);
     Task<List<CommentResponse>> GetCommentsAsync(Guid postId);
