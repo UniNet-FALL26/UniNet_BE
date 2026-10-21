@@ -62,7 +62,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
-    public DbSet<User1SavedUser2> User1SavedUser2 => Set<User1SavedUser2>();
+    public DbSet<UserBookmark> UserBookmarks => Set<UserBookmark>();
     public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<ProjectVerification> ProjectVerifications => Set<ProjectVerification>();
@@ -879,14 +879,14 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasOne(x => x.Skill).WithMany(x => x.JobSkills).HasForeignKey(x => x.SkillId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.SkillId);
         });
-        model.Entity<User1SavedUser2>(e =>
+        model.Entity<UserBookmark>(e =>
         {
-            e.ToTable("User1SavedUser2");
-            e.HasKey(x => new { x.UserBookmarkId, x.UserId });
+            e.ToTable("UserBookmarks");
+            e.HasKey(x => new { x.UserId, x.BookmarkedUserId });
             e.Property(x => x.Note).HasColumnType("text");
-            e.HasOne(x => x.UserBookmark).WithMany(x => x.SavedUsers).HasForeignKey(x => x.UserBookmarkId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.User).WithMany(x => x.SavedByUsers).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(x => x.UserId);
+            e.HasOne(x => x.User).WithMany(x => x.Bookmarks).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.BookmarkedUser).WithMany(x => x.BookmarkedBy).HasForeignKey(x => x.BookmarkedUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.BookmarkedUserId);
         });
         model.Entity<StudentSavedJob>(e =>
         {

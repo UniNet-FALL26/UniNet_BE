@@ -46,6 +46,15 @@ public sealed class PartnerController(IPartnerService partners) : ControllerBase
     public Task<PartnerJobResponse> UpdateJobStatus(Guid jobId, UpdatePartnerJobStatusRequest request, CancellationToken ct)
         => partners.UpdateJobStatusAsync(AccountId, jobId, request.Status, ct);
 
+    [HttpGet("jobs/{jobId:guid}/applications")]
+    public Task<IReadOnlyList<PartnerApplicantResponse>> ListApplicants(Guid jobId, CancellationToken ct)
+        => partners.ListApplicantsAsync(AccountId, jobId, ct);
+
+    [HttpPatch("jobs/{jobId:guid}/applications/{applicationId:guid}")]
+    public Task<PartnerApplicantResponse> UpdateApplicantStatus(Guid jobId, Guid applicationId,
+        UpdateJobApplicationStatusRequest request, CancellationToken ct)
+        => partners.UpdateApplicantStatusAsync(AccountId, jobId, applicationId, request.Status, ct);
+
     [HttpDelete("jobs/{jobId:guid}")]
     public async Task<IActionResult> DeleteJob(Guid jobId, CancellationToken ct)
     {

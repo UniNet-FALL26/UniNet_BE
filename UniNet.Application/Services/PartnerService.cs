@@ -176,6 +176,30 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         return ToJob(job, applicantCount);
     }
 
+    public async Task<IReadOnlyList<PartnerApplicantResponse>> ListApplicantsAsync(Guid accountId, Guid jobId, CancellationToken ct)
+    {
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        if (!await OwnedJobs(profile.Id).AnyAsync(x => x.Id == jobId, ct))
+            throw new PartnerException("JOB_NOT_FOUND", "Không tìm thấy bài đăng.", 404);
+        var applications = await db.JobApplications.AsNoTracking().Where(x => x.JobId == jobId)
+            .Include(x => x.Student).OrderByDescending(x => x.AppliedAt).ThenBy(x => x.Id).ToListAsync(ct);
+        return applications.Select(ToApplicant).ToList();
+    }
+
+    public async Task<PartnerApplicantResponse> UpdateApplicantStatusAsync(Guid accountId, Guid jobId,
+        Guid applicationId, JobApplicationStatus status, CancellationToken ct)
+    {
+        Require(Enum.IsDefined(status), "INVALID_APPLICATION_STATUS", "Trạng thái hồ sơ không hợp lệ.");
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        var application = await db.JobApplications.Include(x => x.Student)
+            .FirstOrDefaultAsync(x => x.Id == applicationId && x.JobId == jobId && x.Job.PartnerId == profile.Id, ct)
+            ?? throw new PartnerException("APPLICATION_NOT_FOUND", "Không tìm thấy hồ sơ ứng tuyển.", 404);
+        application.Status = (short)status;
+        application.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return ToApplicant(application);
+    }
+
     public async Task DeleteJobAsync(Guid accountId, Guid jobId, CancellationToken ct)
     {
         var profile = await GetPartnerProfileAsync(accountId, ct);
@@ -266,6 +290,12 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
                 .ToList(),
             DeserializeBenefits(job.BenefitsJson), applicantCount, job.CreatedAt, job.UpdatedAt);
     }
+
+    private static PartnerApplicantResponse ToApplicant(JobApplication application) => new(
+        application.Id, application.JobId, application.StudentUserId, application.Student.FullName,
+        application.Student.Nickname, application.Student.UniversityName, application.Student.Major,
+        application.Student.AvatarUrl, application.CoverMessage, application.AiMatchScore,
+        (JobApplicationStatus)application.Status, application.AppliedAt, application.UpdatedAt);
 
     private static PartnerJobStatus GetStatus(Job job) => job.Status == (short)PartnerJobStatus.Published &&
         job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow ? PartnerJobStatus.Expired : (PartnerJobStatus)job.Status;
