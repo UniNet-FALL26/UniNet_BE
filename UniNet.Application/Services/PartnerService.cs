@@ -166,13 +166,19 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
     public async Task<PartnerJobResponse> UpdateJobStatusAsync(Guid accountId, Guid jobId, PartnerJobStatus status, CancellationToken ct)
     {
         ValidateStatus(status, allowExpired: false);
+        var now = DateTimeOffset.UtcNow;
         var profile = await GetPartnerProfileAsync(accountId, ct);
         var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
         if (status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
-        if (status == PartnerJobStatus.Published && job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow)
+        if (status == PartnerJobStatus.Published && job.Deadline is not null && job.Deadline <= now)
             throw new PartnerException("INVALID_DEADLINE", "A job with a past deadline cannot be published.");
+        if (status == PartnerJobStatus.Published && job.StartAt is { } startAt)
+        {
+            Require(startAt >= now.AddMinutes(5), "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải cách hiện tại ít nhất 5 phút.");
+            Require(startAt.Minute % 15 == 0, "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải theo mốc 15 phút.");
+        }
         job.Status = (short)status;
         job.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -208,6 +214,8 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             .Select(x => x.Id).FirstAsync(ct);
         if (latestApplicationId != application.Id)
             throw new PartnerException("APPLICATION_SUPERSEDED", "Lượt nộp cũ được giữ để đối chiếu và không thể cập nhật trạng thái.", 409);
+        if (!CanTransitionApplicationStatus((JobApplicationStatus)application.Status, status))
+            throw new PartnerException("INVALID_APPLICATION_TRANSITION", "Hồ sơ chỉ được chuyển trạng thái theo chiều tiến. Đã nhận và Từ chối là trạng thái kết thúc.", 409);
         application.Status = (short)status;
         application.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -356,16 +364,21 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
 
     private static void ValidateJob(SavePartnerJobRequest request)
     {
+        var now = DateTimeOffset.UtcNow;
         ValidateRequired(request.Title, 255, "Title");
         ValidateRequired(request.Location, 255, "Location");
         Require(!string.IsNullOrWhiteSpace(request.Description), "INVALID_DESCRIPTION", "Description is required.");
         ValidateMax(request.Description, 20000, "Description");
         Require(Enum.IsDefined(request.WorkType), "INVALID_WORK_TYPE", "Work type is invalid.");
         ValidateStatus(request.Status, allowExpired: false);
-        Require(request.Deadline > DateTimeOffset.UtcNow || request.Status == PartnerJobStatus.Draft,
+        Require(request.Deadline > now || request.Status == PartnerJobStatus.Draft,
             "INVALID_DEADLINE", "A published job must have a future deadline.");
         Require(request.StartAt is null || request.StartAt < request.Deadline,
             "INVALID_DATE_RANGE", "Start date must be before the application deadline.");
+        Require(request.StartAt is null || request.StartAt >= now.AddMinutes(5),
+            "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải cách hiện tại ít nhất 5 phút.");
+        Require(request.StartAt is null || request.StartAt.Value.Minute % 15 == 0,
+            "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải theo mốc 15 phút.");
         Require(request.MinSalaryVnd is null or >= 1_000_000m && request.MaxSalaryVnd is null or >= 1_000_000m,
             "INVALID_SALARY", "Each provided salary must be at least 1,000,000 VND.");
         const decimal maxSalary = 99_999_999_999_999m;
@@ -394,6 +407,18 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             ValidateMax(benefit.Description, 2000, "Benefit description");
             Require(!string.IsNullOrWhiteSpace(benefit.Description), "INVALID_BENEFIT", "Benefit description is required.");
         }
+    }
+
+    private static bool CanTransitionApplicationStatus(JobApplicationStatus current, JobApplicationStatus next)
+    {
+        if (current == next) return true;
+        return current switch
+        {
+            JobApplicationStatus.Pending => next is JobApplicationStatus.Viewed or JobApplicationStatus.Interview or JobApplicationStatus.Accepted or JobApplicationStatus.Rejected,
+            JobApplicationStatus.Viewed => next is JobApplicationStatus.Interview or JobApplicationStatus.Accepted or JobApplicationStatus.Rejected,
+            JobApplicationStatus.Interview => next is JobApplicationStatus.Accepted or JobApplicationStatus.Rejected,
+            _ => false,
+        };
     }
 
     private static void ValidateStatus(PartnerJobStatus? status, bool allowExpired)

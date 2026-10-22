@@ -17,6 +17,32 @@ public sealed class ProfileService(UniNetDbContext db)
     {
         if (value?.Length > limit) throw new AuthException("INVALID_PROFILE", $"{field} quá dài.");
     }
+    private static void ValidatePartnerContact(PartnerProfileRequest request)
+    {
+        var email = request.ContactEmail?.Trim();
+        if (!string.IsNullOrEmpty(email) &&
+            (!System.Net.Mail.MailAddress.TryCreate(email, out var address) ||
+             !string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase) ||
+             !email.Contains('.')))
+            throw new AuthException("INVALID_PROFILE", "Email liên hệ không đúng định dạng.");
+
+        var website = request.Website?.Trim();
+        if (!string.IsNullOrEmpty(website) &&
+            (!Uri.TryCreate(website, UriKind.Absolute, out var uri) ||
+             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+             string.IsNullOrWhiteSpace(uri.Host)))
+            throw new AuthException("INVALID_PROFILE", "Website phải là URL http hoặc https hợp lệ.");
+
+        var phone = request.Phone?.Trim();
+        if (!string.IsNullOrEmpty(phone))
+        {
+            var digitCount = phone.Count(char.IsDigit);
+            if (!System.Text.RegularExpressions.Regex.IsMatch(phone, @"^\+?[0-9().\-\s]+$") ||
+                digitCount is < 7 or > 15 ||
+                phone.Count(value => value == '+') > 1)
+                throw new AuthException("INVALID_PROFILE", "Số điện thoại chỉ được chứa chữ số và ký hiệu + ( ) . -, dài từ 7 đến 15 chữ số.");
+        }
+    }
     private static string Nickname(string? value, string current)
     {
         if (value is null) return current;
@@ -56,6 +82,7 @@ public sealed class ProfileService(UniNetDbContext db)
         if (request.PartnerType is not { } partnerType || !Enum.IsDefined(partnerType)) throw new AuthException("INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
         Max(request.Industry, 150, "Lĩnh vực"); Max(request.ContactEmail, 255, "Email liên hệ"); Max(request.Phone, 30, "Số điện thoại");
         Max(request.Website, 2048, "Website"); Max(request.Address, 2000, "Địa chỉ");
+        ValidatePartnerContact(request);
         var account = await Load(accountId, AccountRole.Partner, ct);
         var p = account.Profile!;
         await PortraitAssetPolicy.RetainReference(db, accountId, request.AvatarUrl, p.AvatarUrl, ct);
