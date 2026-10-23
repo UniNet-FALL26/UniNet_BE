@@ -174,15 +174,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
     }
 
     private IQueryable<UserProfile> AvailableVerificators(ProjectVerification v, Guid? excludeAssignmentId) =>
-        db.UserProfiles.Where(p => p.Account.Role == AccountRole.Verificator && p.Account.Status == AccountStatus.Active &&
-            p.Id != v.RequestByUserId && !db.ProjectMembers.Any(m => m.ProjectId == v.ProjectId && m.UserId == p.Id) &&
-            !db.VerificationAssignments.Any(a => a.AssignedToUserId == p.Id && a.Id != excludeAssignmentId &&
-                (a.Status == VerificationAssignmentStatus.Assigned || a.Status == VerificationAssignmentStatus.Overdue) &&
-                a.ProjectVerification.Status == ProjectVerificationStatus.Pending &&
-                (!a.ProjectVerification.ScheduledStartAt.HasValue || !a.ProjectVerification.ScheduledEndAt.HasValue ||
-                 (a.ProjectVerification.ScheduledStartAt < v.ScheduledEndAt &&
-                  a.ProjectVerification.ScheduledEndAt > v.ScheduledStartAt) ||
-                 (a.ProjectVerification.MeetingStartAt.HasValue && !a.ProjectVerification.MeetingEndAt.HasValue))));
+        VerificationAvailabilityCalendar.AvailableUsers(db, v, excludeAssignmentId);
 
     private async Task<UserProfile> GetAvailableVerificatorAsync(Guid id, ProjectVerification v,
         Guid? excludeAssignmentId, CancellationToken ct) =>
@@ -200,6 +192,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             ReportDueAt = v.MeetingEndAt.HasValue ? now.AddHours(48) : null, CreatedAt = now, UpdatedAt = now
         };
         db.VerificationAssignments.Add(assignment);
+        v.ReservedVerificatorUserId = user.Id;
         v.UpdatedAt = now;
         return assignment;
     }

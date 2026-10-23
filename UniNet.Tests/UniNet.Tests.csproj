@@ -16,5 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="Fixtures/portrait-sample.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../UniNet.API/appsettings.json" Link="Fixtures/api-appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

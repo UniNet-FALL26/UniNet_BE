@@ -194,6 +194,8 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         var id = (await f.CreateVerificationAsync(true)).Verification.Id;
         f.Configuration["ProjectVerification:TimeZoneId"] = null;
+        var slot = Fixture.Slot();
+        await Error("MEETING_POLICY_NOT_CONFIGURED", () => f.Service.GetAvailableMeetingSlotsAsync(id, f.Owner.Id, slot.StartAt, slot.EndAt));
         await Error("MEETING_POLICY_NOT_CONFIGURED", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, Fixture.Slot()));
     }
 
@@ -402,7 +404,12 @@ public sealed partial class ProjectVerificationTests
         public static Account Account(string name, AccountRole role = AccountRole.Student) => new()
         {
             Email = name + "@test.com", Role = role,
-            Profile = new() { FullName = name, Nickname = name }
+            Profile = new() { FullName = name, Nickname = name,
+                VerificatorAvailabilities = role == AccountRole.Verificator ? [new()
+                {
+                    StartAt = DateTimeOffset.UtcNow.AddDays(-365), EndAt = DateTimeOffset.UtcNow.AddDays(365),
+                    CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+                }] : [] }
         };
         public static Project ProjectFor(Account account) => new()
         {
@@ -457,7 +464,7 @@ public sealed partial class ProjectVerificationTests
             });
             await Db.SaveChangesAsync();
         }
-        public static async Task<Fixture> CreateAsync(bool passed = true)
+        public static async Task<Fixture> CreateAsync(bool passed = true, IConfiguration? configuration = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -481,7 +488,7 @@ public sealed partial class ProjectVerificationTests
                 ["ProjectVerification:MaxAdvanceDays"] = "30"
             };
             foreach (var day in Enum.GetValues<DayOfWeek>()) settings[$"ProjectVerification:WorkingDays:{(int)day}"] = day.ToString();
-            var fixture = new Fixture(connection, db, new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), owner, other, project, package);
+            var fixture = new Fixture(connection, db, configuration ?? new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), owner, other, project, package);
             if (passed) await fixture.SeedPassedAsync(project.Id);
             return fixture;
         }

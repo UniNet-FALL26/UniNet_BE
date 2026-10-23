@@ -42,6 +42,7 @@ public sealed class UserProfile
 
     public List<ProjectVerification> FinalizedVerifications { get; set; } = [];
     public List<VerificationAssignment> VerificationAssignments { get; set; } = [];
+    public List<VerificatorAvailability> VerificatorAvailabilities { get; set; } = [];
     public List<Transaction> Transactions { get; set; } = [];
 
 }

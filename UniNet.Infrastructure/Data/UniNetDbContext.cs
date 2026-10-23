@@ -33,6 +33,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
     public DbSet<UserVerification> UserVerifications => Set<UserVerification>();
@@ -105,6 +106,19 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.GoogleId).HasMaxLength(255); e.HasIndex(x => x.GoogleId).IsUnique().HasFilter("\"GoogleId\" IS NOT NULL");
             e.Property(x => x.GoogleEmail).HasMaxLength(255);
             e.Property(x => x.Role).HasConversion<short>(); e.Property(x => x.Status).HasConversion<short>();
+        });
+        model.Entity<VerificatorAvailability>(e =>
+        {
+            e.ToTable("VerificatorAvailabilities", t => t.HasCheckConstraint(
+                "CK_VerificatorAvailabilities_Interval", "\"EndAt\" > \"StartAt\""));
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.StartAt, x.EndAt });
+            e.HasOne(x => x.User).WithMany(x => x.VerificatorAvailabilities).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<ProjectVerification>(e =>
+        {
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.ReservedVerificatorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<UserProfile>(e =>
         {

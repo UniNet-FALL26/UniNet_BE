@@ -81,11 +81,10 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var policy = ProjectVerificationPolicy.Load(configuration);
         var zone = policy.RequireMeetingPolicy();
         var now = DateTimeOffset.UtcNow;
-        var capacity = await GetCapacityAsync(policy, ct);
-        var bookings = await GetBookingsAsync(verification.Id, from, to, ct);
+        var calendar = await VerificationAvailabilityCalendar.LoadAsync(db, verification, from, to, ct);
         var slots = policy.GenerateSlots(from, to, now, zone)
             .Select(s => new VerificationMeetingSlotResponse(s.Start, s.End,
-                RemainingCapacity(bookings, verification.Project.CreatorId, s.Start, s.End, capacity)))
+                calendar.Remaining(verification.Project.CreatorId, s.Start, s.End, policy.Capacity)))
             .Where(s => s.RemainingCapacity > 0).ToList();
         return new(zone.Id, slots);
     }
@@ -107,14 +106,14 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
             "PAYMENT_PENDING", "Reconcile the existing checkout before changing or renewing a reservation.", 409);
         Require(policy.GenerateSlots(start, end, now, zone).Any(s => s.Start == start && s.End == end),
             "INVALID_MEETING_SLOT", "The interval does not match an available slot in the meeting policy.");
-        var capacity = await GetCapacityAsync(policy, ct);
-        var bookings = await GetBookingsAsync(verification.Id, start, end, ct);
-        Require(RemainingCapacity(bookings, verification.Project.CreatorId, start, end, capacity) > 0,
+        var calendar = await VerificationAvailabilityCalendar.LoadAsync(db, verification, start, end, ct);
+        Require(calendar.Remaining(verification.Project.CreatorId, start, end, policy.Capacity) > 0,
             "MEETING_SLOT_UNAVAILABLE", "The slot is full or conflicts with another meeting of this leader.", 409);
         // Repeating the same active hold cannot extend its deadline indefinitely.
         if (verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil > now &&
             verification.ScheduledStartAt == start && verification.ScheduledEndAt == end)
             return ProjectVerificationMapping.ToDetailResponse(verification);
+        verification.ReservedVerificatorUserId = calendar.Candidates(start, end).First();
         verification.ReservationId = Guid.NewGuid();
         verification.BookingStatus = VerificationBookingStatus.Held;
         var expires = now.AddMinutes(holdMinutes);
@@ -212,49 +211,15 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var policy = ProjectVerificationPolicy.Load(configuration);
         policy.RequireMeetingPolicy();
         var leaderId = await db.Projects.Where(p => p.Id == verification.ProjectId).Select(p => p.CreatorId).SingleAsync(ct);
-        var bookings = await GetBookingsAsync(verification.Id, verification.ScheduledStartAt!.Value,
-            verification.ScheduledEndAt!.Value, ct);
-        return RemainingCapacity(bookings, leaderId, verification.ScheduledStartAt.Value,
-            verification.ScheduledEndAt.Value, await GetCapacityAsync(policy, ct)) > 0;
+        var calendar = await VerificationAvailabilityCalendar.LoadAsync(db, verification,
+            verification.ScheduledStartAt!.Value, verification.ScheduledEndAt!.Value, ct);
+        if (calendar.Remaining(leaderId, verification.ScheduledStartAt.Value, verification.ScheduledEndAt.Value, policy.Capacity) <= 0)
+            return false;
+        var candidates = calendar.Candidates(verification.ScheduledStartAt.Value, verification.ScheduledEndAt.Value);
+        if (!verification.ReservedVerificatorUserId.HasValue || !candidates.Contains(verification.ReservedVerificatorUserId.Value))
+            verification.ReservedVerificatorUserId = candidates.First();
+        return true;
     }
-
-    private async Task<int> GetCapacityAsync(ProjectVerificationPolicy policy, CancellationToken ct)
-    {
-        var staff = await db.UserProfiles.CountAsync(p => p.Account.Role == AccountRole.Verificator &&
-            p.Account.Status == AccountStatus.Active, ct);
-        return Math.Min(policy.Capacity, staff);
-    }
-
-    private sealed record Booking(Guid LeaderId, DateTimeOffset Start, DateTimeOffset End);
-
-    private async Task<List<Booking>> GetBookingsAsync(Guid excludeId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
-    {
-        var now = DateTimeOffset.UtcNow;
-        return await db.ProjectVerifications.AsNoTracking().Where(v => v.Id != excludeId &&
-            v.Status != ProjectVerificationStatus.Cancelled &&
-            (v.BookingStatus == VerificationBookingStatus.Confirmed || v.BookingStatus == VerificationBookingStatus.Legacy ||
-             (v.BookingStatus == VerificationBookingStatus.Held && v.ReservedUntil > now)) && v.ScheduledStartAt.HasValue && v.ScheduledEndAt.HasValue &&
-            v.ScheduledStartAt < to && v.ScheduledEndAt > from)
-            .Select(v => new Booking(v.Project.CreatorId, v.ScheduledStartAt!.Value, v.ScheduledEndAt!.Value)).ToListAsync(ct);
-    }
-
-    private static int RemainingCapacity(List<Booking> bookings, Guid leaderId,
-        DateTimeOffset start, DateTimeOffset end, int capacity)
-    {
-        var overlapping = bookings.Where(b => b.Start < end && b.End > start).ToList();
-        if (overlapping.Any(b => b.LeaderId == leaderId)) return 0;
-        // Count simultaneous occupancy, not the total number of partially overlapping meetings.
-        var events = overlapping.SelectMany(b => new[]
-        {
-            (At: b.Start < start ? start : b.Start, Delta: 1),
-            (At: b.End > end ? end : b.End, Delta: -1)
-        }).OrderBy(e => e.At).ThenBy(e => e.Delta);
-        var occupancy = 0;
-        var peak = 0;
-        foreach (var item in events) { occupancy += item.Delta; peak = Math.Max(peak, occupancy); }
-        return Math.Max(0, capacity - peak);
-    }
-
     private async Task<T> MutateAsync<T>(Func<Task<T>> action, CancellationToken ct)
     {
         try
