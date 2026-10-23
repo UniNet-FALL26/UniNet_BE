@@ -1566,6 +1566,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("ReservedUntil")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("ReservedVerificatorUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("ScheduledEndAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1597,6 +1600,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("ReservationId")
                         .IsUnique();
+
+                    b.HasIndex("ReservedVerificatorUserId");
 
                     b.HasIndex("BookingStatus", "ReservedUntil");
 
@@ -2272,6 +2277,37 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("VerificationId");
 
                     b.ToTable("VerificationTransactions", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("EndAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("StartAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "StartAt", "EndAt");
+
+                    b.ToTable("VerificatorAvailabilities", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VerificatorAvailabilities_Interval", "\"EndAt\" > \"StartAt\"");
+                        });
                 });
 
             modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
@@ -3124,6 +3160,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ReservedVerificatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UniNet.Domain.Entities.ProjectModeration", "EvidenceModeration")
                         .WithMany()
                         .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
@@ -3435,6 +3476,17 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Verification");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany("VerificatorAvailabilities")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
                 {
                     b.HasOne("UniNet.Domain.Account", null)
@@ -3652,6 +3704,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("VerificationAssignments");
 
                     b.Navigation("Verifications");
+
+                    b.Navigation("VerificatorAvailabilities");
                 });
 #pragma warning restore 612, 618
         }

@@ -33,6 +33,7 @@ builder.Services.AddHttpClient<IEvidenceUrlChecker, GoogleSafeBrowsingUrlChecker
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
+builder.Services.AddScoped<VerificatorAvailabilityService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<StudentVerificationService>();

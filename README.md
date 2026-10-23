@@ -15,6 +15,24 @@ Never commit credentials. The API fails at startup if the database connection or
 
 The API reads the ignored `UniNet_BE/.env` file at startup (or `.env` in its content root), including nested keys using `__`. Local file values override appsettings/user secrets; explicit process environment and command-line values take precedence. EF design-time commands also read `ConnectionStrings__UniNet` from this file when the environment variable is not set.
 
+## Verification meeting calendar
+
+`UniNet.API/appsettings.json` supplies the meeting calendar: Vietnam time
+(`Asia/Ho_Chi_Minh`), Monday–Saturday 08:00–17:00, 60-minute slots, capacity 1,
+60 minutes minimum notice, a 30-day booking horizon and a 30-minute reservation hold.
+Capacity is also limited by eligible active verificators who declared availability
+covering the entire slot and have no conflicting commitments. No declared
+availability means an empty slot list. See [availability APIs and deployment](docs/handoffs/verificator-availability.md).
+
+Override these settings in deployment configuration or `.env`, for example
+`ProjectVerification__TimeZoneId`, `ProjectVerification__WorkdayStart`,
+`ProjectVerification__SlotMinutes` and `ProjectVerification__WorkingDays__0`
+(use numbered entries for the remaining days). Restart/redeploy after configuration
+changes. Missing or invalid calendar settings return `MEETING_POLICY_NOT_CONFIGURED`
+(503); missing or invalid hold duration returns `RESERVATION_POLICY_NOT_CONFIGURED`.
+The slot endpoint requires `from` and `to` with an explicit UTC offset and a range
+of at most 31 days, for example `?from=2026-10-26T00:00:00Z&to=2026-10-31T00:00:00Z`.
+
 ## Commands
 
 From the `UniNet_BE` directory:
