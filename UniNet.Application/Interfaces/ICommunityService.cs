@@ -8,12 +8,15 @@ namespace UniNet.Application.Services;
 public interface ICommunityService
 {
     Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize);
-    Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request);
+    Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request, CancellationToken ct = default);
     Task<string> ToggleReactionAsync(Guid postId, Guid currentUserId);
     Task<string> ToggleBookmarkAsync(Guid postId, Guid currentUserId);
     Task<List<CommentResponse>> GetCommentsAsync(Guid postId);
-    Task<Guid> CreateCommentAsync(Guid postId, Guid currentUserId, CreateCommentRequest request);
-    Task<Guid> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request);
+
+    // Đổi kiểu trả về thành CommentResponse
+    Task<CommentResponse> CreateCommentAsync(Guid postId, Guid currentUserId, CreateCommentRequest request);
+    Task<CommentResponse> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request);
+
     Task ReportPostAsync(Guid postId, Guid currentUserId, CreateReportRequest request);
     Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request);
     Task DeletePostAsync(Guid postId, Guid currentUserId);

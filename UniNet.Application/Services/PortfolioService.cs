@@ -74,6 +74,36 @@ public sealed class PortfolioService(UniNetDbContext db)
     private async Task<UserProfile> Own(Guid accountId, CancellationToken ct) =>
         await db.UserProfiles.Include(x => x.Account).Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.AccountId == accountId && x.Account.Status == AccountStatus.Active, ct) ?? throw Missing();
     public async Task<PortfolioResponse> Me(Guid accountId, CancellationToken ct) => Map(await Own(accountId, ct), true, await Catalog(ct));
+    public async Task<PortfolioResponse> ApplicationSnapshot(Guid accountId, CancellationToken ct)
+    {
+        var response = Map(await Own(accountId, ct), true, await Catalog(ct));
+        var content = response.Portfolio;
+        var hidden = (content.Appearance.Profile.HiddenSections ?? []).ToHashSet(StringComparer.Ordinal);
+        var identity = response.Profile;
+        if (hidden.Contains("hero"))
+            identity = identity with { Bio = null, CoverUrl = null };
+        content = content with
+        {
+            Headline = hidden.Contains("hero") ? null : content.Headline,
+            CareerObjective = hidden.Contains("hero") ? null : content.CareerObjective,
+            Location = hidden.Contains("hero") || hidden.Contains("contact") ? null : content.Location,
+            Availability = hidden.Contains("hero") || hidden.Contains("contact") ? null : content.Availability,
+            ContactEmail = null,
+            CvUrl = null,
+            SocialLinks = hidden.Contains("contact") ? [] : content.SocialLinks,
+            Skills = hidden.Contains("skills") ? [] : content.Skills,
+            Projects = hidden.Contains("projects") ? [] : content.Projects.Where(project => !hidden.Contains(project.Featured ? "featured-projects" : "other-projects")).ToArray(),
+            Education = hidden.Contains("journey") ? [] : content.Education,
+            Experience = hidden.Contains("journey") ? [] : content.Experience,
+            Certificates = hidden.Contains("certificates") ? [] : content.Certificates,
+            Activities = hidden.Contains("activities") ? [] : content.Activities,
+            Languages = hidden.Contains("languages") ? [] : content.Languages,
+            Articles = hidden.Contains("articles") ? [] : content.Articles,
+            YearsOfExperience = hidden.Contains("stats") || hidden.Contains("journey") ? null : content.YearsOfExperience,
+            Gpa = hidden.Contains("stats") || hidden.Contains("journey") ? null : content.Gpa
+        };
+        return response with { Profile = identity, Portfolio = content, IsOwner = false, SkillCatalog = null };
+    }
     public async Task<PortfolioResponse> Read(Guid profileId, Guid? viewerId, CancellationToken ct)
     {
         var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Role == AccountRole.Student && x.Account.Status == AccountStatus.Active && (x.AccountId == viewerId || (x.CareerProfile != null && x.CareerProfile.IsPublic)), ct) ?? throw Missing();

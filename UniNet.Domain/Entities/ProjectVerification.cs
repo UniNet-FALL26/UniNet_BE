@@ -21,11 +21,13 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset SubmittedAt { get; set; }
         public VerificationBookingStatus BookingStatus { get; set; }
         public Guid? ReservationId { get; set; }
+        public Guid? ReservedVerificatorUserId { get; set; }
         public DateTimeOffset? ReservedUntil { get; set; }
         public DateTimeOffset? BookingConfirmedAt { get; set; }
         public DateTimeOffset? AssignmentEligibleAt { get; set; }
         public DateTimeOffset? ScheduledStartAt { get; set; }
         public DateTimeOffset? ScheduledEndAt { get; set; }
+        public string? MeetingRoomName { get; set; }
         public DateTimeOffset? MeetingStartAt { get; set; }
         public DateTimeOffset? MeetingEndAt { get; set; }
         public Guid? FinalizedByUserId { get; set; }

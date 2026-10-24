@@ -43,7 +43,7 @@ public sealed partial class ProjectVerificationTests
         Assert.Equal(result.Id, (await service.GetCurrentAsync(data.Assignment, f.Owner.Id)).Id);
         Assert.Equal(result.Summary, (await service.GetDetailAsync(result.Id, f.Other.Id)).Summary);
         var audit = await f.Db.ReportAuditLogs.SingleAsync(); Assert.Equal("Submitted", audit.Action);
-        Assert.Empty(await f.Db.Set<VerificationAdminAction>().ToListAsync());
+        Assert.DoesNotContain(f.Db.Model.GetEntityTypes(), e => e.ClrType.Name == "VerificationAdminAction");
         var error = await Assert.ThrowsAsync<ReportException>(() => service.SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment)));
         Assert.Equal("REPORT_EXISTS", error.Code); Assert.Single(await f.Db.VerificationReports.ToListAsync());
         Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
@@ -96,7 +96,7 @@ public sealed partial class ProjectVerificationTests
     }
 
     [Fact]
-    public async Task SubmittedReportAndHistoricalVersionStorageAreImmutable()
+    public async Task SubmittedReportRemainsImmutableWithoutHistoricalEntities()
     {
         await using var f = await Fixture.CreateAsync(); var data = await PrepareFinalReportAsync(f);
         await new ReportService(f.Db).SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment));
@@ -104,8 +104,7 @@ public sealed partial class ProjectVerificationTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
         f.Db.ChangeTracker.Clear(); stored = await f.Db.VerificationReports.SingleAsync(); f.Db.VerificationReports.Remove(stored);
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
-        f.Db.ChangeTracker.Clear(); f.Db.Set<VerificationReportVersion>().Add(new() { Id = Guid.NewGuid() });
-        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
+        Assert.DoesNotContain(f.Db.Model.GetEntityTypes(), e => e.ClrType.Name == "VerificationReportVersion");
     }
 
     [Fact]

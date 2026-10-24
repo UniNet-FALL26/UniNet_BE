@@ -390,7 +390,10 @@ public sealed partial class TransactionTests
                 ReservedUntil = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds()),
                 ScheduledStartAt = DateTimeOffset.UtcNow.AddDays(2), ScheduledEndAt = DateTimeOffset.UtcNow.AddDays(2).AddHours(1) };
             db.Accounts.AddRange(owner, other, new Account { Email = "staff@test.com", Role = AccountRole.Verificator,
-                Profile = new() { FullName = "Staff", Nickname = "Staff" } });
+                Profile = new() { FullName = "Staff", Nickname = "Staff", VerificatorAvailabilities = [new()
+                {
+                    StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31)
+                }] } });
             db.ProjectVerifications.Add(verification);
             await db.SaveChangesAsync();
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

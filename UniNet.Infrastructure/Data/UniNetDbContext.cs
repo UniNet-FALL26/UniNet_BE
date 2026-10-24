@@ -23,9 +23,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 nameof(ProjectModeration.PolicyJson), nameof(ProjectModeration.CreatedAt) }.Any(p => entry.Property(p).IsModified))
                 throw new InvalidOperationException("Evidence moderation snapshots cannot be changed.");
         }
-        if (ChangeTracker.Entries().Any(e => (e.Entity is VerificationReportVersion or VerificationAdminAction) &&
-            e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
-            throw new InvalidOperationException("Verification report versions and Admin actions are historical storage only.");
         if (ChangeTracker.Entries<VerificationReport>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Submitted verification reports cannot be changed or deleted.");
     }
@@ -36,6 +33,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
     public DbSet<UserVerification> UserVerifications => Set<UserVerification>();
@@ -65,7 +63,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
-    public DbSet<User1SavedUser2> User1SavedUser2 => Set<User1SavedUser2>();
+    public DbSet<UserBookmark> UserBookmarks => Set<UserBookmark>();
     public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<ProjectVerification> ProjectVerifications => Set<ProjectVerification>();
@@ -87,7 +85,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
-        model.ApplyConfiguration(new VerificationAdminActionConfiguration());
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
@@ -109,6 +106,19 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.GoogleId).HasMaxLength(255); e.HasIndex(x => x.GoogleId).IsUnique().HasFilter("\"GoogleId\" IS NOT NULL");
             e.Property(x => x.GoogleEmail).HasMaxLength(255);
             e.Property(x => x.Role).HasConversion<short>(); e.Property(x => x.Status).HasConversion<short>();
+        });
+        model.Entity<VerificatorAvailability>(e =>
+        {
+            e.ToTable("VerificatorAvailabilities", t => t.HasCheckConstraint(
+                "CK_VerificatorAvailabilities_Interval", "\"EndAt\" > \"StartAt\""));
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.StartAt, x.EndAt });
+            e.HasOne(x => x.User).WithMany(x => x.VerificatorAvailabilities).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<ProjectVerification>(e =>
+        {
+            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.ReservedVerificatorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<UserProfile>(e =>
         {
@@ -173,6 +183,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 t.HasCheckConstraint(
                     "CK_Projects_MemberTarget",
                     "\"MemberTarget\" > 0");
+
+                t.HasCheckConstraint("CK_Projects_MinimumQuantity",
+                    "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
 
                 t.HasCheckConstraint(
                     "CK_Projects_Status",
@@ -883,14 +896,14 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasOne(x => x.Skill).WithMany(x => x.JobSkills).HasForeignKey(x => x.SkillId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.SkillId);
         });
-        model.Entity<User1SavedUser2>(e =>
+        model.Entity<UserBookmark>(e =>
         {
-            e.ToTable("User1SavedUser2");
-            e.HasKey(x => new { x.UserBookmarkId, x.UserId });
+            e.ToTable("UserBookmarks");
+            e.HasKey(x => new { x.UserId, x.BookmarkedUserId });
             e.Property(x => x.Note).HasColumnType("text");
-            e.HasOne(x => x.UserBookmark).WithMany(x => x.SavedUsers).HasForeignKey(x => x.UserBookmarkId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.User).WithMany(x => x.SavedByUsers).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(x => x.UserId);
+            e.HasOne(x => x.User).WithMany(x => x.Bookmarks).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.BookmarkedUser).WithMany(x => x.BookmarkedBy).HasForeignKey(x => x.BookmarkedUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.BookmarkedUserId);
         });
         model.Entity<StudentSavedJob>(e =>
         {
@@ -912,6 +925,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasOne(x => x.Student).WithMany(x => x.JobApplications).HasForeignKey(x => x.StudentUserId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.JobId, x.Status });
             e.HasIndex(x => new { x.StudentUserId, x.AppliedAt });
+            e.HasIndex(x => new { x.StudentUserId, x.JobId }).IsUnique().HasFilter("\"Status\" <> 4");
         });
         model.Entity<ProjectVerification>(e =>
         {
@@ -924,12 +938,15 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
-            e.Property<ProjectModerationPurpose>("EvidenceModerationPurpose").HasConversion<short>().HasDefaultValue(ProjectModerationPurpose.ProjectEvidence);
+            e.Property<ProjectModerationPurpose?>("EvidenceModerationPurpose").IsRequired().HasConversion<short>()
+                .HasDefaultValue(ProjectModerationPurpose.ProjectEvidence).HasSentinel(null);
             e.HasOne(x => x.EvidenceModeration).WithMany()
                 .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
                 .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
             e.ToTable("ProjectVerifications", t => t.HasCheckConstraint("CK_ProjectVerifications_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1"));
             e.Property(x => x.BookingStatus).HasConversion<short>();
+            e.Property(x => x.MeetingRoomName).HasMaxLength(200);
+            e.HasIndex(x => x.MeetingRoomName).IsUnique();
             e.HasIndex(x => new { x.BookingStatus, x.ReservedUntil });
             e.HasIndex(x => x.ReservationId).IsUnique();
             e.Property(x => x.AiSummary).HasColumnType("text");
@@ -1016,23 +1033,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => x.AssignmentId).IsUnique();
             foreach (var property in e.Metadata.GetProperties())
                 property.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Throw);
-        });
-        model.Entity<VerificationReportVersion>(e =>
-        {
-            e.ToTable("VerificationReportVersions", t =>
-            {
-                t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
-                t.HasCheckConstraint("CK_ReportVersions_Outcome", "\"Outcome\" IN (1, 2)");
-            });
-            e.HasKey(x => x.Id);
-            e.HasIndex(x => new { x.ReportId, x.Version }).IsUnique();
-            e.Property(x => x.Summary).HasColumnType("text").IsRequired();
-            e.Property(x => x.Findings).HasColumnType("text").IsRequired();
-            e.Property(x => x.Recommendations).HasColumnType("text").IsRequired();
-            e.Property(x => x.Reason).HasMaxLength(2000).IsRequired();
-            e.Property(x => x.Outcome).HasConversion<short>();
-            e.HasOne(x => x.Report).WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<ReportAuditLog>(e =>
         {

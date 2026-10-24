@@ -101,26 +101,15 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         var assignment = await AssignmentQuery().Include(a => a.Report)
             .FirstOrDefaultAsync(a => a.Id == assignmentId, ct)
             ?? throw NotFound();
-        RequireActive(assignment);
+        VerificationMeetingLifecycle.RequireActive(assignment);
         var verification = assignment.ProjectVerification;
-        Require(verification.Status == ProjectVerificationStatus.Pending && verification.FinalizedAt == null,
-            "VERIFICATION_LOCKED", "Only pending verifications can be updated.", 409);
         var now = DateTimeOffset.UtcNow;
         switch (request.Action)
         {
             case AssignmentAction.StartMeeting:
-                Require(verification.MeetingStartAt == null && verification.MeetingEndAt == null &&
-                    verification.ScheduledStartAt.HasValue && verification.ScheduledStartAt <= now,
-                    "INVALID_MEETING_STATE", "The meeting must be scheduled and not already started.", 409);
-                verification.MeetingStartAt = now;
-                break;
             case AssignmentAction.EndMeeting:
-                Require(verification.MeetingStartAt.HasValue && verification.MeetingEndAt == null,
-                    "INVALID_MEETING_STATE", "Start the meeting before ending it.", 409);
-                Require(now >= verification.MeetingStartAt.Value, "CLOCK_CONFLICT", "Server time precedes meeting start.", 409);
-                verification.MeetingEndAt = now;
-                assignment.ReportDueAt = now.AddHours(48);
-                break;
+                throw new AssignmentException("FORBIDDEN",
+                    "Only the assigned Verificator can start or end a meeting through MeetingService.", 403);
             case AssignmentAction.Complete:
                 Require(verification.MeetingEndAt.HasValue && assignment.Report != null,
                     "ASSIGNMENT_INCOMPLETE", "End the meeting and submit a report before completing the assignment.", 409);
@@ -185,15 +174,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
     }
 
     private IQueryable<UserProfile> AvailableVerificators(ProjectVerification v, Guid? excludeAssignmentId) =>
-        db.UserProfiles.Where(p => p.Account.Role == AccountRole.Verificator && p.Account.Status == AccountStatus.Active &&
-            p.Id != v.RequestByUserId && !db.ProjectMembers.Any(m => m.ProjectId == v.ProjectId && m.UserId == p.Id) &&
-            !db.VerificationAssignments.Any(a => a.AssignedToUserId == p.Id && a.Id != excludeAssignmentId &&
-                (a.Status == VerificationAssignmentStatus.Assigned || a.Status == VerificationAssignmentStatus.Overdue) &&
-                a.ProjectVerification.Status == ProjectVerificationStatus.Pending &&
-                (!a.ProjectVerification.ScheduledStartAt.HasValue || !a.ProjectVerification.ScheduledEndAt.HasValue ||
-                 (a.ProjectVerification.ScheduledStartAt < v.ScheduledEndAt &&
-                  a.ProjectVerification.ScheduledEndAt > v.ScheduledStartAt) ||
-                 (a.ProjectVerification.MeetingStartAt.HasValue && !a.ProjectVerification.MeetingEndAt.HasValue))));
+        VerificationAvailabilityCalendar.AvailableUsers(db, v, excludeAssignmentId);
 
     private async Task<UserProfile> GetAvailableVerificatorAsync(Guid id, ProjectVerification v,
         Guid? excludeAssignmentId, CancellationToken ct) =>
@@ -211,6 +192,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             ReportDueAt = v.MeetingEndAt.HasValue ? now.AddHours(48) : null, CreatedAt = now, UpdatedAt = now
         };
         db.VerificationAssignments.Add(assignment);
+        v.ReservedVerificatorUserId = user.Id;
         v.UpdatedAt = now;
         return assignment;
     }

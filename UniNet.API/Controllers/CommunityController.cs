@@ -37,12 +37,13 @@ public class CommunityController : ControllerBase
     }
 
     [HttpPost("posts")]
-    public async Task<IActionResult> CreatePost([FromBody] CreatePostRequest request)
+    [Consumes("multipart/form-data")] // Yêu cầu đính kèm file
+    public async Task<IActionResult> CreatePost([FromForm] CreatePostRequest request, CancellationToken ct)
     {
         try
         {
-            var postId = await _communityService.CreatePostAsync(GetCurrentUserId(), request);
-            return Ok(new { message = "Post created successfully", postId = postId });
+            var postId = await _communityService.CreatePostAsync(GetCurrentUserId(), request, ct);
+            return Ok(new { message = "Tạo bài viết thành công.", postId });
         }
         catch (CommunityException ex)
         {
@@ -90,8 +91,8 @@ public class CommunityController : ControllerBase
     {
         try
         {
-            var commentId = await _communityService.CreateCommentAsync(id, GetCurrentUserId(), request);
-            return Ok(new { message = "Comment added successfully", commentId = commentId });
+            var comment = await _communityService.CreateCommentAsync(id, GetCurrentUserId(), request);
+            return Ok(comment);
         }
         catch (CommunityException ex)
         {
@@ -104,8 +105,8 @@ public class CommunityController : ControllerBase
     {
         try
         {
-            var replyId = await _communityService.CreateReplyAsync(commentId, GetCurrentUserId(), request);
-            return Ok(new { message = "Reply added successfully", replyId = replyId });
+            var reply = await _communityService.CreateReplyAsync(commentId, GetCurrentUserId(), request);
+            return Ok(reply);
         }
         catch (CommunityException ex)
         {

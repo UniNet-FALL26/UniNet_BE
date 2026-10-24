@@ -916,6 +916,10 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("StudentUserId", "AppliedAt");
 
+                    b.HasIndex("StudentUserId", "JobId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" <> 4");
+
                     b.ToTable("JobApplications", (string)null);
                 });
 
@@ -1019,6 +1023,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<int>("MemberTarget")
                         .HasColumnType("integer");
 
+                    b.Property<int>("MinimumQuantity")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ProjectField")
                         .IsRequired()
                         .HasMaxLength(150)
@@ -1057,6 +1064,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("Projects", null, t =>
                         {
                             t.HasCheckConstraint("CK_Projects_MemberTarget", "\"MemberTarget\" > 0");
+
+                            t.HasCheckConstraint("CK_Projects_MinimumQuantity", "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
 
                             t.HasCheckConstraint("CK_Projects_RecruitmentStatus", "\"RecruitmentStatus\" BETWEEN 0 AND 3");
 
@@ -1544,6 +1553,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("MeetingEndAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("MeetingRoomName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<DateTimeOffset?>("MeetingStartAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1561,6 +1574,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<DateTimeOffset?>("ReservedUntil")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReservedVerificatorUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("ScheduledEndAt")
                         .HasColumnType("timestamp with time zone");
@@ -1581,6 +1597,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("FinalizedByUserId");
 
+                    b.HasIndex("MeetingRoomName")
+                        .IsUnique();
+
                     b.HasIndex("PackageId");
 
                     b.HasIndex("ProjectId")
@@ -1590,6 +1609,8 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("ReservationId")
                         .IsUnique();
+
+                    b.HasIndex("ReservedVerificatorUserId");
 
                     b.HasIndex("BookingStatus", "ReservedUntil");
 
@@ -2004,12 +2025,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+            modelBuilder.Entity("UniNet.Domain.Entities.UserBookmark", b =>
                 {
-                    b.Property<Guid>("UserBookmarkId")
+                    b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("UserId")
+                    b.Property<Guid>("BookmarkedUserId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Note")
@@ -2018,11 +2039,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("SavedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.HasKey("UserBookmarkId", "UserId");
+                    b.HasKey("UserId", "BookmarkedUserId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("BookmarkedUserId");
 
-                    b.ToTable("User1SavedUser2", (string)null);
+                    b.ToTable("UserBookmarks", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -2054,45 +2075,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("UserSkills", (string)null);
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationAdminAction", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ActorUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Decision")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<Guid?>("RefundId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("VerificationId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ActorUserId");
-
-                    b.HasIndex("RefundId");
-
-                    b.HasIndex("VerificationId", "CreatedAt");
-
-                    b.ToTable("VerificationAdminAction");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationAssignment", b =>
@@ -2282,59 +2264,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationReportVersion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Findings")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<short>("Outcome")
-                        .HasColumnType("smallint");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("Recommendations")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("ReportId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("SubmittedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("SubmittedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Summary")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SubmittedByUserId");
-
-                    b.HasIndex("ReportId", "Version")
-                        .IsUnique();
-
-                    b.ToTable("VerificationReportVersions", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_ReportVersions_Outcome", "\"Outcome\" IN (1, 2)");
-
-                            t.HasCheckConstraint("CK_ReportVersions_Version", "\"Version\" >= 2");
-                        });
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
                 {
                     b.Property<Guid>("TransactionId")
@@ -2357,6 +2286,37 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("VerificationId");
 
                     b.ToTable("VerificationTransactions", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("EndAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("StartAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "StartAt", "EndAt");
+
+                    b.ToTable("VerificatorAvailabilities", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VerificatorAvailabilities_Interval", "\"EndAt\" > \"StartAt\"");
+                        });
                 });
 
             modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
@@ -3209,6 +3169,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ReservedVerificatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UniNet.Domain.Entities.ProjectModeration", "EvidenceModeration")
                         .WithMany()
                         .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
@@ -3377,23 +3342,23 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.User1SavedUser2", b =>
+            modelBuilder.Entity("UniNet.Domain.Entities.UserBookmark", b =>
                 {
-                    b.HasOne("UniNet.Domain.UserProfile", "UserBookmark")
-                        .WithMany("SavedUsers")
-                        .HasForeignKey("UserBookmarkId")
+                    b.HasOne("UniNet.Domain.UserProfile", "BookmarkedUser")
+                        .WithMany("BookmarkedBy")
+                        .HasForeignKey("BookmarkedUserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.HasOne("UniNet.Domain.UserProfile", "User")
-                        .WithMany("SavedByUsers")
+                        .WithMany("Bookmarks")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("User");
+                    b.Navigation("BookmarkedUser");
 
-                    b.Navigation("UserBookmark");
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UserSkill", b =>
@@ -3413,26 +3378,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Skill");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationAdminAction", b =>
-                {
-                    b.HasOne("UniNet.Domain.UserProfile", null)
-                        .WithMany()
-                        .HasForeignKey("ActorUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.Entities.RefundTransaction", null)
-                        .WithMany()
-                        .HasForeignKey("RefundId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", null)
-                        .WithMany()
-                        .HasForeignKey("VerificationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationAssignment", b =>
@@ -3521,23 +3466,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("VerificationAssignment");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationReportVersion", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.VerificationReport", "Report")
-                        .WithMany()
-                        .HasForeignKey("ReportId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.UserProfile", null)
-                        .WithMany()
-                        .HasForeignKey("SubmittedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Report");
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.Transaction", "Transaction")
@@ -3555,6 +3483,17 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Transaction");
 
                     b.Navigation("Verification");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "User")
+                        .WithMany("VerificatorAvailabilities")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
@@ -3743,6 +3682,10 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.UserProfile", b =>
                 {
+                    b.Navigation("BookmarkedBy");
+
+                    b.Navigation("Bookmarks");
+
                     b.Navigation("CareerProfile");
 
                     b.Navigation("FinalizedVerifications");
@@ -3759,11 +3702,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Navigation("RequestedVerifications");
 
-                    b.Navigation("SavedByUsers");
-
                     b.Navigation("SavedJobs");
-
-                    b.Navigation("SavedUsers");
 
                     b.Navigation("SentInvitations");
 
@@ -3774,6 +3713,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("VerificationAssignments");
 
                     b.Navigation("Verifications");
+
+                    b.Navigation("VerificatorAvailabilities");
                 });
 #pragma warning restore 612, 618
         }

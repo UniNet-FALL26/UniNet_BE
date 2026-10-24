@@ -4,6 +4,22 @@ namespace UniNet.Application.DTOs.Verification;
 
 public sealed record PartnerVerificationDocumentRequest(VerificationDocumentType Type, string FileName, string Url);
 
+public sealed record SubmitPartnerVerificationUploadRequest(
+    string? TaxCode,
+    string? RepresentativeName,
+    VerificationDocumentType Type,
+    string FileName,
+    string? Url);
+
+public sealed record PartnerVerificationUploadDocumentRequest(
+    VerificationDocumentType Type,
+    string FileName,
+    string? Url,
+    int? FileIndex);
+
+public sealed record PartnerVerificationFile(string FileName, string ContentType, byte[] Bytes);
+public sealed record PartnerVerificationFileContent(string FileName, string ContentType, byte[] Bytes);
+
 public sealed record SubmitPartnerVerificationRequest(
     string? TaxCode,
     string? RepresentativeName,

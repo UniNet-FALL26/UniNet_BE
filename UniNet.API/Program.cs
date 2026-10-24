@@ -19,6 +19,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<VerificationDeadlineTasks>();
+builder.Services.AddScoped<ProjectRecruitmentTasks>();
 builder.Services.AddScoped<VerificationReservationTasks>();
 builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<EvidenceModerationTasks>();
@@ -33,6 +34,7 @@ builder.Services.AddHttpClient<IEvidenceUrlChecker, GoogleSafeBrowsingUrlChecker
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
+builder.Services.AddScoped<VerificatorAvailabilityService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<PartnerVerificationService>();
 builder.Services.AddScoped<StudentVerificationService>();
@@ -44,9 +46,11 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestServ
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IStudentOpportunityService, UniNet.Application.Services.StudentOpportunityService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IAssignmentService, AssignmentService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IMeetingService, MeetingService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IReportService, ReportService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
@@ -199,6 +203,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     {
         context.Response.StatusCode = joinRequestError.Status;
         await context.Response.WriteAsJsonAsync(new { code = joinRequestError.Code, message = joinRequestError.Message });
+        return;
+    }
+    if (error is MeetingException meetingError)
+    {
+        context.Response.StatusCode = meetingError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = meetingError.Code, message = meetingError.Message });
         return;
     }
     if (error is AssignmentException assignmentError)

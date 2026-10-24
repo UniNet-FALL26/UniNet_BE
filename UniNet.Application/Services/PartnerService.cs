@@ -123,6 +123,10 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
+        var startTimeChanged = job.StartAt?.ToUnixTimeSeconds() / 60 != request.StartAt?.ToUnixTimeSeconds() / 60;
+        if (job.Status == (short)PartnerJobStatus.Published &&
+            (job.StartAt is null || job.StartAt <= DateTimeOffset.UtcNow.AddMinutes(5)) && startTimeChanged)
+            throw new PartnerException("JOB_START_TIME_LOCKED", "Thời gian bắt đầu đã được khóa vì bài đăng còn không quá 5 phút để bắt đầu nhận hồ sơ.", 409);
         var skills = await LoadSkillsAsync(request.Skills, request.Status == PartnerJobStatus.Published, ct);
         var requestedSkills = skills.ToDictionary(x => x.skill.Id);
         foreach (var existing in job.JobSkills.ToList())
@@ -162,18 +166,62 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
     public async Task<PartnerJobResponse> UpdateJobStatusAsync(Guid accountId, Guid jobId, PartnerJobStatus status, CancellationToken ct)
     {
         ValidateStatus(status, allowExpired: false);
+        var now = DateTimeOffset.UtcNow;
         var profile = await GetPartnerProfileAsync(accountId, ct);
         var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
         if (status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
-        if (status == PartnerJobStatus.Published && job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow)
+        if (status == PartnerJobStatus.Published && job.Deadline is not null && job.Deadline <= now)
             throw new PartnerException("INVALID_DEADLINE", "A job with a past deadline cannot be published.");
+        if (status == PartnerJobStatus.Published && job.StartAt is { } startAt)
+        {
+            Require(startAt >= now.AddMinutes(5), "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải cách hiện tại ít nhất 5 phút.");
+            Require(startAt.Minute % 15 == 0, "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải theo mốc 15 phút.");
+        }
         job.Status = (short)status;
         job.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         var applicantCount = await db.JobApplications.CountAsync(x => x.JobId == job.Id, ct);
         return ToJob(job, applicantCount);
+    }
+
+    public async Task<IReadOnlyList<PartnerApplicantResponse>> ListApplicantsAsync(Guid accountId, Guid jobId, CancellationToken ct)
+    {
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        if (!await OwnedJobs(profile.Id).AnyAsync(x => x.Id == jobId, ct))
+            throw new PartnerException("JOB_NOT_FOUND", "Không tìm thấy bài đăng.", 404);
+        var applications = await db.JobApplications.AsNoTracking().Where(x => x.JobId == jobId)
+            .Include(x => x.Student).OrderByDescending(x => x.AppliedAt).ThenBy(x => x.Id).ToListAsync(ct);
+        var rounds = applications.GroupBy(x => x.StudentUserId).SelectMany(group => group
+            .OrderBy(x => x.AppliedAt).ThenBy(x => x.Id)
+            .Select((application, index) => new { application.Id, Round = index + 1 }))
+            .ToDictionary(x => x.Id, x => x.Round);
+        return applications.Select(application => ToApplicant(application, rounds[application.Id])).ToList();
+    }
+
+    public async Task<PartnerApplicantResponse> UpdateApplicantStatusAsync(Guid accountId, Guid jobId,
+        Guid applicationId, JobApplicationStatus status, CancellationToken ct)
+    {
+        Require(Enum.IsDefined(status), "INVALID_APPLICATION_STATUS", "Trạng thái hồ sơ không hợp lệ.");
+        var profile = await GetPartnerProfileAsync(accountId, ct);
+        var application = await db.JobApplications.Include(x => x.Student)
+            .FirstOrDefaultAsync(x => x.Id == applicationId && x.JobId == jobId && x.Job.PartnerId == profile.Id, ct)
+            ?? throw new PartnerException("APPLICATION_NOT_FOUND", "Không tìm thấy hồ sơ ứng tuyển.", 404);
+        var latestApplicationId = await db.JobApplications.AsNoTracking()
+            .Where(x => x.JobId == jobId && x.StudentUserId == application.StudentUserId)
+            .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id)
+            .Select(x => x.Id).FirstAsync(ct);
+        if (latestApplicationId != application.Id)
+            throw new PartnerException("APPLICATION_SUPERSEDED", "Lượt nộp cũ được giữ để đối chiếu và không thể cập nhật trạng thái.", 409);
+        if (!CanTransitionApplicationStatus((JobApplicationStatus)application.Status, status))
+            throw new PartnerException("INVALID_APPLICATION_TRANSITION", "Hồ sơ chỉ được chuyển trạng thái theo chiều tiến. Đã nhận và Từ chối là trạng thái kết thúc.", 409);
+        application.Status = (short)status;
+        application.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        var roundIds = await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == application.StudentUserId && x.JobId == jobId)
+            .OrderBy(x => x.AppliedAt).ThenBy(x => x.Id).Select(x => x.Id).ToListAsync(ct);
+        return ToApplicant(application, roundIds.IndexOf(application.Id) + 1);
     }
 
     public async Task DeleteJobAsync(Guid accountId, Guid jobId, CancellationToken ct)
@@ -267,6 +315,26 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             DeserializeBenefits(job.BenefitsJson), applicantCount, job.CreatedAt, job.UpdatedAt);
     }
 
+    private static PartnerApplicantResponse ToApplicant(JobApplication application, int applicationRound) => new(
+        application.Id, application.JobId, application.StudentUserId, application.Student.FullName,
+        application.Student.Nickname, application.Student.UniversityName, application.Student.Major,
+        application.Student.AvatarUrl, application.CoverMessage, application.AiMatchScore,
+        (JobApplicationStatus)application.Status, application.AppliedAt, application.UpdatedAt,
+        ReadSubmittedPortfolio(application.ProfileSnapshot), applicationRound);
+
+    private static UniNet.Application.PortfolioResponse? ReadSubmittedPortfolio(string? snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(snapshot)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(snapshot);
+            return document.RootElement.TryGetProperty("portfolio", out var portfolio)
+                ? JsonSerializer.Deserialize<UniNet.Application.PortfolioResponse>(portfolio.GetRawText(), JsonOptions)
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
     private static PartnerJobStatus GetStatus(Job job) => job.Status == (short)PartnerJobStatus.Published &&
         job.Deadline is not null && job.Deadline <= DateTimeOffset.UtcNow ? PartnerJobStatus.Expired : (PartnerJobStatus)job.Status;
 
@@ -296,16 +364,21 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
 
     private static void ValidateJob(SavePartnerJobRequest request)
     {
+        var now = DateTimeOffset.UtcNow;
         ValidateRequired(request.Title, 255, "Title");
         ValidateRequired(request.Location, 255, "Location");
         Require(!string.IsNullOrWhiteSpace(request.Description), "INVALID_DESCRIPTION", "Description is required.");
         ValidateMax(request.Description, 20000, "Description");
         Require(Enum.IsDefined(request.WorkType), "INVALID_WORK_TYPE", "Work type is invalid.");
         ValidateStatus(request.Status, allowExpired: false);
-        Require(request.Deadline > DateTimeOffset.UtcNow || request.Status == PartnerJobStatus.Draft,
+        Require(request.Deadline > now || request.Status == PartnerJobStatus.Draft,
             "INVALID_DEADLINE", "A published job must have a future deadline.");
         Require(request.StartAt is null || request.StartAt < request.Deadline,
             "INVALID_DATE_RANGE", "Start date must be before the application deadline.");
+        Require(request.StartAt is null || request.StartAt >= now.AddMinutes(5),
+            "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải cách hiện tại ít nhất 5 phút.");
+        Require(request.StartAt is null || request.StartAt.Value.Minute % 15 == 0,
+            "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải theo mốc 15 phút.");
         Require(request.MinSalaryVnd is null or >= 1_000_000m && request.MaxSalaryVnd is null or >= 1_000_000m,
             "INVALID_SALARY", "Each provided salary must be at least 1,000,000 VND.");
         const decimal maxSalary = 99_999_999_999_999m;
@@ -334,6 +407,18 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             ValidateMax(benefit.Description, 2000, "Benefit description");
             Require(!string.IsNullOrWhiteSpace(benefit.Description), "INVALID_BENEFIT", "Benefit description is required.");
         }
+    }
+
+    private static bool CanTransitionApplicationStatus(JobApplicationStatus current, JobApplicationStatus next)
+    {
+        if (current == next) return true;
+        return current switch
+        {
+            JobApplicationStatus.Pending => next is JobApplicationStatus.Viewed or JobApplicationStatus.Interview or JobApplicationStatus.Accepted or JobApplicationStatus.Rejected,
+            JobApplicationStatus.Viewed => next is JobApplicationStatus.Interview or JobApplicationStatus.Accepted or JobApplicationStatus.Rejected,
+            JobApplicationStatus.Interview => next is JobApplicationStatus.Accepted or JobApplicationStatus.Rejected,
+            _ => false,
+        };
     }
 
     private static void ValidateStatus(PartnerJobStatus? status, bool allowExpired)

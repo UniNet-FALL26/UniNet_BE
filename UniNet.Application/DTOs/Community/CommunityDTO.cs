@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Http;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
@@ -7,7 +8,9 @@ namespace UniNet.Application.DTOs.Community;
 public class CreatePostRequest
 {
     public string? Description { get; set; }
-    public List<string>? MediaUrls { get; set; }
+
+    // Nhận danh sách file đính kèm từ Form Data
+    public List<IFormFile>? Files { get; set; } = new();
 }
 
 // Dùng cho API Comment bình thường
@@ -69,12 +72,11 @@ public class CommentResponse
     public Guid PostId { get; set; }
     public Guid AuthorUserId { get; set; }
     public string AuthorName { get; set; } = null!;
+    public string? AuthorAvatarUrl { get; set; } // <--- Bổ sung Avatar
     public Guid? ParentCommentId { get; set; }
     public Guid? ReplyToUserId { get; set; }
     public string? ReplyToUserName { get; set; }
     public string Content { get; set; } = null!;
-    public DateTimeOffset CreatedAt { get; set; }
-
-    // THÊM DÒNG NÀY ĐỂ CHỨA CÁC REPLY NHỎ BÊN TRONG
+    public DateTimeOffset CreatedAt { get; set; } // Định dạng ISO 8601 mặc định
     public List<CommentResponse> Replies { get; set; } = new();
 }

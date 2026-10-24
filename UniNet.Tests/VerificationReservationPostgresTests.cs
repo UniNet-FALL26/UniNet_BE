@@ -65,7 +65,8 @@ public sealed partial class VerificationReservationPostgresTests
             await using var db = Open(); await db.Database.ExecuteSqlRawAsync(db.Database.GenerateCreateScript());
             foreach (var day in Enum.GetValues<DayOfWeek>()) Config[$"ProjectVerification:WorkingDays:{(int)day}"] = day.ToString();
             Account User(string name, AccountRole role = AccountRole.Student) => new() { Email = name + "@test.com", Role = role,
-                Profile = new() { FullName = name, Nickname = name } };
+                Profile = new() { FullName = name, Nickname = name, VerificatorAvailabilities = role == AccountRole.Verificator
+                    ? [new() { StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31) }] : [] } };
             var owner = User("owner"); var other = sameLeader ? owner : User("other");
             db.Accounts.Add(owner); if (!sameLeader) db.Accounts.Add(other); db.Accounts.Add(User("staff", AccountRole.Verificator));
             var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verify", IsActive = true,
@@ -111,7 +112,8 @@ public sealed partial class VerificationReservationPostgresTests
         await using (var seed = store.Open())
         {
             seed.Accounts.Add(new() { Email = "staff2@test.com", Role = AccountRole.Verificator,
-                Profile = new() { FullName = "Staff2", Nickname = "Staff2" } }); await seed.SaveChangesAsync();
+                Profile = new() { FullName = "Staff2", Nickname = "Staff2", VerificatorAvailabilities = [new()
+                    { StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31) }] } }); await seed.SaveChangesAsync();
         }
         await AssertOneWinnerAsync(store);
     }
