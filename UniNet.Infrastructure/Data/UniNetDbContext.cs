@@ -184,6 +184,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                     "CK_Projects_MemberTarget",
                     "\"MemberTarget\" > 0");
 
+                t.HasCheckConstraint("CK_Projects_MinimumQuantity",
+                    "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
+
                 t.HasCheckConstraint(
                     "CK_Projects_Status",
                     "\"Status\" BETWEEN 0 AND 3");
