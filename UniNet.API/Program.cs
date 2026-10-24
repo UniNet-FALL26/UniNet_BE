@@ -19,6 +19,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<VerificationDeadlineTasks>();
+builder.Services.AddScoped<ProjectRecruitmentTasks>();
 builder.Services.AddScoped<VerificationReservationTasks>();
 builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<EvidenceModerationTasks>();

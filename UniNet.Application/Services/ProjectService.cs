@@ -112,6 +112,9 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Require(request.ExpectedOutput > DateTimeOffset.UtcNow,
             "INVALID_EXPECTED_OUTPUT", "Project expected output must be in the future.");
 
+        Require(request.MinimumQuantity >= 2 && request.MinimumQuantity <= request.MemberTarget,
+            "INVALID_MINIMUM_QUANTITY", "Minimum quantity must be between 2 and member target, including the creator.");
+
         // Validate role requirements total quantity equals (MemberTarget - 1)
         if (request.RoleRequirements?.Count > 0)
         {
@@ -148,6 +151,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             ProjectField = request.ProjectField.Trim(),
             Description = request.Description.Trim(),
             MemberTarget = request.MemberTarget,
+            MinimumQuantity = request.MinimumQuantity,
             RecruitmentDeadline = request.RecruitmentDeadline.ToUniversalTime(),
             ExpectedOutput = request.ExpectedOutput?.ToUniversalTime(),
             Visibility = request.Visibility,
@@ -516,6 +520,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
+            project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.ExpectedOutput,
@@ -543,6 +548,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
+            project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,
@@ -572,6 +578,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.ProjectField,
             project.Description,
             project.MemberTarget,
+            project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
             project.Visibility,

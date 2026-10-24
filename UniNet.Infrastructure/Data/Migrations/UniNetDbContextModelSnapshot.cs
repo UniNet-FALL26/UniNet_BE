@@ -1023,6 +1023,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<int>("MemberTarget")
                         .HasColumnType("integer");
 
+                    b.Property<int>("MinimumQuantity")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ProjectField")
                         .IsRequired()
                         .HasMaxLength(150)
@@ -1061,6 +1064,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("Projects", null, t =>
                         {
                             t.HasCheckConstraint("CK_Projects_MemberTarget", "\"MemberTarget\" > 0");
+
+                            t.HasCheckConstraint("CK_Projects_MinimumQuantity", "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
 
                             t.HasCheckConstraint("CK_Projects_RecruitmentStatus", "\"RecruitmentStatus\" BETWEEN 0 AND 3");
 
