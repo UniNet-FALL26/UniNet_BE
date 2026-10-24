@@ -137,6 +137,14 @@ public sealed class ContributionServiceTests
             default));
         Assert.Equal("CONTRIBUTION_INPUTS_LOCKED", taskError.Code);
 
+        var memberStatusError = await Assert.ThrowsAsync<ProjectException>(() => taskService.UpdateTaskStatusAsync(
+            f.Project.Id,
+            task.Id,
+            f.MemberAccount.Id,
+            ProjectTaskStatus.InProgress,
+            default));
+        Assert.Equal("CONTRIBUTION_INPUTS_LOCKED", memberStatusError.Code);
+
         var reportError = await Assert.ThrowsAsync<ProjectException>(() => taskService.SubmitTaskReportAsync(
             f.Project.Id,
             task.Id,

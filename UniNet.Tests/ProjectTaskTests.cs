@@ -168,6 +168,11 @@ public sealed class ProjectTaskTests
         await using (db)
         {
             var scenario = await CreateProjectScenario(db);
+            var created = await tasks.CreateProjectTaskAsync(
+                scenario.Project.Id,
+                scenario.LeaderAccount.Id,
+                new CreateProjectTaskRequest("Leader-only task", "Members cannot edit general task fields.", DateTimeOffset.UtcNow.AddDays(2)),
+                default);
 
             var ex = await Assert.ThrowsAsync<ProjectException>(() => tasks.CreateProjectTaskAsync(
                 scenario.Project.Id,
@@ -176,6 +181,185 @@ public sealed class ProjectTaskTests
                 default));
 
             Assert.Equal("FORBIDDEN", ex.Code);
+
+            var updateEx = await Assert.ThrowsAsync<ProjectException>(() => tasks.UpdateProjectTaskAsync(
+                scenario.Project.Id,
+                created.Id,
+                scenario.MemberAccount.Id,
+                new UpdateProjectTaskRequest(Title: "Member cannot edit this"),
+                default));
+
+            Assert.Equal("FORBIDDEN", updateEx.Code);
+        }
+    }
+
+    [Fact]
+    public async Task AssignedActiveMemberCanStartTodoTaskWithoutChangingOtherTaskFields()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateProjectScenario(db);
+            var created = await tasks.CreateProjectTaskAsync(
+                scenario.Project.Id,
+                scenario.LeaderAccount.Id,
+                new CreateProjectTaskRequest(
+                    "Startable task",
+                    "Task fields should remain unchanged.",
+                    DateTimeOffset.UtcNow.AddDays(3),
+                    AssignedUserIds: [scenario.MemberProfile.Id]),
+                default);
+
+            var updated = await tasks.UpdateTaskStatusAsync(
+                scenario.Project.Id,
+                created.Id,
+                scenario.MemberAccount.Id,
+                ProjectTaskStatus.InProgress,
+                default);
+
+            Assert.Equal(ProjectTaskStatus.InProgress, updated.Status);
+            Assert.Equal(created.Title, updated.Title);
+            Assert.Equal(created.Description, updated.Description);
+            Assert.Equal(created.Deadline, updated.Deadline);
+            Assert.Equal([scenario.MemberProfile.Id], updated.AssignedUsers.Select(user => user.UserId));
+
+            var persisted = await db.ProjectTasks.SingleAsync(task => task.Id == created.Id);
+            Assert.Equal(ProjectTaskStatus.InProgress, persisted.Status);
+        }
+    }
+
+    [Fact]
+    public async Task UnassignedProjectMemberCannotStartTask()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateProjectScenario(db);
+            var created = await tasks.CreateProjectTaskAsync(
+                scenario.Project.Id,
+                scenario.LeaderAccount.Id,
+                new CreateProjectTaskRequest(
+                    "Assigned task",
+                    "Only its assignee can start it.",
+                    DateTimeOffset.UtcNow.AddDays(3),
+                    AssignedUserIds: [scenario.LeaderProfile.Id]),
+                default);
+
+            var ex = await Assert.ThrowsAsync<ProjectException>(() => tasks.UpdateTaskStatusAsync(
+                scenario.Project.Id,
+                created.Id,
+                scenario.MemberAccount.Id,
+                ProjectTaskStatus.InProgress,
+                default));
+
+            Assert.Equal("TASK_STATUS_UPDATE_DENIED", ex.Code);
+            Assert.Equal(ProjectTaskStatus.ToDo,
+                (await db.ProjectTasks.SingleAsync(task => task.Id == created.Id)).Status);
+        }
+    }
+
+    [Theory]
+    [InlineData(ProjectMemberStatus.Left)]
+    [InlineData(ProjectMemberStatus.Kicked)]
+    public async Task InactiveAssignedMemberCannotStartTask(ProjectMemberStatus membershipStatus)
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateProjectScenario(db);
+            var created = await tasks.CreateProjectTaskAsync(
+                scenario.Project.Id,
+                scenario.LeaderAccount.Id,
+                new CreateProjectTaskRequest(
+                    "Task for former member",
+                    "Inactive members cannot start tasks.",
+                    DateTimeOffset.UtcNow.AddDays(3),
+                    AssignedUserIds: [scenario.MemberProfile.Id]),
+                default);
+            var membership = await db.ProjectMembers.SingleAsync(member =>
+                member.ProjectId == scenario.Project.Id && member.UserId == scenario.MemberProfile.Id);
+            membership.Status = membershipStatus;
+            await db.SaveChangesAsync();
+
+            var ex = await Assert.ThrowsAsync<ProjectException>(() => tasks.UpdateTaskStatusAsync(
+                scenario.Project.Id,
+                created.Id,
+                scenario.MemberAccount.Id,
+                ProjectTaskStatus.InProgress,
+                default));
+
+            Assert.Equal("TASK_STATUS_UPDATE_DENIED", ex.Code);
+            Assert.Equal(ProjectTaskStatus.ToDo,
+                (await db.ProjectTasks.SingleAsync(task => task.Id == created.Id)).Status);
+        }
+    }
+
+    [Theory]
+    [InlineData(ProjectTaskStatus.InProgress)]
+    [InlineData(ProjectTaskStatus.Completed)]
+    [InlineData(ProjectTaskStatus.Cancelled)]
+    public async Task MemberStatusEndpointOnlyAllowsStartingTodoTask(ProjectTaskStatus currentStatus)
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateProjectScenario(db);
+            var created = await tasks.CreateProjectTaskAsync(
+                scenario.Project.Id,
+                scenario.LeaderAccount.Id,
+                new CreateProjectTaskRequest(
+                    "Not startable task",
+                    "This task is not currently ToDo.",
+                    DateTimeOffset.UtcNow.AddDays(3),
+                    currentStatus,
+                    [scenario.MemberProfile.Id]),
+                default);
+
+            var ex = await Assert.ThrowsAsync<ProjectException>(() => tasks.UpdateTaskStatusAsync(
+                scenario.Project.Id,
+                created.Id,
+                scenario.MemberAccount.Id,
+                ProjectTaskStatus.InProgress,
+                default));
+
+            Assert.Equal("INVALID_TASK_STATUS_TRANSITION", ex.Code);
+            Assert.Equal(currentStatus,
+                (await db.ProjectTasks.SingleAsync(task => task.Id == created.Id)).Status);
+        }
+    }
+
+    [Fact]
+    public async Task MemberStatusEndpointRejectsTransitionsOtherThanInProgress()
+    {
+        var (connection, db, tasks) = await Setup();
+        await using (connection)
+        await using (db)
+        {
+            var scenario = await CreateProjectScenario(db);
+            var created = await tasks.CreateProjectTaskAsync(
+                scenario.Project.Id,
+                scenario.LeaderAccount.Id,
+                new CreateProjectTaskRequest(
+                    "ToDo task",
+                    "Members cannot complete tasks through the start endpoint.",
+                    DateTimeOffset.UtcNow.AddDays(3),
+                    AssignedUserIds: [scenario.MemberProfile.Id]),
+                default);
+
+            var ex = await Assert.ThrowsAsync<ProjectException>(() => tasks.UpdateTaskStatusAsync(
+                scenario.Project.Id,
+                created.Id,
+                scenario.MemberAccount.Id,
+                ProjectTaskStatus.Completed,
+                default));
+
+            Assert.Equal("INVALID_TASK_STATUS_TRANSITION", ex.Code);
+            Assert.Equal(ProjectTaskStatus.ToDo,
+                (await db.ProjectTasks.SingleAsync(task => task.Id == created.Id)).Status);
         }
     }
 

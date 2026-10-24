@@ -18,6 +18,8 @@ public record UpdateProjectTaskRequest(
     List<Guid>? AssignedUserIds = null
 );
 
+public record UpdateProjectTaskStatusRequest(ProjectTaskStatus Status);
+
 public record ProjectTaskAssignmentInfo(
     Guid AssignmentId,
     Guid UserId,
