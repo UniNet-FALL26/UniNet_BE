@@ -16,5 +16,5 @@ public static class TransactionMapping
         transaction.ExpiredAt, transaction.CreatedAt, transaction.UpdatedAt,
         transaction.Status == PaymentStatus.Pending &&
             (string.IsNullOrEmpty(transaction.PaymentUrl) || transaction.FailureReason != null),
-        transaction.FailureReason is DuplicatePaymentReview or LatePaymentReview or BookingPaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", transaction.FailureReason);
+        transaction.FailureReason is DuplicatePaymentReview or LatePaymentReview or BookingPaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", transaction.FailureReason, transaction.PaymentQrCode);
 }

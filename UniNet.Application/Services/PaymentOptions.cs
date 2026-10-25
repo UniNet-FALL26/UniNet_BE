@@ -20,9 +20,14 @@ public sealed class PaymentOptions
 
     public void RequireCheckoutConfiguration(bool requireLinkDuration = true)
     {
-        if (!IsWebUrl(ReturnUrl) || !IsWebUrl(CancelUrl) || (requireLinkDuration && (LinkExpirationMinutes is < 1 or > 1440)))
+        var invalid = new List<string>();
+        if (!IsWebUrl(ReturnUrl)) invalid.Add("Payments:ReturnUrl (Payments__ReturnUrl)");
+        if (!IsWebUrl(CancelUrl)) invalid.Add("Payments:CancelUrl (Payments__CancelUrl)");
+        if (requireLinkDuration && LinkExpirationMinutes is < 1 or > 1440)
+            invalid.Add("Payments:LinkExpirationMinutes (1-1440)");
+        if (invalid.Count > 0)
             throw new TransactionException("PAYMENT_NOT_CONFIGURED",
-                "Configure payment return/cancel URLs and link expiration before creating checkout.", 503);
+                "Missing or invalid payment configuration: " + string.Join(", ", invalid) + ".", 503);
     }
 
     public static bool IsWebUrl(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
