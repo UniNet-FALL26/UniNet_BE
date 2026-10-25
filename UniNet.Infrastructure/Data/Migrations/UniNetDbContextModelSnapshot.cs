@@ -2319,6 +2319,85 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.WorkspaceChannel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("DeletedById");
+
+                    b.HasIndex("ProjectId", "IsDeleted");
+
+                    b.ToTable("WorkspaceChannels", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkspaceChannels_DeletedMetadata", "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR (\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WorkspaceMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ChannelId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SenderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderId");
+
+                    b.HasIndex("ChannelId", "CreatedAt", "Id");
+
+                    b.ToTable("WorkspaceMessages", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3496,6 +3575,51 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.WorkspaceChannel", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "DeletedBy")
+                        .WithMany()
+                        .HasForeignKey("DeletedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.Project", "Project")
+                        .WithMany("WorkspaceChannels")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("DeletedBy");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WorkspaceMessage", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.WorkspaceChannel", "Channel")
+                        .WithMany("Messages")
+                        .HasForeignKey("ChannelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", "Sender")
+                        .WithMany()
+                        .HasForeignKey("SenderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Channel");
+
+                    b.Navigation("Sender");
+                });
+
             modelBuilder.Entity("UniNet.Domain.PortraitAsset", b =>
                 {
                     b.HasOne("UniNet.Domain.Account", null)
@@ -3625,6 +3749,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("RoleRequirements");
 
                     b.Navigation("Verifications");
+
+                    b.Navigation("WorkspaceChannels");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectModeration", b =>
@@ -3669,6 +3795,11 @@ namespace UniNet.Infrastructure.Data.Migrations
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationAssignment", b =>
                 {
                     b.Navigation("Report");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WorkspaceChannel", b =>
+                {
+                    b.Navigation("Messages");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Skill", b =>

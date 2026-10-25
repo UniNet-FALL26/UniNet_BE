@@ -9,6 +9,8 @@ using UniNet.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
+// Browser SignalR bearer tokens use a query parameter; the default Hosting request logs include query strings.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting", Microsoft.Extensions.Logging.LogLevel.Warning);
 _ = UniNet.API.Services.UploadFileReader.GetMaxVideoBytes(builder.Configuration);
 var connection = builder.Configuration.GetConnectionString("UniNet")
     ?? throw new InvalidOperationException("ConnectionStrings:UniNet is required.");
@@ -52,6 +54,11 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationSer
 builder.Services.AddScoped<UniNet.Application.Interfaces.IAssignmentService, AssignmentService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IMeetingService, MeetingService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IReportService, ReportService>();
+builder.Services.AddScoped<IWorkspaceAccessService, WorkspaceAccessService>();
+builder.Services.AddScoped<IWorkspaceChatService, WorkspaceChatService>();
+builder.Services.AddSingleton<UniNet.API.Hubs.IWorkspaceConnectionTracker, UniNet.API.Hubs.WorkspaceConnectionTracker>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IWorkspaceMemberRevoker, UniNet.API.Services.WorkspaceMemberRevoker>();
+builder.Services.AddScoped<ILiveKitTokenService, LiveKitTokenService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
     client.Timeout = TimeSpan.FromSeconds(30))
@@ -63,6 +70,7 @@ builder.Services.AddScoped<IAdvertisementService, AdvertisementService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
 builder.Services.AddHttpClient<UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromSeconds(30))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
@@ -78,6 +86,28 @@ builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.
 builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
 builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+var figmaOrigins = new[]
+{
+    "http://localhost:3000",
+    "https://ta-01m551rnn4dyqsyrf74mnkz5vv-1380-2pwdyx71k1tz10bigm5fnvcgc.makeproxy-m.figma.site"
+};
+
+var allowedOrigins = origins
+    .Concat(figmaOrigins)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Frontend", policy =>
+    {
+        policy
+            .WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 builder.Services.AddCors(options => options.AddPolicy("MobileWeb", policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddCors(options =>
 {
@@ -122,6 +152,16 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.MapInboundClaims = false;
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/hubs/workspace") &&
+                context.Request.Query.TryGetValue("access_token", out var token))
+                context.Token = token;
+            return Task.CompletedTask;
+        }
+    };
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true, ValidIssuer = builder.Configuration["Jwt:Issuer"],
@@ -234,14 +274,21 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     context.Response.StatusCode = 500;
     await context.Response.WriteAsJsonAsync(new { code = "INTERNAL_ERROR", message = "Có lỗi xảy ra. Vui lòng thử lại." });
 }));
-app.UseHttpsRedirection();
-app.UseCors("MobileWeb");
-app.UseCors("UniNetDashboard");
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+app.UseCors("Frontend");
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
+app.MapHub<UniNet.API.Hubs.WorkspaceChatHub>(
+    "/hubs/workspace",
+    options => options.CloseOnAuthenticationExpiration = true)
+    .RequireAuthorization();
 app.Run();
 
 public partial class Program { }

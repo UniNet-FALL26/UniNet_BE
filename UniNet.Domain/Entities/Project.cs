@@ -39,6 +39,7 @@ namespace UniNet.Domain.Entities
 
         public List<ProjectModeration> Moderations { get; set; } = [];
         public List<ProjectVerification> Verifications { get; set; } = [];
+        public List<WorkspaceChannel> WorkspaceChannels { get; set; } = [];
         public ContributionCycle? ContributionCycle { get; set; }
     }
 }

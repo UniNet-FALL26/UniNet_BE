@@ -692,6 +692,54 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             .SingleAsync(t => t.Id == taskId, ct));
     }
 
+    public async Task<ProjectTaskResponse> UpdateTaskStatusAsync(
+        Guid projectId,
+        Guid taskId,
+        Guid accountId,
+        ProjectTaskStatus status,
+        CancellationToken ct = default)
+    {
+        var profile = await GetProfileAsync(accountId, ct);
+        Require(status == ProjectTaskStatus.InProgress,
+            "INVALID_TASK_STATUS_TRANSITION",
+            "Members can only start a task by changing its status to InProgress.",
+            400);
+
+        await using var transaction = await BeginInputMutationAsync(projectId, ct);
+        var task = await db.ProjectTasks
+            .Include(t => t.Creator)
+            .Include(t => t.Assignments).ThenInclude(a => a.User)
+            .SingleOrDefaultAsync(t => t.Id == taskId && t.ProjectId == projectId, ct);
+        Require(task is not null, "PROJECT_TASK_NOT_FOUND", "Task not found.", 404);
+
+        var isActiveProjectMember = await db.ProjectMembers.AsNoTracking()
+            .AnyAsync(member =>
+                member.ProjectId == projectId &&
+                member.UserId == profile.Id &&
+                member.Status == ProjectMemberStatus.Active, ct);
+        var isAssigned = task.Assignments.Any(assignment => assignment.UserId == profile.Id);
+        Require(isActiveProjectMember && isAssigned,
+            "TASK_STATUS_UPDATE_DENIED",
+            "Only active project members assigned to this task can start it.",
+            403);
+
+        var now = DateTimeOffset.UtcNow;
+        Require(ResolveEffectiveStatus(task, now) == ProjectTaskStatus.ToDo,
+            "INVALID_TASK_STATUS_TRANSITION",
+            "Only a task currently in ToDo status can be started.",
+            409);
+
+        task.Status = ProjectTaskStatus.InProgress;
+        task.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
+        await transaction.CommitAsync(ct);
+        return Map(await db.ProjectTasks
+            .Include(item => item.Creator)
+            .Include(item => item.Assignments).ThenInclude(assignment => assignment.User)
+            .SingleAsync(item => item.Id == taskId, ct));
+    }
+
     public async Task DeleteProjectTaskAsync(Guid projectId, Guid taskId, Guid accountId, CancellationToken ct = default)
     {
         await EnsureProjectLeaderAsync(projectId, accountId, ct);

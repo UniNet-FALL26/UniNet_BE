@@ -49,6 +49,22 @@ public sealed class ProjectTasksController(IProjectTaskService tasks) : Controll
         }
     }
 
+    [Authorize(Roles = "Student"), HttpPatch("tasks/{taskId:guid}/status")]
+    public async Task<IActionResult> UpdateTaskStatus(
+        Guid projectId, Guid taskId, UpdateProjectTaskStatusRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var result = await tasks.UpdateTaskStatusAsync(
+                projectId, taskId, AccountId, request.Status, ct);
+            return Ok(result);
+        }
+        catch (ProjectException ex)
+        {
+            return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message });
+        }
+    }
+
     [Authorize(Roles = "Student"), HttpDelete("tasks/{taskId:guid}")]
     public async Task<IActionResult> DeleteProjectTask(Guid projectId, Guid taskId, CancellationToken ct)
     {
