@@ -4,13 +4,13 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed record AdminSkillQuery(string? Search = null, SkillCategory? Category = null, bool? IsActive = null, int Page = 1, int PageSize = 20);
-public sealed record SaveAdminSkill(string Name, SkillCategory? Category, bool IsActive);
-public sealed record AdminSkillItem(Guid Id, string Name, SkillCategory? Category, bool IsActive, int StudentCount);
+public sealed record AdminSkillQuery(string? Search = null, SkillCategory? Category = null, bool? IsActive = null, int Page = 1, int PageSize = 20, string Sort = "name");
+public sealed record SaveAdminSkill(string Name, SkillCategory? Category, bool IsActive, string? IconUrl = null);
+public sealed record AdminSkillItem(Guid Id, string Name, SkillCategory? Category, bool IsActive, int StudentCount, string? IconUrl);
 
 public sealed class AdminSkillsService(UniNetDbContext db)
 {
-    private async Task RequireAdmin(Guid actor, CancellationToken ct)
+    public async Task RequireAdmin(Guid actor, CancellationToken ct)
     {
         if (!await db.Accounts.AnyAsync(a => a.Id == actor && a.Role == AccountRole.Admin && a.Status == AccountStatus.Active, ct))
             throw new AuthException("FORBIDDEN", "Chỉ quản trị viên đang hoạt động được quản lý kỹ năng.", 403);
@@ -22,7 +22,7 @@ public sealed class AdminSkillsService(UniNetDbContext db)
     }
 
     private IQueryable<AdminSkillItem> Items(IQueryable<Skill> skills) => skills.Select(s => new AdminSkillItem(s.Id, s.Name, s.Category, s.IsActive,
-        s.UserSkills.Where(u => u.User.Account.Role == AccountRole.Student && u.User.Account.Status != AccountStatus.Deleted).Select(u => u.UserId).Distinct().Count()));
+        s.UserSkills.Where(u => u.User.Account.Role == AccountRole.Student && u.User.Account.Status != AccountStatus.Deleted).Select(u => u.UserId).Distinct().Count(), s.IconUrl));
 
     public async Task<AdminPage<AdminSkillItem>> ListAsync(Guid actor, AdminSkillQuery request, CancellationToken ct)
     {
@@ -35,7 +35,12 @@ public sealed class AdminSkillsService(UniNetDbContext db)
         if (request.Category.HasValue) query = query.Where(s => s.Category == request.Category);
         if (request.IsActive.HasValue) query = query.Where(s => s.IsActive == request.IsActive);
         var total = await query.CountAsync(ct);
-        var rows = await Items(query.OrderBy(s => s.Name).ThenBy(s => s.Id).Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)).ToListAsync(ct);
+        var sorted = request.Sort switch {
+            "name" => query.OrderBy(s => s.Name).ThenBy(s => s.Id),
+            "popular" => query.OrderByDescending(s => s.UserSkills.Where(u => u.User.Account.Role == AccountRole.Student && u.User.Account.Status != AccountStatus.Deleted).Select(u => u.UserId).Distinct().Count()).ThenBy(s => s.Name).ThenBy(s => s.Id),
+            _ => throw new AuthException("INVALID_SORT", "Cách sắp xếp không hợp lệ.")
+        };
+        var rows = await Items(sorted.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)).ToListAsync(ct);
         return new(rows, request.Page, request.PageSize, total);
     }
 
@@ -53,6 +58,14 @@ public sealed class AdminSkillsService(UniNetDbContext db)
         if (await db.Set<Skill>().AnyAsync(s => s.Id != row.Id && s.Name.Trim().ToLower() == normalized, ct))
             throw new AuthException("DUPLICATE_SKILL", "Tên kỹ năng đã tồn tại.", 409);
         row.Name = name; row.Category = request.Category; row.IsActive = request.IsActive; row.UpdatedAt = DateTimeOffset.UtcNow;
+        if (request.IconUrl is not null) {
+            var icon = request.IconUrl.Trim();
+            if (icon.Length > 2048 || !Uri.TryCreate(icon, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps || !url.IsDefaultPort ||
+                !url.Host.Equals("res.cloudinary.com", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrEmpty(url.UserInfo) ||
+                !string.IsNullOrEmpty(url.Query) || !string.IsNullOrEmpty(url.Fragment) || !url.AbsolutePath.Contains("/image/upload/", StringComparison.Ordinal))
+                throw new AuthException("INVALID_SKILL_ICON", "Icon phải là ảnh đã tải lên Cloudinary.");
+            row.IconUrl = url.AbsoluteUri;
+        }
         if (!id.HasValue) db.Set<Skill>().Add(row);
         await db.SaveChangesAsync(ct);
         var result = await Items(db.Set<Skill>().Where(s => s.Id == row.Id)).SingleAsync(ct);
