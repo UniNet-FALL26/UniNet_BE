@@ -21,7 +21,7 @@ public sealed class AdminSkillsController(AdminSkillsService skills) : Controlle
     {
         await skills.RequireAdmin(Actor, ct);
         var image = await ImageFileReader.Read(file, ct);
-        var png = SkillIconImages.Normalize(image.Bytes);
+        var png = SkillIconImages.FitToCanvas(image.Bytes);
         return Ok(await cloud.Upload(new(png, $"uninet/skills/{Actor:N}/{Guid.NewGuid():N}", "png"), ct));
     }
 
@@ -30,6 +30,14 @@ public sealed class AdminSkillsController(AdminSkillsService skills) : Controlle
     {
         await skills.RequireAdmin(Actor, ct);
         var image = await ImageFileReader.Read(file, ct);
-        return File(await SkillIconImages.RemoveBackground(image.Bytes, processor, ct), "image/png");
+        return File(SkillIconImages.FitToCanvas(await SkillIconImages.RemoveBackground(image.Bytes, processor, ct)), "image/png");
+    }
+
+    [HttpPost("icons/preview"), Consumes("multipart/form-data"), RequestSizeLimit(ImageFileReader.MaxBytes + 65536), RequestFormLimits(MultipartBodyLengthLimit = ImageFileReader.MaxBytes + 65536)]
+    public async Task<IActionResult> PreviewIcon(IFormFile file, CancellationToken ct)
+    {
+        await skills.RequireAdmin(Actor, ct);
+        var image = await ImageFileReader.Read(file, ct);
+        return File(SkillIconImages.FitToCanvas(image.Bytes), "image/png");
     }
 }

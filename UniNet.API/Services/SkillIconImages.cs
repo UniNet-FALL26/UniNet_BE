@@ -6,6 +6,38 @@ namespace UniNet.API.Services;
 public static class SkillIconImages
 {
     private static readonly SemaphoreSlim Processing = new(1);
+    public static byte[] FitToCanvas(byte[] source)
+    {
+        using var image = GeminiPortraitProcessor.Decode(source);
+        var pixels = image.Pixels; var width = image.Width; var height = image.Height;
+        var background = pixels[0];
+        int Difference(SKColor color) => Math.Max(Math.Abs(color.Red - background.Red), Math.Max(Math.Abs(color.Green - background.Green), Math.Abs(color.Blue - background.Blue)));
+        var border = 0; var matching = 0;
+        for (var y = 0; y < height; y++) for (var x = 0; x < width; x++) {
+            if (x != 0 && y != 0 && x != width - 1 && y != height - 1) continue;
+            border++; if (pixels[y * width + x].Alpha >= 250 && Difference(pixels[y * width + x]) <= 12) matching++;
+        }
+        var solidBackground = background.Alpha >= 250 && matching >= border * 0.95;
+        var left = width; var top = height; var right = -1; var bottom = -1;
+        for (var y = 0; y < height; y++) for (var x = 0; x < width; x++) {
+            var pixel = pixels[y * width + x];
+            if (pixel.Alpha <= 8 || solidBackground && Difference(pixel) <= 12) continue;
+            left = Math.Min(left, x); top = Math.Min(top, y); right = Math.Max(right, x); bottom = Math.Max(bottom, y);
+        }
+        if (right < left || bottom < top) { left = 0; top = 0; right = width - 1; bottom = height - 1; }
+        using var cropped = new SKBitmap();
+        if (!image.ExtractSubset(cropped, new SKRectI(left, top, right + 1, bottom + 1))) throw new AuthException("INVALID_IMAGE", "Không chuẩn hóa được ảnh icon.");
+        var scale = 448d / Math.Max(cropped.Width, cropped.Height);
+        using var resized = cropped.Resize(new SKImageInfo(Math.Max(1, (int)Math.Round(cropped.Width * scale)), Math.Max(1, (int)Math.Round(cropped.Height * scale)), SKColorType.Rgba8888, SKAlphaType.Premul), new SKSamplingOptions(SKFilterMode.Linear));
+        if (resized is null) throw new AuthException("INVALID_IMAGE", "Không chuẩn hóa được ảnh icon.");
+        using var output = new SKBitmap(512, 512, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using var canvas = new SKCanvas(output);
+        canvas.Clear(solidBackground ? background : SKColors.Transparent);
+        canvas.DrawBitmap(resized, (512 - resized.Width) / 2, (512 - resized.Height) / 2);
+        using var png = output.Encode(SKEncodedImageFormat.Png, 100);
+        return png.ToArray();
+    }
+
     public static byte[] Normalize(byte[] source)
     {
         using var image = GeminiPortraitProcessor.Decode(source);
