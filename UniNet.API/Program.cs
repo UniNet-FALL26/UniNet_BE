@@ -20,6 +20,7 @@ if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("J
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminUsersService>();
+builder.Services.AddScoped<AdminSkillsService>();
 builder.Services.AddScoped<AdminPermissionService>();
 builder.Services.AddScoped<AdminVerificationQueries>();
 builder.Services.AddScoped<TransactionService>();
