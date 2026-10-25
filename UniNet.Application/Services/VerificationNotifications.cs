@@ -15,9 +15,7 @@ public sealed class VerificationNotifications(UniNetDbContext db)
             throw new ProjectVerificationException("FORBIDDEN", "Active verification staff access is required.", 403);
         page = Math.Max(page, 1); pageSize = Math.Clamp(pageSize, 1, 100);
         var now = DateTimeOffset.UtcNow;
-        var allowed = new List<string>();
-        foreach (var permission in NotificationPermissionPolicy.All)
-            if (await NotificationPermissionPolicy.HasAsync(db, accountId, permission, ct)) allowed.Add(permission);
+        var allowed = await NotificationPermissionPolicy.EffectiveAsync(db, accountId, ct);
         return await db.Set<VerificationNotification>().AsNoTracking().Where(n => n.RecipientUserId == accountId && n.Category == "verification" &&
             (n.ExpiresAt == null || n.ExpiresAt > now) && (n.RequiredPermission == null || allowed.Contains(n.RequiredPermission)))
             .OrderByDescending(n => n.CreatedAt).ThenBy(n => n.Id)

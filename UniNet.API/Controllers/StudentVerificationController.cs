@@ -6,10 +6,11 @@ using UniNet.Application;
 using UniNet.Application.DTOs.Verification;
 using UniNet.Application.Services;
 using UniNet.Domain;
+using UniNet.Infrastructure.Data;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Student,Admin"), Route("api/student/verification"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+[ApiController, Authorize(Roles = "Student,Admin,Moderator,Verificator"), Route("api/student/verification"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class StudentVerificationController(StudentVerificationService verifications) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
@@ -29,7 +30,7 @@ public sealed class StudentVerificationController(StudentVerificationService ver
             new(form.Document.FileName, form.Document.ContentType, buffer.ToArray()), ct);
     }
 
-    [HttpGet("{verificationId:guid}/document"), Authorize(Roles = "Student,Admin")]
+    [HttpGet("{verificationId:guid}/document"), Authorize(Roles = "Student,Admin,Moderator,Verificator")]
     public async Task<IActionResult> Document(Guid verificationId, CancellationToken ct)
     {
         var document = await verifications.GetDocumentAsync(AccountId, verificationId, ct);
@@ -47,17 +48,18 @@ public sealed class StudentVerificationForm
     [Required] public IFormFile Document { get; set; } = null!;
 }
 
-[ApiController, Authorize(Roles = "Admin"), Route("api/admin/student-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public sealed class AdminStudentVerificationsController(StudentVerificationService verifications) : ControllerBase
+[ApiController, Authorize(Roles = "Admin,Moderator,Verificator"), Route("api/admin/student-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+public sealed class AdminStudentVerificationsController(StudentVerificationService verifications, UniNetDbContext db) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
         ? id : throw new AuthException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401);
 
     [HttpGet]
-    public Task<StudentVerificationQueueResponse> List([FromQuery] VerificationStatus? status = null, [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20, CancellationToken ct = default) => verifications.ListAsync(AccountId, status, page, pageSize, ct);
+    public Task<AdminVerificationPage> List([FromQuery] AdminVerificationQuery query, CancellationToken ct) => new AdminVerificationQueries(db).ListAsync(AccountId, VerificationType.Student, query, ct);
+    [HttpGet("stats")]
+    public Task<AdminVerificationStats> Stats(CancellationToken ct) => new AdminVerificationQueries(db).StatsAsync(AccountId, VerificationType.Student, ct);
     [HttpGet("{verificationId:guid}")]
-    public Task<StudentVerificationStatusResponse> Detail(Guid verificationId, CancellationToken ct) => verifications.GetDetailAsync(AccountId, verificationId, ct);
+    public Task<AdminVerificationDetail> Detail(Guid verificationId, CancellationToken ct) => new AdminVerificationQueries(db).DetailAsync(AccountId, VerificationType.Student, verificationId, ct);
     [HttpPost("{verificationId:guid}/approve")]
     public Task<StudentVerificationStatusResponse> Approve(Guid verificationId, CancellationToken ct) => verifications.ReviewAsync(AccountId, verificationId, true, null, ct);
     [HttpPost("{verificationId:guid}/reject")]

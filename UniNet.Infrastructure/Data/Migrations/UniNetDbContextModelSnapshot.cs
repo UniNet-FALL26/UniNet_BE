@@ -56,6 +56,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<short>("Role")
                         .HasColumnType("smallint");
 
+                    b.Property<int>("SessionVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<short>("Status")
                         .HasColumnType("smallint");
 
@@ -153,6 +158,41 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("CareerProfiles", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.AccountStatusChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("PreviousStatus")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorAccountId");
+
+                    b.HasIndex("AccountId", "CreatedAt");
+
+                    b.ToTable("AccountStatusChanges", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementCampaign", b =>
@@ -2838,6 +2878,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.AccountStatusChange", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ActorAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.AdvertisementCampaign", b =>

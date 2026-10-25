@@ -84,25 +84,24 @@ public sealed class PartnerVerificationMultipleForm
     public List<IFormFile> Files { get; set; } = [];
 }
 
-[ApiController, Authorize(Roles = "Admin"), Route("api/admin/partner-verifications")]
+[ApiController, Authorize(Roles = "Admin,Moderator,Verificator"), Route("api/admin/partner-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AdminPartnerVerificationsController(PartnerVerificationService verifications, UniNetDbContext db) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
         ? id : throw new UniNet.Application.AuthException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401);
 
     [HttpGet]
-    public async Task<PartnerVerificationQueueResponse> Pending([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
-    {
-        await NotificationPermissionPolicy.RequireAsync(db, AccountId, NotificationPermissionPolicy.PartnerVerificationReview, ct);
-        return await verifications.ListPendingAsync(page, pageSize, ct);
-    }
+    public Task<AdminVerificationPage> Pending([FromQuery] AdminVerificationQuery query, CancellationToken ct) =>
+        new AdminVerificationQueries(db).ListAsync(AccountId, UniNet.Domain.VerificationType.Partner, query, ct);
+
+    [HttpGet("stats")]
+    public Task<AdminVerificationStats> Stats(CancellationToken ct) => new AdminVerificationQueries(db).StatsAsync(AccountId, UniNet.Domain.VerificationType.Partner, ct);
 
     [HttpGet("{verificationId:guid}")]
-    public async Task<PartnerVerificationDetailResponse> Detail(Guid verificationId, CancellationToken ct)
-    {
-        await NotificationPermissionPolicy.RequireAsync(db, AccountId, NotificationPermissionPolicy.PartnerVerificationReview, ct);
-        return await verifications.GetPendingAsync(verificationId, ct);
-    }
+    public Task<AdminVerificationDetail> Detail(Guid verificationId, CancellationToken ct) => new AdminVerificationQueries(db).DetailAsync(AccountId, UniNet.Domain.VerificationType.Partner, verificationId, ct);
+
+    [HttpGet("{verificationId:guid}/documents/{documentIndex:int}/external")]
+    public async Task<object> External(Guid verificationId, int documentIndex, CancellationToken ct) => new { url = await new AdminVerificationQueries(db).ExternalDocumentAsync(AccountId, verificationId, documentIndex, ct) };
 
     [HttpGet("{verificationId:guid}/documents/{documentIndex:int}")]
     public async Task<IActionResult> Document(Guid verificationId, int documentIndex, CancellationToken ct)

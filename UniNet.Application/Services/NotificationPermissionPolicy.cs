@@ -14,10 +14,17 @@ public static class NotificationPermissionPolicy
     public const string RecruitmentReview = "recruitment.review";
     public const string EvidenceReview = "verification.evidence.review";
     public const string CommunityReview = "community.review";
-    public static readonly string[] All = [Manage, StudentVerificationReview, PartnerVerificationReview, ProjectReview, RecruitmentReview, EvidenceReview, CommunityReview];
+    public const string UsersView = "users.view";
+    public const string UsersDetail = "users.detail";
+    public const string UsersLock = "users.lock";
+    public const string UsersUnlock = "users.unlock";
+    public const string StaffManage = "staff.manage";
+    public const string PermissionsManage = "permissions.manage";
+    public static readonly string[] All = [Manage, StudentVerificationReview, PartnerVerificationReview, ProjectReview, RecruitmentReview, EvidenceReview, CommunityReview,
+        UsersView, UsersDetail, UsersLock, UsersUnlock, StaffManage, PermissionsManage];
 
     public static AccountRole[] Roles(string permission) => permission switch {
-        Manage or StudentVerificationReview or PartnerVerificationReview => [AccountRole.Admin],
+        Manage or StudentVerificationReview or PartnerVerificationReview or UsersView or UsersDetail or UsersLock or UsersUnlock or StaffManage or PermissionsManage => [AccountRole.Admin],
         EvidenceReview => [AccountRole.Admin, AccountRole.Verificator],
         ProjectReview or RecruitmentReview => [AccountRole.Admin, AccountRole.Moderator],
         CommunityReview => [AccountRole.Admin, AccountRole.Moderator],
@@ -36,6 +43,15 @@ public static class NotificationPermissionPolicy
 
     public static Task<bool> HasAsync(UniNetDbContext db, Guid accountId, string permission, CancellationToken ct = default) =>
         Recipients(db, permission).AnyAsync(a => a.Id == accountId, ct);
+
+    public static async Task<IReadOnlyList<string>> EffectiveAsync(UniNetDbContext db, Guid accountId, CancellationToken ct = default)
+    {
+        var account = await db.Accounts.AsNoTracking().Where(a => a.Id == accountId && a.Status == AccountStatus.Active)
+            .Select(a => new { a.Role }).SingleOrDefaultAsync(ct);
+        if (account == null || account.Role is not (AccountRole.Admin or AccountRole.Moderator or AccountRole.Verificator)) return [];
+        var overrides = await db.Set<NotificationPermissionOverride>().AsNoTracking().Where(p => p.AccountId == accountId).ToDictionaryAsync(p => p.Permission, p => p.IsGranted, ct);
+        return All.Where(permission => overrides.TryGetValue(permission, out var granted) ? granted : Roles(permission).Contains(account.Role)).ToArray();
+    }
 
     public static async Task RequireAsync(UniNetDbContext db, Guid accountId, string permission, CancellationToken ct = default)
     {

@@ -110,6 +110,8 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
     private async Task<PartnerVerificationStatusResponse> CreateAsync(Guid accountId, string? taxCode,
         string? representativeName, object documents, CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await LockAsync(accountId, ct);
         var profile = await LoadPartnerProfileAsync(accountId, ct);
         var latest = await LatestPartnerVerification(profile.Id).FirstOrDefaultAsync(ct);
         if (latest?.Status == VerificationStatus.Pending)
@@ -149,6 +151,7 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
                 EventKey: $"partner-verification:{verification.Id}:submitted", Audience: "Permission",
                 RequiredPermission: NotificationPermissionPolicy.PartnerVerificationReview, SenderUserId: accountId), ct);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return new(verification.Id, verification.Status, null, verification.SubmittedAt);
     }
 
@@ -189,46 +192,42 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
         return ToDetail(verification);
     }
 
-    public async Task<PartnerVerificationDetailResponse> ApproveAsync(Guid reviewerAccountId, Guid verificationId, CancellationToken ct)
+    public Task<PartnerVerificationDetailResponse> ApproveAsync(Guid reviewerAccountId, Guid verificationId, CancellationToken ct) =>
+        ReviewAsync(reviewerAccountId, verificationId, true, null, ct);
+
+    public Task<PartnerVerificationDetailResponse> RejectAsync(Guid reviewerAccountId, Guid verificationId, string reason, CancellationToken ct) =>
+        ReviewAsync(reviewerAccountId, verificationId, false, reason, ct);
+
+    private async Task<PartnerVerificationDetailResponse> ReviewAsync(Guid reviewerAccountId, Guid verificationId, bool approve, string? reason, CancellationToken ct)
     {
         await EnsureActiveAdminAsync(reviewerAccountId, ct);
-        var verification = await LoadPendingAsync(verificationId, ct);
+        if (!approve && (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 2000))
+            throw new AuthException("INVALID_REJECT_REASON", "Lý do từ chối bắt buộc và tối đa 2000 ký tự.");
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var owner = await db.UserVerifications.Where(v => v.Id == verificationId && v.VerificationType == VerificationType.Partner)
+            .Select(v => (Guid?)v.User.AccountId).SingleOrDefaultAsync(ct) ?? throw new AuthException("VERIFICATION_NOT_FOUND", "Không tìm thấy hồ sơ.", 404);
+        await LockAsync(owner, ct);
+        var verification = await db.UserVerifications.Include(v => v.User).ThenInclude(p => p.Account).SingleAsync(v => v.Id == verificationId, ct);
         var now = DateTimeOffset.UtcNow;
-        verification.Status = VerificationStatus.Approved;
-        verification.RejectReason = null;
-        verification.ReviewedBy = reviewerAccountId;
-        verification.ReviewedAt = now;
-        verification.UpdatedAt = now;
-        verification.User.IsVerified = true;
+        var status = approve ? VerificationStatus.Approved : VerificationStatus.Rejected;
+        var changed = await db.UserVerifications.Where(v => v.Id == verificationId && v.Status == VerificationStatus.Pending && v.User.Account.Status == AccountStatus.Active)
+            .ExecuteUpdateAsync(s => s.SetProperty(v => v.Status, status).SetProperty(v => v.RejectReason, approve ? null : reason!.Trim())
+                .SetProperty(v => v.ReviewedBy, (Guid?)reviewerAccountId).SetProperty(v => v.ReviewedAt, (DateTimeOffset?)now).SetProperty(v => v.UpdatedAt, now), ct);
+        if (changed != 1) throw new AuthException("VERIFICATION_ALREADY_REVIEWED", "Hồ sơ đã được xử lý hoặc tài khoản không còn hoạt động. Vui lòng tải lại.", 409);
+        await db.Entry(verification).ReloadAsync(ct);
+        verification.User.IsVerified = approve;
         verification.User.UpdatedAt = now;
-        await NotificationService.EnqueueAsync(db, [verification.User.AccountId],
-            new("verification.partner.approved", "Verification", "Xác minh đối tác thành công",
-                "Hồ sơ đối tác của bạn đã được xác minh.", "UserVerification", verification.Id,
-                EventKey: $"partner-verification:{verification.Id}:approved", SenderUserId: reviewerAccountId), ct);
-        await db.SaveChangesAsync(ct);
+        await NotificationService.EnqueueAsync(db, [owner],
+            new(approve ? "verification.partner.approved" : "verification.partner.rejected", "Verification", approve ? "Xác minh đối tác thành công" : "Yêu cầu xác minh bị từ chối",
+                approve ? "Hồ sơ đối tác của bạn đã được xác minh." : "Yêu cầu xác minh đối tác bị từ chối: " + reason!.Trim(),
+                "UserVerification", verification.Id, EventKey: $"partner-verification:{verification.Id}:{(approve ? "approved" : "rejected")}", SenderUserId: reviewerAccountId), ct);
+        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         return ToDetail(verification);
     }
 
-    public async Task<PartnerVerificationDetailResponse> RejectAsync(Guid reviewerAccountId, Guid verificationId, string reason, CancellationToken ct)
+    private async Task LockAsync(Guid accountId, CancellationToken ct)
     {
-        await EnsureActiveAdminAsync(reviewerAccountId, ct);
-        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 2000)
-            throw new AuthException("INVALID_REJECT_REASON", "Lý do từ chối bắt buộc và tối đa 2000 ký tự.");
-        var verification = await LoadPendingAsync(verificationId, ct);
-        var now = DateTimeOffset.UtcNow;
-        verification.Status = VerificationStatus.Rejected;
-        verification.RejectReason = reason.Trim();
-        verification.ReviewedBy = reviewerAccountId;
-        verification.ReviewedAt = now;
-        verification.UpdatedAt = now;
-        verification.User.IsVerified = false;
-        verification.User.UpdatedAt = now;
-        await NotificationService.EnqueueAsync(db, [verification.User.AccountId],
-            new("verification.partner.rejected", "Verification", "Yêu cầu xác minh bị từ chối",
-                $"Yêu cầu xác minh đối tác bị từ chối: {reason.Trim()}", "UserVerification", verification.Id,
-                EventKey: $"partner-verification:{verification.Id}:rejected", SenderUserId: reviewerAccountId), ct);
-        await db.SaveChangesAsync(ct);
-        return ToDetail(verification);
+        if (db.Database.IsNpgsql()) await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({accountId.ToString()}, 0))", ct);
     }
 
     private IQueryable<UserVerification> LatestPartnerVerification(Guid userId) => db.UserVerifications
@@ -246,8 +245,6 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
 
     private async Task EnsureActiveAdminAsync(Guid accountId, CancellationToken ct)
     {
-        var isAdmin = await db.Accounts.AnyAsync(x => x.Id == accountId && x.Role == AccountRole.Admin && x.Status == AccountStatus.Active, ct);
-        if (!isAdmin) throw new AuthException("FORBIDDEN", "Chỉ admin đang hoạt động mới được duyệt xác minh.", 403);
         if (!await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.PartnerVerificationReview, ct))
             throw new AuthException("FORBIDDEN", "Bạn không có quyền xét duyệt xác minh đối tác.", 403);
     }

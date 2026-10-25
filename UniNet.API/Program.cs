@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using UniNet.Application;
@@ -18,6 +19,9 @@ var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationExceptio
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AdminUsersService>();
+builder.Services.AddScoped<AdminPermissionService>();
+builder.Services.AddScoped<AdminVerificationQueries>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<NotificationService>();
@@ -75,7 +79,9 @@ builder.Services.AddScoped<IAdvertisementService, AdvertisementService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
 builder.Services.AddControllers();
-builder.Services.AddSignalR();
+builder.Services.AddSingleton<UniNet.API.Services.AccountSessionConnections>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UniNet.API.Services.AccountSessionConnections>());
+builder.Services.AddSignalR(options => options.AddFilter<UniNet.API.Services.AccountSessionConnections>());
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
 builder.Services.AddHttpClient<UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromSeconds(30))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
@@ -159,6 +165,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     options.MapInboundClaims = false;
     options.Events = new JwtBearerEvents
     {
+        OnTokenValidated = async context =>
+        {
+            var db = context.HttpContext.RequestServices.GetRequiredService<UniNetDbContext>();
+            if (!await UniNet.API.Services.AccountTokenValidation.ValidateAsync(context.Principal, db, context.HttpContext.RequestAborted))
+                context.Fail("Account session is no longer active.");
+        },
         OnMessageReceived = context =>
         {
             if ((context.Request.Path.StartsWithSegments("/hubs/workspace") || context.Request.Path.StartsWithSegments("/hubs/notifications")) &&

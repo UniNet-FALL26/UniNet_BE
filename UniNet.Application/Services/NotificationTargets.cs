@@ -16,6 +16,11 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
         var staff = account.Role is AccountRole.Admin or AccountRole.Moderator or AccountRole.Verificator;
         string? url = null;
         switch (n.TargetType) {
+            case "User":
+                if (id == accountId) url = account.Role == AccountRole.Partner ? "/(company)/profile" : "/settings?account=1";
+                else if (await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.UsersDetail, ct) && await db.Accounts.AnyAsync(a => a.Id == id, ct))
+                    url = $"/{account.Role.ToString().ToLowerInvariant()}/users/{id}";
+                break;
             case "ContentReport":
                 if (await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.CommunityReview, ct) &&
                     await db.ContentReports.AnyAsync(r => r.Id == id && db.CommunityPosts.Any(p => p.Id == r.PostId), ct))
@@ -29,8 +34,8 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
                 else if (await NotificationPermissionPolicy.HasAsync(db, accountId,
                     partnerVerification ? NotificationPermissionPolicy.PartnerVerificationReview : NotificationPermissionPolicy.StudentVerificationReview, ct))
                     url = partnerVerification
-                        ? account.Role == AccountRole.Admin ? "/admin/partner-verifications" : "/verificator/companies"
-                        : account.Role == AccountRole.Admin ? "/admin/student-verifications" : "/verificator/students";
+                        ? $"/{account.Role.ToString().ToLowerInvariant()}/partner-verifications/{id}"
+                        : $"/{account.Role.ToString().ToLowerInvariant()}/student-verifications/{id}";
                 break;
             case "JobApplication":
                 var application = await db.JobApplications.Include(a => a.Job).AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct);

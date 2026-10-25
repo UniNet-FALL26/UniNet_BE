@@ -109,6 +109,7 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
             x.Role == AccountRole.Admin && x.Status == AccountStatus.Active, ct);
         if (!isAdmin)
             throw new AuthException("FORBIDDEN", "Only an active Admin can create staff accounts.", 403);
+        await NotificationPermissionPolicy.RequireAsync(db, adminAccountId, NotificationPermissionPolicy.StaffManage, ct);
 
         Require(request.Role is AccountRole.Moderator or AccountRole.Verificator,
             "INVALID_ROLE", "Only Moderator or Verificator accounts can be created.");
@@ -217,7 +218,7 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
         Require((deviceId?.Length ?? 0) <= 255 && (deviceName?.Length ?? 0) <= 255, "INVALID_DEVICE", "Invalid device information.");
         var minutes = Math.Clamp(configuration.GetValue("Jwt:AccessMinutes", 30), 15, 60);
         var expires = now.AddMinutes(minutes);
-        var claims = new[] { new Claim(JwtRegisteredClaimNames.Sub, account.Id.ToString()), new Claim(JwtRegisteredClaimNames.Email, account.Email), new Claim(ClaimTypes.Role, account.Role.ToString()), new Claim("token_type", "access") };
+        var claims = new[] { new Claim(JwtRegisteredClaimNames.Sub, account.Id.ToString()), new Claim(JwtRegisteredClaimNames.Email, account.Email), new Claim(ClaimTypes.Role, account.Role.ToString()), new Claim("token_type", "access"), new Claim("session_version", account.SessionVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
         var credentials = new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)), SecurityAlgorithms.HmacSha256);
         var jwt = new JwtSecurityToken(configuration["Jwt:Issuer"], configuration["Jwt:Audience"], claims, now.UtcDateTime, expires.UtcDateTime, credentials);
         var rawRefresh = NewRefreshToken();

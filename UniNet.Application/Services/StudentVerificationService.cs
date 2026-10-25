@@ -90,7 +90,7 @@ public sealed class StudentVerificationService(UniNetDbContext db)
         // Conditional database update makes a second review fail even if an older instance was tracked.
         var now = DateTimeOffset.UtcNow;
         var status = approve ? VerificationStatus.Approved : VerificationStatus.Rejected;
-        var changed = await db.UserVerifications.Where(x => x.Id == id && x.Status == VerificationStatus.Pending)
+        var changed = await db.UserVerifications.Where(x => x.Id == id && x.Status == VerificationStatus.Pending && x.User.Account.Status == AccountStatus.Active)
             .ExecuteUpdateAsync(set => set.SetProperty(x => x.Status, status).SetProperty(x => x.ReviewedBy, (Guid?)adminId)
                 .SetProperty(x => x.ReviewedAt, (DateTimeOffset?)now).SetProperty(x => x.UpdatedAt, now)
                 .SetProperty(x => x.RejectReason, approve ? null : reason!.Trim()), ct);
@@ -124,9 +124,7 @@ public sealed class StudentVerificationService(UniNetDbContext db)
         var account = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == accountId && x.Status == AccountStatus.Active, ct);
         if (account is null) throw Error("FORBIDDEN", "Không có quyền xem tài liệu.", 403);
         var row = await FindAsync(id, ct);
-        if (account.Role != AccountRole.Admin && row.User.AccountId != accountId)
-            throw Error("FORBIDDEN", "Không có quyền xem tài liệu.", 403);
-        if (account.Role == AccountRole.Admin) await AdminAsync(accountId, ct);
+        if (row.User.AccountId != accountId) await AdminAsync(accountId, ct);
         var data = Read(row);
         return new(data.DocumentName, data.DocumentContentType, Convert.FromBase64String(data.DocumentBase64));
     }
@@ -152,8 +150,6 @@ public sealed class StudentVerificationService(UniNetDbContext db)
     }
     private async Task AdminAsync(Guid accountId, CancellationToken ct)
     {
-        if (!await db.Accounts.AnyAsync(x => x.Id == accountId && x.Role == AccountRole.Admin && x.Status == AccountStatus.Active, ct))
-            throw Error("FORBIDDEN", "Chỉ quản trị viên đang hoạt động được xét duyệt.", 403);
         if (!await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.StudentVerificationReview, ct))
             throw Error("FORBIDDEN", "Bạn không có quyền xét duyệt xác minh sinh viên.", 403);
     }

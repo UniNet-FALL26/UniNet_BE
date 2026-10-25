@@ -10,6 +10,7 @@ public sealed class Account
     public AccountRole Role { get; set; }
     public AccountStatus Status { get; set; } = AccountStatus.Active;
     public bool EmailVerified { get; set; }
+    public int SessionVersion { get; set; }
     public DateTimeOffset? LastLoginAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

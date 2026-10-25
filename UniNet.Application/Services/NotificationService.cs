@@ -59,9 +59,7 @@ public sealed class NotificationService(UniNetDbContext db)
     {
         await ActiveAccountAsync(id, ct);
         var now = DateTimeOffset.UtcNow;
-        var allowed = new List<string>();
-        foreach (var permission in NotificationPermissionPolicy.All)
-            if (await NotificationPermissionPolicy.HasAsync(db, id, permission, ct)) allowed.Add(permission);
+        var allowed = await NotificationPermissionPolicy.EffectiveAsync(db, id, ct);
         return db.Set<VerificationNotification>().Where(n => n.RecipientUserId == id &&
             (n.ExpiresAt == null || n.ExpiresAt > now) && (n.RequiredPermission == null || allowed.Contains(n.RequiredPermission)));
     }

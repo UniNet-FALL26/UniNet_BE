@@ -15,6 +15,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        if (ChangeTracker.Entries<AccountStatusChange>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Account status history cannot be changed or deleted.");
         foreach (var entry in ChangeTracker.Entries<VerificationNotification>().Where(e => e.State == EntityState.Added).ToList())
         {
             if (!Set<NotificationDelivery>().Local.Any(x => x.NotificationId == entry.Entity.Id && x.Reason == "created"))
@@ -128,6 +130,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        AdminManagementConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         NotificationConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
