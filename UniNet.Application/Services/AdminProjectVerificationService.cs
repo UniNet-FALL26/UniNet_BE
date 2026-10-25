@@ -17,6 +17,8 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdmin
             .SingleOrDefaultAsync(p => p.AccountId == accountId, ct);
         if (actor == null || actor.Account.Role != AccountRole.Admin || actor.Account.Status != AccountStatus.Active)
             throw Error("FORBIDDEN", "An active admin account is required.", 403);
+        if (!await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct))
+            throw Error("FORBIDDEN", "Bạn không có quyền quản lý xác minh dự án.", 403);
         return actor.Id;
     }
 

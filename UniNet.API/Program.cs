@@ -20,6 +20,11 @@ builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();
+builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<NotificationTargets>();
+builder.Services.AddScoped<NotificationBroadcastService>();
+builder.Services.AddHostedService<UniNet.API.Services.NotificationBackgroundWorker>();
+builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.IUserIdProvider, UniNet.API.Hubs.AccountUserIdProvider>();
 builder.Services.AddScoped<VerificationDeadlineTasks>();
 builder.Services.AddScoped<ProjectRecruitmentTasks>();
 builder.Services.AddScoped<VerificationReservationTasks>();
@@ -156,7 +161,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     {
         OnMessageReceived = context =>
         {
-            if (context.Request.Path.StartsWithSegments("/hubs/workspace") &&
+            if ((context.Request.Path.StartsWithSegments("/hubs/workspace") || context.Request.Path.StartsWithSegments("/hubs/notifications")) &&
                 context.Request.Query.TryGetValue("access_token", out var token))
                 context.Token = token;
             return Task.CompletedTask;
@@ -197,6 +202,15 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
             code = "CONCURRENT_MODIFICATION",
             message = "A concurrent database update prevented this operation. Retry the request."
         });
+        return;
+    }
+    // Serializable callers may hold an older snapshot even after the notification event lock.
+    // Retry the whole business request rather than continuing an aborted PostgreSQL transaction.
+    if (error?.GetBaseException() is Npgsql.PostgresException {
+        SqlState: Npgsql.PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_Notifications_RecipientUserId_EventKey" })
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { code = "CONCURRENT_MODIFICATION", message = "Thông báo đã được xử lý đồng thời. Vui lòng thử lại thao tác." });
         return;
     }
     if (error is TransactionException transactionError)
@@ -289,6 +303,7 @@ app.MapHub<UniNet.API.Hubs.WorkspaceChatHub>(
     "/hubs/workspace",
     options => options.CloseOnAuthenticationExpiration = true)
     .RequireAuthorization();
+app.MapHub<UniNet.API.Hubs.NotificationsHub>("/hubs/notifications", options => options.CloseOnAuthenticationExpiration = true).RequireAuthorization();
 app.Run();
 
 public partial class Program { }

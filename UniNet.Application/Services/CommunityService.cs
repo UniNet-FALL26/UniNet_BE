@@ -363,6 +363,11 @@ public class CommunityService : ICommunityService
         };
 
         _context.ContentReports.Add(report);
+        await NotificationService.EnqueuePermissionAsync(_context, NotificationPermissionPolicy.CommunityReview,
+            new("community.report.submitted", "Community", "Bài viết cần được xem xét",
+                "Có một bài viết bị báo cáo cần được xem xét.", "ContentReport", report.Id,
+                EventKey: $"content-report:{report.Id}:submitted", Audience: "Permission",
+                RequiredPermission: NotificationPermissionPolicy.CommunityReview, SenderUserId: currentUserId));
         await _context.SaveChangesAsync();
     }
 

@@ -67,7 +67,9 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
              a.Status == VerificationAssignmentStatus.Completed), ct),
             "ASSIGNMENT_EXISTS", "This verification already has an active or completed assignment.", 409);
         var user = await GetAvailableVerificatorAsync(request.AssignedToUserId, verification, null, ct);
-        return AssignmentMapping.ToResponse(AddAssignment(verification, user, admin, DateTimeOffset.UtcNow));
+        var assignment = AddAssignment(verification, user, admin, DateTimeOffset.UtcNow);
+        await EnqueueAssignmentAsync(assignment, user.AccountId, accountId, ct);
+        return AssignmentMapping.ToResponse(assignment);
     }, ct);
 
     public Task<AssignmentResponse> ReplaceVerificatorAsync(Guid assignmentId, Guid accountId,
@@ -91,6 +93,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         old.ReplacementReason = request.Reason.Trim();
         old.ReplacedBy = replacement;
         old.UpdatedAt = now;
+        await EnqueueAssignmentAsync(replacement, user.AccountId, accountId, ct);
         return AssignmentMapping.ToResponse(replacement);
     }, ct);
 
@@ -144,6 +147,8 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             (role.HasValue ? user.Account.Role == role.Value :
                 user.Account.Role is AccountRole.Admin or AccountRole.Verificator),
             "FORBIDDEN", "An active account with the required assignment role is required.", 403);
+        Require(await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct),
+            "FORBIDDEN", "Bạn không có quyền xử lý xác minh dự án.", 403);
         return user;
     }
 
@@ -196,6 +201,13 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         v.UpdatedAt = now;
         return assignment;
     }
+
+    private Task EnqueueAssignmentAsync(VerificationAssignment assignment, Guid recipientAccountId, Guid senderAccountId, CancellationToken ct)
+        => NotificationService.EnqueueAsync(db, [recipientAccountId],
+            new("verification.assignment.created", "Verification", "Bạn được phân công xác minh dự án",
+                "Bạn vừa được phân công một hồ sơ xác minh dự án. Mở hồ sơ để xem lịch và chi tiết.",
+                "ProjectVerification", assignment.ProjectVerificationId, EventKey: $"verification-assignment:{assignment.Id}:assigned",
+                RequiredPermission: NotificationPermissionPolicy.EvidenceReview, SenderUserId: senderAccountId), ct);
 
     private static void RequireActive(VerificationAssignment assignment) => Require(
         assignment.Status is VerificationAssignmentStatus.Assigned or VerificationAssignmentStatus.Overdue,

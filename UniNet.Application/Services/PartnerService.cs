@@ -218,6 +218,18 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             throw new PartnerException("INVALID_APPLICATION_TRANSITION", "Hồ sơ chỉ được chuyển trạng thái theo chiều tiến. Đã nhận và Từ chối là trạng thái kết thúc.", 409);
         application.Status = (short)status;
         application.UpdatedAt = DateTimeOffset.UtcNow;
+        var statusLabel = status switch
+        {
+            JobApplicationStatus.Accepted => "được chấp nhận",
+            JobApplicationStatus.Rejected => "bị từ chối",
+            JobApplicationStatus.Interview => "được mời phỏng vấn",
+            JobApplicationStatus.Viewed => "được xem",
+            _ => "được cập nhật"
+        };
+        await NotificationService.EnqueueAsync(db, [application.Student.AccountId],
+            new("recruitment.application.status", "Recruitment", "Cập nhật hồ sơ ứng tuyển",
+                $"Hồ sơ ứng tuyển của bạn đã {statusLabel}.", "JobApplication", application.Id,
+                EventKey: $"application:{application.Id}:status:{(short)status}", SenderUserId: accountId), ct);
         await db.SaveChangesAsync(ct);
         var roundIds = await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == application.StudentUserId && x.JobId == jobId)
             .OrderBy(x => x.AppliedAt).ThenBy(x => x.Id).Select(x => x.Id).ToListAsync(ct);

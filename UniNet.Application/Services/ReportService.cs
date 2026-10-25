@@ -47,6 +47,11 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
         assignment.CompletedAt = now;
         assignment.UpdatedAt = now;
         Finalize(verification, request.Outcome!.Value, actor.Id, now);
+        var ownerAccountId = await db.Projects.Where(p => p.Id == verification.ProjectId).Select(p => p.Creator.AccountId).SingleAsync(ct);
+        await NotificationService.EnqueueAsync(db, [ownerAccountId],
+            new("verification.project.finalized", "Verification", "Có kết quả xác minh dự án",
+                request.Outcome == ProjectVerificationStatus.Verified ? "Dự án của bạn đã được xác minh thành công." : "Dự án của bạn chưa đạt xác minh. Mở hồ sơ để xem kết quả.",
+                "ProjectVerification", verification.Id, EventKey: $"project-verification:{verification.Id}:finalized", SenderUserId: accountId), ct);
         return ReportMapping.ToResponse(report);
     }, ct);
 
@@ -78,6 +83,9 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
             ? actor.Account.Role == AccountRole.Verificator
             : actor.Account.Role is AccountRole.Verificator or AccountRole.Admin or AccountRole.Student or AccountRole.Partner),
             "FORBIDDEN", "Your account cannot access verification reports.", 403);
+        if (actor.Account.Role is AccountRole.Admin or AccountRole.Verificator)
+            Require(await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct),
+                "FORBIDDEN", "Bạn không có quyền xem hoặc xử lý báo cáo xác minh.", 403);
         return actor;
     }
 

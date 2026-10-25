@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using UniNet.Domain.Entities;
 using UniNet.Domain;
-using UniNet.Domain.Enums;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -10,20 +9,21 @@ public sealed class VerificationNotificationConfiguration : IEntityTypeConfigura
 {
     public void Configure(EntityTypeBuilder<VerificationNotification> e)
     {
-        e.HasKey(n => n.Id);
-        e.Property(n => n.EventKey).HasMaxLength(200).IsRequired();
-        e.Property(n => n.Message).HasMaxLength(2000).IsRequired();
-        e.HasIndex(n => new { n.EventKey, n.RecipientUserId }).IsUnique();
+        e.ToTable("Notifications"); e.HasKey(n => n.Id);
+        e.Property(n => n.Type).HasMaxLength(60).IsRequired();
+        e.Property(n => n.Category).HasMaxLength(40).IsRequired();
+        e.Property(n => n.Title).HasMaxLength(200).IsRequired();
+        e.Property(n => n.Message).IsRequired();
+        e.Property(n => n.Audience).HasMaxLength(30).IsRequired();
+        e.Property(n => n.RequiredPermission).HasMaxLength(100);
+        e.Property(n => n.TargetType).HasMaxLength(60);
+        e.Property(n => n.TargetUrl).HasMaxLength(500);
+        e.Property(n => n.EventKey).HasMaxLength(200);
+        e.HasIndex(n => new { n.RecipientUserId, n.EventKey }).IsUnique().HasFilter("\"EventKey\" IS NOT NULL");
         e.HasIndex(n => new { n.RecipientUserId, n.CreatedAt });
-        e.HasOne<ProjectVerification>().WithMany().HasForeignKey(n => n.VerificationId).OnDelete(DeleteBehavior.Restrict);
-        e.Property<ProjectModerationPurpose?>("EvidenceModerationPurpose").IsRequired().HasConversion<short>()
-            .HasDefaultValue(ProjectModerationPurpose.ProjectEvidence).HasSentinel(null);
-        e.HasOne<ProjectModeration>().WithMany().HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
-            .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
-        e.ToTable("VerificationNotification", t => t.HasCheckConstraint("CK_VerificationNotification_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1"));
-        e.HasOne<UserVerification>().WithMany().HasForeignKey(n => n.UserVerificationId).OnDelete(DeleteBehavior.Restrict);
-        e.ToTable("VerificationNotification", t => t.HasCheckConstraint("CK_VerificationNotification_Target",
-            "(CASE WHEN \"VerificationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"EvidenceModerationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"UserVerificationId\" IS NOT NULL THEN 1 ELSE 0 END) = 1"));
-        e.HasOne<UserProfile>().WithMany().HasForeignKey(n => n.RecipientUserId).OnDelete(DeleteBehavior.Restrict);
+        e.HasIndex(n => new { n.RecipientUserId, n.ReadAt, n.CreatedAt });
+        e.HasIndex(n => n.BroadcastId);
+        e.HasOne<Account>().WithMany().HasForeignKey(n => n.RecipientUserId).OnDelete(DeleteBehavior.Restrict);
+        e.HasOne<Account>().WithMany().HasForeignKey(n => n.SenderUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

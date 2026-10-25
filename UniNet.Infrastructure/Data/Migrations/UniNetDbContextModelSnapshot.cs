@@ -941,6 +941,150 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("JobSkills", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcast", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Audience")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("ProcessedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RecipientCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("RetryAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid>("SenderUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("TargetUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderUserId");
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("NotificationBroadcasts", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcastRecipient", b =>
+                {
+                    b.Property<Guid>("BroadcastId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("BroadcastId", "AccountId");
+
+                    b.HasIndex("AccountId");
+
+                    b.ToTable("NotificationBroadcastRecipients", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("NotificationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset?>("RetryAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("DeliveredAt", "CreatedAt");
+
+                    b.ToTable("NotificationDeliveries", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationPermissionOverride", b =>
+                {
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Permission")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsGranted")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("AccountId", "Permission");
+
+                    b.ToTable("NotificationPermissionOverrides", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Package", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2155,55 +2299,82 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Audience")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid?>("BroadcastId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("EventKey")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<Guid?>("EvidenceModerationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<short>("EvidenceModerationPurpose")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("smallint")
-                        .HasDefaultValue((short)1);
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Message")
                         .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("RecipientUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("UserVerificationId")
+                    b.Property<string>("RequiredPermission")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("SenderUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("VerificationId")
+                    b.Property<Guid?>("TargetId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("TargetUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserVerificationId");
+                    b.HasIndex("BroadcastId");
 
-                    b.HasIndex("VerificationId");
-
-                    b.HasIndex("EventKey", "RecipientUserId")
-                        .IsUnique();
-
-                    b.HasIndex("EvidenceModerationId", "EvidenceModerationPurpose");
+                    b.HasIndex("SenderUserId");
 
                     b.HasIndex("RecipientUserId", "CreatedAt");
 
-                    b.ToTable("VerificationNotification", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_VerificationNotification_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1");
+                    b.HasIndex("RecipientUserId", "EventKey")
+                        .IsUnique()
+                        .HasFilter("\"EventKey\" IS NOT NULL");
 
-                            t.HasCheckConstraint("CK_VerificationNotification_Target", "(CASE WHEN \"VerificationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"EvidenceModerationId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"UserVerificationId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
-                        });
+                    b.HasIndex("RecipientUserId", "ReadAt", "CreatedAt");
+
+                    b.ToTable("Notifications", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationReport", b =>
@@ -3061,6 +3232,48 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Skill");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcast", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("SenderUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcastRecipient", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.NotificationBroadcast", null)
+                        .WithMany("Recipients")
+                        .HasForeignKey("BroadcastId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationDelivery", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationPermissionOverride", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "Creator")
@@ -3495,26 +3708,15 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationNotification", b =>
                 {
-                    b.HasOne("UniNet.Domain.UserProfile", null)
+                    b.HasOne("UniNet.Domain.Account", null)
                         .WithMany()
                         .HasForeignKey("RecipientUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("UniNet.Domain.UserVerification", null)
+                    b.HasOne("UniNet.Domain.Account", null)
                         .WithMany()
-                        .HasForeignKey("UserVerificationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", null)
-                        .WithMany()
-                        .HasForeignKey("VerificationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("UniNet.Domain.Entities.ProjectModeration", null)
-                        .WithMany()
-                        .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
-                        .HasPrincipalKey("Id", "Purpose")
+                        .HasForeignKey("SenderUserId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -3725,6 +3927,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("JobSkills");
 
                     b.Navigation("SavedByStudents");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcast", b =>
+                {
+                    b.Navigation("Recipients");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.Package", b =>

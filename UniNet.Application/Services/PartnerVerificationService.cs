@@ -143,14 +143,18 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
         profile.IsVerified = false;
         profile.UpdatedAt = now;
         db.UserVerifications.Add(verification);
+        await NotificationService.EnqueuePermissionAsync(db, NotificationPermissionPolicy.PartnerVerificationReview,
+            new("verification.partner.submitted", "Verification", "Hồ sơ đối tác chờ xác minh",
+                "Có yêu cầu xác minh đối tác mới đang chờ xét duyệt.", "UserVerification", verification.Id,
+                EventKey: $"partner-verification:{verification.Id}:submitted", Audience: "Permission",
+                RequiredPermission: NotificationPermissionPolicy.PartnerVerificationReview, SenderUserId: accountId), ct);
         await db.SaveChangesAsync(ct);
         return new(verification.Id, verification.Status, null, verification.SubmittedAt);
     }
 
     public async Task<PartnerVerificationFileContent> GetDocumentAsync(Guid adminAccountId, Guid verificationId, int documentIndex, CancellationToken ct)
     {
-        var isAdmin = await db.Accounts.AnyAsync(x => x.Id == adminAccountId && x.Role == AccountRole.Admin && x.Status == AccountStatus.Active, ct);
-        if (!isAdmin) throw new AuthException("FORBIDDEN", "Chỉ quản trị viên đang hoạt động mới được xem tài liệu.", 403);
+        await EnsureActiveAdminAsync(adminAccountId, ct);
         if (documentIndex < 0) throw new AuthException("VERIFICATION_DOCUMENT_NOT_FOUND", "Không tìm thấy tài liệu.", 404);
         var row = await db.UserVerifications.AsNoTracking().SingleOrDefaultAsync(x => x.Id == verificationId && x.VerificationType == VerificationType.Partner, ct)
             ?? throw new AuthException("VERIFICATION_NOT_FOUND", "Không tìm thấy hồ sơ xác minh.", 404);
@@ -197,6 +201,10 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
         verification.UpdatedAt = now;
         verification.User.IsVerified = true;
         verification.User.UpdatedAt = now;
+        await NotificationService.EnqueueAsync(db, [verification.User.AccountId],
+            new("verification.partner.approved", "Verification", "Xác minh đối tác thành công",
+                "Hồ sơ đối tác của bạn đã được xác minh.", "UserVerification", verification.Id,
+                EventKey: $"partner-verification:{verification.Id}:approved", SenderUserId: reviewerAccountId), ct);
         await db.SaveChangesAsync(ct);
         return ToDetail(verification);
     }
@@ -215,6 +223,10 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
         verification.UpdatedAt = now;
         verification.User.IsVerified = false;
         verification.User.UpdatedAt = now;
+        await NotificationService.EnqueueAsync(db, [verification.User.AccountId],
+            new("verification.partner.rejected", "Verification", "Yêu cầu xác minh bị từ chối",
+                $"Yêu cầu xác minh đối tác bị từ chối: {reason.Trim()}", "UserVerification", verification.Id,
+                EventKey: $"partner-verification:{verification.Id}:rejected", SenderUserId: reviewerAccountId), ct);
         await db.SaveChangesAsync(ct);
         return ToDetail(verification);
     }
@@ -236,6 +248,8 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
     {
         var isAdmin = await db.Accounts.AnyAsync(x => x.Id == accountId && x.Role == AccountRole.Admin && x.Status == AccountStatus.Active, ct);
         if (!isAdmin) throw new AuthException("FORBIDDEN", "Chỉ admin đang hoạt động mới được duyệt xác minh.", 403);
+        if (!await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.PartnerVerificationReview, ct))
+            throw new AuthException("FORBIDDEN", "Bạn không có quyền xét duyệt xác minh đối tác.", 403);
     }
 
     private async Task<UserVerification> LoadPendingAsync(Guid id, CancellationToken ct)

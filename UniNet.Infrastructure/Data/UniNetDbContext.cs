@@ -4,6 +4,10 @@ using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
 using UniNet.Domain.Entities.Community;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -11,6 +15,11 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        foreach (var entry in ChangeTracker.Entries<VerificationNotification>().Where(e => e.State == EntityState.Added).ToList())
+        {
+            if (!Set<NotificationDelivery>().Local.Any(x => x.NotificationId == entry.Entity.Id && x.Reason == "created"))
+                Set<NotificationDelivery>().Add(new() { AccountId = entry.Entity.RecipientUserId, NotificationId = entry.Entity.Id });
+        }
         foreach (var entry in ChangeTracker.Entries<ProjectModeration>())
         {
             if (entry.State == EntityState.Modified && entry.Property(x => x.Purpose).IsModified)
@@ -26,10 +35,42 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         if (ChangeTracker.Entries<VerificationReport>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Submitted verification reports cannot be changed or deleted.");
     }
+    private List<EntityEntry<VerificationNotification>> KeyedNotifications() => Database.IsNpgsql()
+        ? ChangeTracker.Entries<VerificationNotification>().Where(e => e.State == EntityState.Added && e.Entity.EventKey != null)
+            .OrderBy(e => e.Entity.RecipientUserId).ThenBy(e => e.Entity.EventKey, StringComparer.Ordinal).ToList() : [];
+
+    private static long NotificationLock(VerificationNotification n) => BinaryPrimitives.ReadInt64LittleEndian(
+        SHA256.HashData(Encoding.UTF8.GetBytes($"notification:{n.RecipientUserId:N}:{n.EventKey}")));
+    private void DetachDuplicate(EntityEntry<VerificationNotification> entry)
+    {
+        foreach (var delivery in ChangeTracker.Entries<NotificationDelivery>().Where(e => e.State == EntityState.Added &&
+            e.Entity.NotificationId == entry.Entity.Id && e.Entity.Reason == "created").ToList()) delivery.State = EntityState.Detached;
+        entry.State = EntityState.Detached;
+    }
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
-    { GuardHistory(); return base.SaveChanges(acceptAllChangesOnSuccess); }
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken ct = default)
-    { GuardHistory(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, ct); }
+    {
+        var entries = KeyedNotifications();
+        using var owned = entries.Count > 0 && Database.CurrentTransaction == null ? Database.BeginTransaction() : null;
+        foreach (var entry in entries) {
+            var n = entry.Entity; var key = NotificationLock(n);
+            Database.ExecuteSqlInterpolated($"SELECT pg_advisory_xact_lock({key})");
+            if (Set<VerificationNotification>().AsNoTracking().Any(x => x.RecipientUserId == n.RecipientUserId && x.EventKey == n.EventKey)) DetachDuplicate(entry);
+        }
+        GuardHistory(); var result = base.SaveChanges(acceptAllChangesOnSuccess); owned?.Commit(); return result;
+    }
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken ct = default)
+    {
+        var entries = KeyedNotifications();
+        await using var owned = entries.Count > 0 && Database.CurrentTransaction == null ? await Database.BeginTransactionAsync(ct) : null;
+        foreach (var entry in entries) {
+            var n = entry.Entity; var key = NotificationLock(n);
+            await Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({key})", ct);
+            if (await Set<VerificationNotification>().AsNoTracking().AnyAsync(x => x.RecipientUserId == n.RecipientUserId && x.EventKey == n.EventKey, ct)) DetachDuplicate(entry);
+        }
+        GuardHistory(); var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
+        if (owned != null) await owned.CommitAsync(ct); return result;
+    }
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<Account> Accounts => Set<Account>();
@@ -88,6 +129,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
+        NotificationConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
         model.Entity<PortraitAsset>(e =>

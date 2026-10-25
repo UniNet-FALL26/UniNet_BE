@@ -69,6 +69,12 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                 ]
             };
             db.ContributionCycles.Add(cycle);
+            var participantAccountIds = await db.UserProfiles.Where(p => cycle.Participants.Select(x => x.UserId).Contains(p.Id))
+                .Select(p => p.AccountId).ToArrayAsync(ct);
+            await NotificationService.EnqueueAsync(db, participantAccountIds.Where(id => id != accountId),
+                new("project.completed", "Project", "Dự án đã hoàn thành",
+                    $"Dự án {project.Title} đã hoàn thành. Bạn có thể xem kết quả và đánh giá đóng góp.",
+                    "Project", project.Id, EventKey: $"project:{project.Id}:completed", SenderUserId: accountId), ct);
             await db.SaveChangesAsync(ct);
             await new EvidenceModerationSource(db, configuration).RefreshAsync(request.ProjectId, now, ct, createInitial: true);
             await transaction.CommitAsync(ct);
@@ -297,6 +303,12 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
         project.Status = ProjectStatus.Pending;
         project.UpdatedAt = DateTimeOffset.UtcNow;
+        var memberAccountIds = await db.ProjectMembers.Where(m => m.ProjectId == projectId && m.Status == ProjectMemberStatus.Active)
+            .Select(m => m.User.AccountId).ToArrayAsync(ct);
+        await NotificationService.EnqueueAsync(db, memberAccountIds.Where(id => id != userId),
+            new("project.updated", "Project", "Thông tin dự án được cập nhật",
+                $"Thông tin dự án {project.Title} đã thay đổi và đang chờ kiểm duyệt lại.", "Project", projectId,
+                EventKey: $"project:{projectId}:updated:{project.UpdatedAt.UtcTicks}", SenderUserId: userId), ct);
         await db.SaveChangesAsync(ct);
 
         return await MapToDetailResponseAsync(project, userId, ct);

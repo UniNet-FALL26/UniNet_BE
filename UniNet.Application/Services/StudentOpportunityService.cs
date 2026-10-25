@@ -122,13 +122,19 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
             studentId = student.Id, student.FullName, student.Nickname, student.UniversityName, student.Major,
             student.AvatarUrl, portfolio = submittedPortfolio, capturedAt = DateTimeOffset.UtcNow
         }, JsonOptions);
-        db.JobApplications.Add(new JobApplication
+        var application = new JobApplication
         {
             JobId = job.Id, StudentUserId = student.Id,
             CoverMessage = string.IsNullOrWhiteSpace(coverMessage) ? null : coverMessage.Trim(),
             ProfileSnapshot = snapshot, Status = (short)JobApplicationStatus.Pending,
             AppliedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
-        });
+        };
+        db.JobApplications.Add(application);
+        var partnerAccountId = await db.UserProfiles.Where(p => p.Id == job.PartnerId).Select(p => p.AccountId).SingleAsync(ct);
+        await NotificationService.EnqueueAsync(db, [partnerAccountId],
+            new("recruitment.application.submitted", "Recruitment", "Có hồ sơ ứng tuyển mới",
+                $"{student.FullName} vừa ứng tuyển vào tin tuyển dụng của bạn.", "JobApplication", application.Id,
+                EventKey: $"application:{application.Id}:submitted", SenderUserId: accountId), ct);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException
             { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_JobApplications_StudentUserId_JobId" })

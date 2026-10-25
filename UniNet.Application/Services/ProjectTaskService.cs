@@ -609,6 +609,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
                 .ToList();
 
             db.ProjectTaskAssignments.AddRange(assignments);
+            await EnqueueTaskAssignmentsAsync(task, assignedUserIds, accountId, ct);
             await db.SaveChangesAsync(ct);
         }
         await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
@@ -666,6 +667,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             var existingAssignments = await db.ProjectTaskAssignments
                 .Where(a => a.ProjectTaskId == taskId)
                 .ToListAsync(ct);
+            var newlyAssignedIds = desiredIds.Except(existingAssignments.Select(a => a.UserId)).ToArray();
 
             foreach (var assignment in existingAssignments)
                 db.ProjectTaskAssignments.Remove(assignment);
@@ -681,6 +683,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
 
                 db.ProjectTaskAssignments.AddRange(replacements);
             }
+            await EnqueueTaskAssignmentsAsync(task, newlyAssignedIds, accountId, ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -774,6 +777,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         var existingAssignments = await db.ProjectTaskAssignments
             .Where(a => a.ProjectTaskId == taskId)
             .ToListAsync(ct);
+        var newlyAssignedIds = desiredIds.Except(existingAssignments.Select(a => a.UserId)).ToArray();
 
         foreach (var assignment in existingAssignments)
             db.ProjectTaskAssignments.Remove(assignment);
@@ -791,6 +795,7 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
         }
 
         task.UpdatedAt = DateTimeOffset.UtcNow;
+        await EnqueueTaskAssignmentsAsync(task, newlyAssignedIds, accountId, ct);
         await db.SaveChangesAsync(ct);
         await new EvidenceModerationSource(db, configuration).RefreshAsync(projectId, DateTimeOffset.UtcNow, ct);
         await transaction.CommitAsync(ct);
@@ -801,6 +806,16 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             .SingleAsync(t => t.Id == taskId, ct);
 
         return Map(updatedTask);
+    }
+
+    private async Task EnqueueTaskAssignmentsAsync(ProjectTask task, IEnumerable<Guid> profileIds, Guid senderAccountId, CancellationToken ct)
+    {
+        var ids = profileIds.Distinct().ToArray();
+        if (ids.Length == 0) return;
+        var accountIds = await db.UserProfiles.Where(p => ids.Contains(p.Id)).Select(p => p.AccountId).ToArrayAsync(ct);
+        await NotificationService.EnqueueAsync(db, accountIds,
+            new("project.task.assigned", "Project", "Bạn được giao nhiệm vụ mới", $"Bạn được giao nhiệm vụ: {task.Title}.",
+                "Task", task.Id, EventKey: $"task:{task.Id}:assigned:{task.UpdatedAt.UtcTicks}", SenderUserId: senderAccountId), ct);
     }
 
     public async Task<TaskReportListResponse> GetTaskReportsAsync(

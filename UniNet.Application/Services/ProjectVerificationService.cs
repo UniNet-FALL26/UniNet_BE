@@ -41,6 +41,11 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
             Status = ProjectVerificationStatus.Pending, SubmittedAt = now, CreatedAt = now, UpdatedAt = now
         };
         db.ProjectVerifications.Add(verification);
+        await NotificationService.EnqueuePermissionAsync(db, NotificationPermissionPolicy.EvidenceReview,
+            new("verification.project.submitted", "Verification", "Yêu cầu xác minh dự án mới",
+                $"Dự án {project.Title} vừa gửi yêu cầu xác minh.", "ProjectVerification", verification.Id,
+                EventKey: $"project-verification:{verification.Id}:submitted", Audience: "Permission",
+                RequiredPermission: NotificationPermissionPolicy.EvidenceReview, SenderUserId: accountId), ct);
         // The project remains Completed; AI/payment/final decisions are separate operations.
         return ProjectVerificationMapping.ToDetailResponse(verification);
     }, ct);

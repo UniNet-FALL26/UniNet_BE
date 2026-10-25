@@ -51,6 +51,8 @@ public sealed class ProjectModerationService(
     private async Task<ProjectModerationResponse> ReviewProjectAsync(
         Guid projectId, Guid accountId, ReviewProjectRequest request, ProjectModerationStatus decision, CancellationToken ct)
     {
+        if (!await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.ProjectReview, ct))
+            throw new ProjectException("FORBIDDEN", "Bạn không có quyền kiểm duyệt dự án.", 403);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         if (!await db.Projects.AnyAsync(p => p.Id == projectId, ct))
             throw new ProjectException("PROJECT_NOT_FOUND", "Project not found.", 404);
@@ -86,6 +88,12 @@ public sealed class ProjectModerationService(
         await db.Projects.Where(p => p.Id == projectId).ExecuteUpdateAsync(setters => setters
             .SetProperty(p => p.Status, projectStatus)
             .SetProperty(p => p.UpdatedAt, now), ct);
+        var ownerAccountId = await db.Projects.Where(p => p.Id == projectId).Select(p => p.Creator.AccountId).SingleAsync(ct);
+        await NotificationService.EnqueueAsync(db, [ownerAccountId],
+            new("project.moderation.reviewed", "Project", decision == ProjectModerationStatus.Approved ? "Dự án được duyệt" : "Dự án bị từ chối",
+                decision == ProjectModerationStatus.Approved ? "Dự án của bạn đã được duyệt." : $"Dự án của bạn bị từ chối: {note}",
+                "Project", projectId, EventKey: $"project-moderation:{latest.Id}:{decision}", SenderUserId: accountId), ct);
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
         latest.Status = decision;
@@ -228,6 +236,19 @@ public sealed class ProjectModerationService(
 
         moderation.CheckedAt = DateTimeOffset.UtcNow;
         moderation.UpdatedAt = moderation.CheckedAt.Value;
+        if (moderation.Status == ProjectModerationStatus.ReviewRequired)
+            await NotificationService.EnqueuePermissionAsync(db, NotificationPermissionPolicy.ProjectReview,
+                new("project.moderation.pending", "Project", "Dự án cần kiểm duyệt",
+                    $"Dự án {project.Title} cần được kiểm duyệt thủ công.", "ProjectModeration", moderation.Id,
+                    EventKey: $"project-moderation:{moderation.Id}:review-required", Audience: "Permission",
+                    RequiredPermission: NotificationPermissionPolicy.ProjectReview, SenderUserId: accountId), CancellationToken.None);
+        else if (moderation.Status == ProjectModerationStatus.Approved)
+        {
+            var ownerAccountId = await db.UserProfiles.Where(p => p.Id == project.CreatorId).Select(p => p.AccountId).SingleAsync(CancellationToken.None);
+            await NotificationService.EnqueueAsync(db, [ownerAccountId],
+                new("project.moderation.approved", "Project", "Dự án được duyệt", $"Dự án {project.Title} đã được duyệt.",
+                    "Project", projectId, EventKey: $"project-moderation:{moderation.Id}:Approved"), CancellationToken.None);
+        }
         // Persist terminal errors even when the caller disconnected during processing.
         await db.SaveChangesAsync(CancellationToken.None);
         return ToResponse(moderation);

@@ -120,6 +120,13 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         }
         request.Status = decision;
         request.UpdatedAt = now;
+        if (decision is ProjectJoinRequestStatus.Accepted or ProjectJoinRequestStatus.Rejected)
+            await NotificationService.EnqueueAsync(db, [request.User.AccountId],
+                new("project.join-request.reviewed", "Project", "Kết quả yêu cầu tham gia dự án",
+                    decision == ProjectJoinRequestStatus.Accepted
+                        ? $"Yêu cầu tham gia dự án {request.Project.Title} của bạn đã được chấp nhận."
+                        : $"Yêu cầu tham gia dự án {request.Project.Title} của bạn đã bị từ chối.",
+                    "Project", request.ProjectId, EventKey: $"project-join-request:{request.Id}:{decision}", SenderUserId: accountId), ct);
         return request;
     }, ct);
 

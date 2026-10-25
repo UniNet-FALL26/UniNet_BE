@@ -47,8 +47,11 @@ public sealed class StudentVerificationService(UniNetDbContext db)
             SubmittedAt = now, CreatedAt = now, UpdatedAt = now
         };
         db.UserVerifications.Add(row);
-        var admins = await db.UserProfiles.Where(p => p.Account.Role == AccountRole.Admin && p.Account.Status == AccountStatus.Active).Select(p => p.Id).ToListAsync(ct);
-        foreach (var admin in admins) AddNotification(admin, row.Id, "submitted", "Có yêu cầu xác minh sinh viên mới đang chờ xét duyệt.", now);
+        await NotificationService.EnqueuePermissionAsync(db, NotificationPermissionPolicy.StudentVerificationReview,
+            new("verification.student.submitted", "Verification", "Hồ sơ sinh viên chờ xác minh",
+                "Có yêu cầu xác minh sinh viên mới đang chờ xét duyệt.", "UserVerification", row.Id,
+                EventKey: $"student-verification:{row.Id}:submitted", Audience: "Permission",
+                RequiredPermission: NotificationPermissionPolicy.StudentVerificationReview, SenderUserId: accountId), ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return ToStatus(row, profile.IsVerified);
@@ -106,8 +109,11 @@ public sealed class StudentVerificationService(UniNetDbContext db)
             await db.UserProfiles.Where(x => x.Id == row.UserId).ExecuteUpdateAsync(set => set
                 .SetProperty(x => x.IsVerified, false).SetProperty(x => x.UpdatedAt, now), ct);
         await db.Entry(row.User).ReloadAsync(ct);
-        AddNotification(row.UserId, row.Id, approve ? "approved" : "rejected",
-            approve ? "Tài khoản sinh viên của bạn đã được xác minh." : "Yêu cầu xác minh cần bổ sung. Mở thông tin tài khoản để xem lý do.", now);
+        var action = approve ? "approved" : "rejected";
+        await NotificationService.EnqueueAsync(db, [ownerId],
+            new($"verification.student.{action}", "Verification", approve ? "Xác minh tài khoản thành công" : "Yêu cầu xác minh bị từ chối",
+                approve ? "Tài khoản sinh viên của bạn đã được xác minh." : $"Yêu cầu xác minh bị từ chối: {reason!.Trim()}",
+                "UserVerification", row.Id, EventKey: $"student-verification:{row.Id}:{action}", SenderUserId: adminId), ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return ToStatus(row, approve);
@@ -120,6 +126,7 @@ public sealed class StudentVerificationService(UniNetDbContext db)
         var row = await FindAsync(id, ct);
         if (account.Role != AccountRole.Admin && row.User.AccountId != accountId)
             throw Error("FORBIDDEN", "Không có quyền xem tài liệu.", 403);
+        if (account.Role == AccountRole.Admin) await AdminAsync(accountId, ct);
         var data = Read(row);
         return new(data.DocumentName, data.DocumentContentType, Convert.FromBase64String(data.DocumentBase64));
     }
@@ -147,10 +154,9 @@ public sealed class StudentVerificationService(UniNetDbContext db)
     {
         if (!await db.Accounts.AnyAsync(x => x.Id == accountId && x.Role == AccountRole.Admin && x.Status == AccountStatus.Active, ct))
             throw Error("FORBIDDEN", "Chỉ quản trị viên đang hoạt động được xét duyệt.", 403);
+        if (!await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.StudentVerificationReview, ct))
+            throw Error("FORBIDDEN", "Bạn không có quyền xét duyệt xác minh sinh viên.", 403);
     }
-    private void AddNotification(Guid recipient, Guid verificationId, string action, string message, DateTimeOffset now) =>
-        db.Set<VerificationNotification>().Add(new() { Id = Guid.NewGuid(), RecipientUserId = recipient,
-            UserVerificationId = verificationId, EventKey = $"student-verification:{verificationId}:{action}", Message = message, CreatedAt = now });
     private static Snapshot Read(UserVerification row) => JsonSerializer.Deserialize<Snapshot>(row.VerificationData, JsonOptions)
         ?? throw Error("INVALID_VERIFICATION_DATA", "Không thể đọc dữ liệu xác minh.", 500);
     private static StudentVerificationStatusResponse ToStatus(UserVerification? row, bool verified, bool currentAccountStatus = false)

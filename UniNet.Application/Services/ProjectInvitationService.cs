@@ -41,6 +41,10 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             Status = ProjectInvitationStatus.Sent, CreatedAt = now, UpdatedAt = now
         };
         db.ProjectInvitations.Add(invitation);
+        await NotificationService.EnqueueAsync(db, [invitee.AccountId],
+            new("project.invitation.received", "Project", "Lời mời tham gia dự án",
+                $"{inviter.FullName} mời bạn tham gia dự án {project.Title} với vai trò {invitation.Role}.",
+                "ProjectInvitation", invitation.Id, EventKey: $"project-invitation:{invitation.Id}:sent", SenderUserId: accountId), ct);
         return invitation;
     }, ct);
 
@@ -121,6 +125,15 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         }
         invitation.Status = decision;
         invitation.UpdatedAt = now;
+        var recipientAccountId = decision == ProjectInvitationStatus.Cancelled ? invitation.Invitee.AccountId : invitation.Inviter.AccountId;
+        await NotificationService.EnqueueAsync(db, [recipientAccountId],
+            new("project.invitation.updated", "Project", "Cập nhật lời mời dự án",
+                decision switch
+                {
+                    ProjectInvitationStatus.Accepted => $"{actor.FullName} đã chấp nhận lời mời tham gia dự án {invitation.Project.Title}.",
+                    ProjectInvitationStatus.Declined => $"{actor.FullName} đã từ chối lời mời tham gia dự án {invitation.Project.Title}.",
+                    _ => $"Lời mời tham gia dự án {invitation.Project.Title} đã bị hủy."
+                }, "ProjectInvitation", invitation.Id, EventKey: $"project-invitation:{invitation.Id}:{decision}", SenderUserId: accountId), ct);
         return invitation;
     }, ct);
 
