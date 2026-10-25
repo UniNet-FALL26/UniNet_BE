@@ -55,6 +55,7 @@ public class PostResponse
     public Guid Id { get; set; }
     public Guid AuthorUserId { get; set; }
     public string AuthorName { get; set; } = null!;
+    public string? AuthorAvatar { get; set; }
     public short AuthorActorType { get; set; }
     public string? Description { get; set; }
     public List<string> MediaUrls { get; set; } = new();
