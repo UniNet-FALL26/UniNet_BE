@@ -44,6 +44,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectRoleRequirement> ProjectRoleRequirements => Set<ProjectRoleRequirement>();
     public DbSet<ProjectSkill> ProjectSkills => Set<ProjectSkill>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<WorkspaceChannel> WorkspaceChannels => Set<WorkspaceChannel>();
+    public DbSet<WorkspaceMessage> WorkspaceMessages => Set<WorkspaceMessage>();
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
     public DbSet<ProjectTask> ProjectTasks => Set<ProjectTask>();
@@ -377,6 +379,55 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 x.UserId,
                 x.Status
             });
+        });
+        model.Entity<WorkspaceChannel>(e =>
+        {
+            e.ToTable("WorkspaceChannels", t => t.HasCheckConstraint(
+                "CK_WorkspaceChannels_DeletedMetadata",
+                "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR " +
+                "(\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)"));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+                e.Property(x => x.CreatedAt).HasConversion<long>(
+                    value => value.UtcTicks,
+                    ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
+            e.HasOne(x => x.Project)
+                .WithMany(x => x.WorkspaceChannels)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.CreatedBy)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.DeletedBy)
+                .WithMany()
+                .HasForeignKey(x => x.DeletedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.ProjectId, x.IsDeleted });
+        });
+        model.Entity<WorkspaceMessage>(e =>
+        {
+            e.ToTable("WorkspaceMessages");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Content).HasMaxLength(4000).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+                e.Property(x => x.CreatedAt).HasConversion<long>(
+                    value => value.UtcTicks,
+                    ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
+            e.HasOne(x => x.Channel)
+                .WithMany(x => x.Messages)
+                .HasForeignKey(x => x.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Sender)
+                .WithMany()
+                .HasForeignKey(x => x.SenderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.ChannelId, x.CreatedAt, x.Id });
         });
         model.Entity<ProjectJoinRequest>(e =>
         {

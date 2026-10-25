@@ -9,7 +9,9 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class ProjectMemberService(UniNetDbContext db) : IProjectMemberService
+public sealed class ProjectMemberService(
+    UniNetDbContext db,
+    IWorkspaceMemberRevoker? workspaceMemberRevoker = null) : IProjectMemberService
 {
     public async Task<List<RecommendedProjectMemberResponse>> GetRecommendedMembersAsync(Guid projectId,
         Guid accountId, CancellationToken ct = default)
@@ -131,28 +133,42 @@ public sealed class ProjectMemberService(UniNetDbContext db) : IProjectMemberSer
         return new(projectId, project.Title, members.Count, members);
     }
 
-    public Task<ProjectMemberResponse> KickAsync(Guid projectId, Guid userId, Guid accountId,
-        CancellationToken ct = default) => MutateAsync(async () =>
+    public async Task<ProjectMemberResponse> KickAsync(Guid projectId, Guid userId, Guid accountId,
+        CancellationToken ct = default)
     {
-        var actor = await GetStudentAsync(accountId, ct);
-        var project = await GetProjectAsync(projectId, ct);
-        Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can kick members.", 403);
-        Require(userId != project.CreatorId, "CANNOT_KICK_CREATOR", "The project creator cannot be kicked.", 403);
-        var member = await GetMemberAsync(projectId, userId, ct);
-        await RemoveAsync(member, project, ProjectMemberStatus.Kicked, ct);
-        return member;
-    }, ct);
+        var response = await MutateAsync(async () =>
+        {
+            var actor = await GetStudentAsync(accountId, ct);
+            var project = await GetProjectAsync(projectId, ct);
+            Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can kick members.", 403);
+            Require(userId != project.CreatorId, "CANNOT_KICK_CREATOR", "The project creator cannot be kicked.", 403);
+            var member = await GetMemberAsync(projectId, userId, ct);
+            await RemoveAsync(member, project, ProjectMemberStatus.Kicked, ct);
+            return member;
+        }, ct);
+        if (workspaceMemberRevoker is not null)
+            await workspaceMemberRevoker.RevokeMemberAsync(projectId, userId, CancellationToken.None);
+        return response;
+    }
 
-    public Task<ProjectMemberResponse> LeaveAsync(Guid projectId, Guid accountId,
-        CancellationToken ct = default) => MutateAsync(async () =>
+    public async Task<ProjectMemberResponse> LeaveAsync(Guid projectId, Guid accountId,
+        CancellationToken ct = default)
     {
-        var actor = await GetStudentAsync(accountId, ct);
-        var project = await GetProjectAsync(projectId, ct);
-        Require(project.CreatorId != actor.Id, "CREATOR_CANNOT_LEAVE", "The project creator cannot leave the project.", 403);
-        var member = await GetMemberAsync(projectId, actor.Id, ct);
-        await RemoveAsync(member, project, ProjectMemberStatus.Left, ct);
-        return member;
-    }, ct);
+        var userProfileId = Guid.Empty;
+        var response = await MutateAsync(async () =>
+        {
+            var actor = await GetStudentAsync(accountId, ct);
+            userProfileId = actor.Id;
+            var project = await GetProjectAsync(projectId, ct);
+            Require(project.CreatorId != actor.Id, "CREATOR_CANNOT_LEAVE", "The project creator cannot leave the project.", 403);
+            var member = await GetMemberAsync(projectId, actor.Id, ct);
+            await RemoveAsync(member, project, ProjectMemberStatus.Left, ct);
+            return member;
+        }, ct);
+        if (workspaceMemberRevoker is not null)
+            await workspaceMemberRevoker.RevokeMemberAsync(projectId, userProfileId, CancellationToken.None);
+        return response;
+    }
 
     private async Task RemoveAsync(ProjectMember member, Project project, ProjectMemberStatus status, CancellationToken ct)
     {
