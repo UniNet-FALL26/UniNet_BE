@@ -2116,6 +2116,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("PaymentQrCode")
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
                     b.Property<string>("PaymentRef")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
