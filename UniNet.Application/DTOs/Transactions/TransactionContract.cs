@@ -19,7 +19,7 @@ public record TransactionResponse(
     DateTimeOffset UpdatedAt,
     bool ReconciliationRequired,
     bool RequiresReview,
-    string? DiagnosticCode);
+    string? DiagnosticCode, string? QrCode = null);
 
 public record TransactionsResponse(int Page, int PageSize, int TotalItems, int TotalPages,
     List<TransactionResponse> Transactions);
@@ -32,4 +32,4 @@ public record CreateProviderPaymentRequest(string OrderCode, long AmountVnd, str
 
 public record ProviderPaymentResult(string OrderCode, decimal AmountVnd, string Currency,
     string PaymentLinkId, PaymentStatus Status, string? CheckoutUrl = null,
-    decimal? AmountPaidVnd = null, string? Reference = null, DateTimeOffset? PaidAt = null);
+    decimal? AmountPaidVnd = null, string? Reference = null, DateTimeOffset? PaidAt = null, string? QrCode = null);

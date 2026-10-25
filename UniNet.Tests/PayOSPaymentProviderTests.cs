@@ -122,18 +122,19 @@ public sealed class PayOSPaymentProviderTests
     [Fact]
     public async Task ValidSignedCreationResponseReturnsCheckout()
     {
-        var signature = Hmac("amount=37000&checkoutUrl=https://pay.payos.vn/web/test&currency=VND&orderCode=123&paymentLinkId=test&status=PENDING");
+        var signature = Hmac("amount=37000&checkoutUrl=https://pay.payos.vn/web/test&currency=VND&orderCode=123&paymentLinkId=test&qrCode=000201-test-payload&status=PENDING");
         using var http = new HttpClient(new Handler(_ => Task.FromResult(JsonResponse(JsonSerializer.Serialize(new
         {
             code = "00", signature,
             data = new { orderCode = 123, amount = 37000, currency = "VND", paymentLinkId = "test",
-                status = "PENDING", checkoutUrl = "https://pay.payos.vn/web/test" }
+                status = "PENDING", checkoutUrl = "https://pay.payos.vn/web/test", qrCode = "000201-test-payload" }
         })))));
         var result = await new PayOSPaymentProvider(http, Configuration()).CreatePaymentAsync(
             new("123", 37000, "UniNet verification", "https://app.test/paid", "https://app.test/cancel",
                 DateTimeOffset.UtcNow.AddMinutes(30)), default);
         Assert.Equal("test", result.PaymentLinkId);
         Assert.Equal("https://pay.payos.vn/web/test", result.CheckoutUrl);
+        Assert.Equal("000201-test-payload", result.QrCode);
         Assert.Equal(PaymentStatus.Pending, result.Status);
     }
 

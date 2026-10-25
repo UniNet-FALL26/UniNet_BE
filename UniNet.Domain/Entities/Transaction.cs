@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -16,6 +16,7 @@ namespace UniNet.Domain.Entities
         public decimal Amount { get; set; }
         public string? PaymentRef { get; set; }
         public string? PaymentUrl { get; set; }
+        public string? PaymentQrCode { get; set; }
         public string? PaymentMethod { get; set; }
         public string? ProviderOrderCode { get; set; }
         public string? ProviderPaymentLinkId { get; set; }

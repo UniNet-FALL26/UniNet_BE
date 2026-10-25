@@ -138,7 +138,7 @@ public sealed class PayOSPaymentProvider(HttpClient http, IConfiguration configu
                 throw new PaymentProviderException("INVALID_PROVIDER_RESPONSE", "PayOS returned an invalid checkout URL.");
             return new(Number(data, "orderCode").ToString(CultureInfo.InvariantCulture), Number(data, "amount"),
                 String(data, "currency") ?? "VND", RequiredString(data, creating ? "paymentLinkId" : "id"),
-                status, url, creating ? null : Number(data, "amountPaid"));
+                status, url, creating ? null : Number(data, "amountPaid"), QrCode: String(data, "qrCode"));
         }
         catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
         {

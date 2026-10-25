@@ -1078,6 +1078,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.Amount).HasPrecision(18, 2).IsRequired();
             e.Property(x => x.PaymentRef).HasMaxLength(255);
             e.Property(x => x.PaymentUrl).HasMaxLength(2048);
+            e.Property(x => x.PaymentQrCode).HasMaxLength(4096);
             e.Property(x => x.PaymentMethod).HasMaxLength(100);
             e.Property(x => x.ProviderOrderCode).HasMaxLength(255);
             e.Property(x => x.ProviderPaymentLinkId).HasMaxLength(255);

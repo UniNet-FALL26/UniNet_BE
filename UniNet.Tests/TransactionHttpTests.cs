@@ -22,7 +22,7 @@ namespace UniNet.Tests;
 public sealed class TransactionHttpTests
 {
     [Fact]
-    public async Task AllFiveRoutesBindAndUserRoutesRequireStudentWhileWebhookAllowsAnonymous()
+    public async Task PaymentRoutesRequireStudentAndWebhookAllowsAnonymousWhileReconciliationIsBackgroundOnly()
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("payment-http-test-key-at-least-32-bytes"));
         var builder = WebApplication.CreateBuilder();
@@ -67,12 +67,12 @@ public sealed class TransactionHttpTests
         Assert.Equal(service.TransactionId, (await client.GetFromJsonAsync<TransactionResponse>(
             $"{basePath}/{service.TransactionId}"))!.Id);
         using var reconcile = await client.PostAsync($"api/payments/{service.TransactionId}/reconcile", null);
-        Assert.Equal(HttpStatusCode.OK, reconcile.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, reconcile.StatusCode);
         client.DefaultRequestHeaders.Authorization = null;
         using var webhook = await client.PostAsJsonAsync("api/webhooks/payos", new { data = new { orderCode = 123 } });
         Assert.Equal(HttpStatusCode.OK, webhook.StatusCode);
         Assert.Equal(1, service.WebhookCalls);
-        Assert.Equal(1, service.ReconcileCalls);
+        Assert.Equal(0, service.ReconcileCalls);
         await app.StopAsync();
     }
 

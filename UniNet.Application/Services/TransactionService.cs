@@ -210,6 +210,12 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                     "PAYMENT_DATA_MISMATCH", "Provider checkout URL is invalid.", 409);
                 transaction.PaymentUrl = result.CheckoutUrl;
             }
+            if (!string.IsNullOrWhiteSpace(result.QrCode))
+            {
+                Require(result.QrCode.Length <= 4096,
+                    "PAYMENT_DATA_MISMATCH", "Provider QR payload is invalid.", 409);
+                transaction.PaymentQrCode = result.QrCode;
+            }
             if (result.Status == PaymentStatus.Success)
             {
                 var alreadyPaid = await db.Transactions.AnyAsync(t => t.Id != transaction.Id &&

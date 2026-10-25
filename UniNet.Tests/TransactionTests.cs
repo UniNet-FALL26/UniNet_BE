@@ -28,16 +28,18 @@ public sealed partial class TransactionTests
             Assert.Equal(PaymentStatus.Pending, stored.Status);
             Assert.Equal(f.Verification.Id, stored.VerificationTransaction!.VerificationId);
             Assert.Equal(37000, request.AmountVnd);
-            return FakeProvider.Result(request.OrderCode, request.AmountVnd);
+            return FakeProvider.Result(request.OrderCode, request.AmountVnd) with { QrCode = "000201-test-payload" };
         };
         var result = await f.CheckoutAsync();
         Assert.Equal(37000, result.AmountVnd);
         Assert.Equal("https://pay.payos.vn/web/test", result.CheckoutUrl);
+        Assert.Equal("000201-test-payload", result.QrCode);
         Assert.False(result.ReconciliationRequired);
         f.Package.Price = 42000;
         await f.Db.SaveChangesAsync();
         var reused = await f.CheckoutAsync();
         Assert.Equal(result.Id, reused.Id);
+        Assert.Equal(result.QrCode, reused.QrCode);
         Assert.Equal(37000, reused.AmountVnd);
         Assert.Equal(1, f.Provider.CreateCalls);
         Assert.Equal(ProjectVerificationStatus.Pending, f.Verification.Status);
@@ -309,7 +311,7 @@ public sealed partial class TransactionTests
         {
             started.SetResult();
             await finish.Task;
-            return FakeProvider.Result(request.OrderCode, request.AmountVnd);
+            return FakeProvider.Result(request.OrderCode, request.AmountVnd) with { QrCode = "000201-test-payload" };
         };
         var first = f.CheckoutAsync();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
