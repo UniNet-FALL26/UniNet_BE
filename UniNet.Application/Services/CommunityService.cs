@@ -54,6 +54,7 @@ public class CommunityService : ICommunityService
             Id = p.Id,
             AuthorUserId = p.AuthorUserId,
             AuthorName = p.AuthorUser.FullName ?? "Ẩn danh",
+            AuthorAvatar = p.AuthorUser.AvatarUrl,
             AuthorActorType = p.AuthorActorType,
             Description = p.Description,
             MediaUrls = p.Media.OrderBy(m => m.DisplayOrder).Select(m => m.FileUrl).ToList(),
