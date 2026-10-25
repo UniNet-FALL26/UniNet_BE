@@ -20,6 +20,7 @@ public sealed class AdminUsersService(UniNetDbContext db)
         if (request.Search?.Length > 255 || request.Role.HasValue && !Enum.IsDefined(request.Role.Value) || request.Status.HasValue && !Enum.IsDefined(request.Status.Value)) throw Invalid();
         var query = db.Accounts.AsNoTracking().Where(a => a.Status != AccountStatus.Deleted);
         if (request.StaffOnly) query = query.Where(a => a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Verificator);
+        else query = query.Where(a => a.Role == AccountRole.Student || a.Role == AccountRole.Partner);
         if (request.Role.HasValue) query = query.Where(a => a.Role == request.Role);
         if (request.Status.HasValue) query = query.Where(a => a.Status == request.Status);
         if (!string.IsNullOrWhiteSpace(request.Search)) {
@@ -52,7 +53,7 @@ public sealed class AdminUsersService(UniNetDbContext db)
     public async Task<AdminUserStats> StatsAsync(Guid actor, CancellationToken ct)
     {
         await NotificationPermissionPolicy.RequireAsync(db, actor, NotificationPermissionPolicy.UsersView, ct);
-        var query = db.Accounts.Where(a => a.Status != AccountStatus.Deleted);
+        var query = db.Accounts.Where(a => a.Status != AccountStatus.Deleted && (a.Role == AccountRole.Student || a.Role == AccountRole.Partner));
         return new(await query.CountAsync(ct), await query.CountAsync(a => a.Status == AccountStatus.Active, ct), await query.CountAsync(a => a.Status == AccountStatus.Suspended, ct), await query.CountAsync(a => a.Profile != null && a.Profile.IsVerified, ct));
     }
 
