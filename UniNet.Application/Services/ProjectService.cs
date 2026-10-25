@@ -436,6 +436,9 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var filterStatus = recruitmentStatus ?? RecruitmentStatus.Open;
         query = query.Where(p => p.RecruitmentStatus == filterStatus);
 
+        var now = DateTimeOffset.UtcNow;
+        query = query.Where(p => p.RecruitmentDeadline > now);
+
         // Filter: keyword (search in title and description)
         if (!string.IsNullOrWhiteSpace(keyword))
         {
