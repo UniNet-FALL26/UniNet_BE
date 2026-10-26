@@ -40,9 +40,11 @@ public class UpdatePostRequest
 {
     public string? Description { get; set; }
 
-    // Nếu Client gửi danh sách mới, ta sẽ xóa ảnh cũ và thêm ảnh mới. 
-    // Nếu để null, hệ thống hiểu là giữ nguyên ảnh cũ.
-    public List<string>? MediaUrls { get; set; }
+    // Danh sách URL ảnh/video cũ mà người dùng GIỮ LẠI
+    public List<string>? KeepMediaUrls { get; set; } = new();
+
+    // Danh sách FILE MỚI tải lên từ thiết bị
+    public List<IFormFile>? NewFiles { get; set; } = new();
 }
 
 public class UpdateCommentRequest

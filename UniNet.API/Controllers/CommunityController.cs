@@ -129,12 +129,13 @@ public class CommunityController : ControllerBase
     }
 
     [HttpPut("posts/{id}")]
-    public async Task<IActionResult> UpdatePost(Guid id, [FromBody] UpdatePostRequest request)
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> UpdatePost(Guid id, [FromForm] UpdatePostRequest request, CancellationToken ct)
     {
         try
         {
-            await _communityService.UpdatePostAsync(id, GetCurrentUserId(), request);
-            return Ok(new { message = "Post updated successfully" });
+            await _communityService.UpdatePostAsync(id, GetCurrentUserId(), request, ct);
+            return Ok(new { message = "Post updated successfully." });
         }
         catch (CommunityException ex)
         {
