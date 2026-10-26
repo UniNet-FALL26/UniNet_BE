@@ -18,7 +18,7 @@ public interface ICommunityService
     Task<CommentResponse> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request);
 
     Task ReportPostAsync(Guid postId, Guid currentUserId, CreateReportRequest request);
-    Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request);
+    Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request, CancellationToken ct = default);
     Task DeletePostAsync(Guid postId, Guid currentUserId);
     Task UpdateCommentAsync(Guid commentId, Guid currentUserId, UpdateCommentRequest request);
     Task DeleteCommentAsync(Guid commentId, Guid currentUserId);

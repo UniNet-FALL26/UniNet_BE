@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Application.Common;
 using UniNet.Application.DTOs.Community;
@@ -371,15 +372,15 @@ public class CommunityService : ICommunityService
         await _context.SaveChangesAsync();
     }
 
-    public async Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request)
+    public async Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request, CancellationToken ct = default)
     {
-        var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId);
+        var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId, ct);
         if (userProfile == null)
             throw new CommunityException("USER_NOT_FOUND", "User profile not found.", 404);
 
         var post = await _context.CommunityPosts
             .Include(p => p.Media)
-            .FirstOrDefaultAsync(p => p.Id == postId && !p.IsDeleted);
+            .FirstOrDefaultAsync(p => p.Id == postId && !p.IsDeleted, ct);
 
         if (post == null)
             throw new CommunityException("POST_NOT_FOUND", "Post not found.", 404);
@@ -387,33 +388,116 @@ public class CommunityService : ICommunityService
         if (post.AuthorUserId != userProfile.Id)
             throw new CommunityException("FORBIDDEN_ACTION", "You do not have permission to update this post.", 403);
 
-        post.Description = request.Description;
+        var keepUrls = request.KeepMediaUrls ?? new List<string>();
+        var newFiles = request.NewFiles ?? new List<IFormFile>();
+
+        // Validate: Bài viết sau khi cập nhật không được rỗng cả text lẫn media
+        bool willHaveDescription = !string.IsNullOrWhiteSpace(request.Description);
+        bool willHaveMedia = keepUrls.Count > 0 || newFiles.Count > 0;
+
+        if (!willHaveDescription && !willHaveMedia)
+            throw new CommunityException("INVALID_POST", "Bài viết phải có mô tả hoặc ít nhất 1 hình ảnh/video.", 400);
+
+        // 1. Cập nhật thông tin chữ
+        post.Description = request.Description?.Trim();
         post.UpdatedAt = DateTimeOffset.UtcNow;
 
-        if (request.MediaUrls != null)
-        {
-            _context.CommunityPostMedia.RemoveRange(post.Media);
+        // 2. Lọc danh sách media bị xóa (những media đang có trong DB nhưng KHÔNG nằm trong KeepMediaUrls)
+        var mediaToRemove = post.Media.Where(m => !keepUrls.Contains(m.FileUrl)).ToList();
 
-            if (request.MediaUrls.Any())
+        foreach (var media in mediaToRemove)
+        {
+            // Trích xuất publicId từ Cloudinary URL để xóa file trên Cloudinary (nếu cần)
+            // Ví dụ URL: https://res.cloudinary.com/cloud/image/upload/v12345/community/posts/postId/mediaId.jpg
+            var publicId = ExtractPublicIdFromUrl(media.FileUrl);
+            if (!string.IsNullOrEmpty(publicId))
             {
-                int order = 0;
-                var newMediaList = request.MediaUrls.Select(url => new CommunityPostMedia
+                try
+                {
+                    await _imageStorage.Destroy(publicId, ct);
+                }
+                catch
+                {
+                    // Log cảnh báo nếu cần, không chặn tiến trình update DB
+                }
+            }
+
+            _context.CommunityPostMedia.Remove(media);
+        }
+
+        // 3. Xử lý Upload các file MỚI gửi lên
+        if (newFiles.Count > 0)
+        {
+            int currentMaxOrder = post.Media.Except(mediaToRemove).Select(m => m.DisplayOrder).DefaultIfEmpty(-1).Max();
+
+            foreach (var file in newFiles)
+            {
+                if (file.Length == 0) continue;
+
+                var extension = Path.GetExtension(file.FileName).ToLowerInvariant().TrimStart('.');
+                if (extension is not ("png" or "jpg" or "jpeg" or "webp" or "mp4" or "webm" or "mov"))
+                {
+                    throw new CommunityException("INVALID_FILE_FORMAT", $"Định dạng .{extension} không được hỗ trợ.", 400);
+                }
+
+                var isVideo = extension is "mp4" or "webm" or "mov";
+                var resourceType = isVideo ? "video" : "image";
+                var format = (extension == "jpeg") ? "jpg" : extension;
+
+                using var memoryStream = new MemoryStream();
+                await file.CopyToAsync(memoryStream, ct);
+
+                var publicId = $"community/posts/{post.Id}/{Guid.NewGuid():N}";
+                var uploadResult = await _imageStorage.Upload(
+                    new ImageUploadRequest(memoryStream.ToArray(), publicId, format, resourceType),
+                    ct
+                );
+
+                _context.CommunityPostMedia.Add(new CommunityPostMedia
                 {
                     Id = Guid.NewGuid(),
                     PostId = post.Id,
-                    FileUrl = url,
-                    MediaType = (short)MediaType.Image,
-                    DisplayOrder = order++,
+                    MediaType = (short)(isVideo ? 1 : 0),
+                    FileUrl = uploadResult.ImageUrl,
+                    DisplayOrder = ++currentMaxOrder,
                     CreatedAt = DateTimeOffset.UtcNow
-                }).ToList();
-
-                _context.CommunityPostMedia.AddRange(newMediaList);
+                });
             }
         }
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(ct);
     }
 
+    // Hàm phụ trợ tách PublicId từ Cloudinary URL
+    private static string? ExtractPublicIdFromUrl(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            var path = uri.AbsolutePath; // /cloudName/image/upload/v123456/folder/file.jpg
+            var parts = path.Split(new[] { "/upload/" }, StringSplitOptions.None);
+            if (parts.Length < 2) return null;
+
+            var relativePath = parts[1]; // v123456/folder/file.jpg
+            var firstSlashIndex = relativePath.IndexOf('/');
+            if (firstSlashIndex >= 0)
+            {
+                relativePath = relativePath[(firstSlashIndex + 1)..]; // folder/file.jpg
+            }
+
+            var lastDotIndex = relativePath.LastIndexOf('.');
+            if (lastDotIndex > 0)
+            {
+                relativePath = relativePath[..lastDotIndex]; // folder/file
+            }
+
+            return relativePath;
+        }
+        catch
+        {
+            return null;
+        }
+    }
     public async Task DeletePostAsync(Guid postId, Guid currentUserId)
     {
         var userProfile = await _context.UserProfiles.FirstOrDefaultAsync(u => u.AccountId == currentUserId);
