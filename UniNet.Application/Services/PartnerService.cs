@@ -118,15 +118,19 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
     public async Task<PartnerJobResponse> UpdateJobAsync(Guid accountId, Guid jobId, SavePartnerJobRequest request, CancellationToken ct)
     {
         var profile = await GetPartnerProfileAsync(accountId, ct);
-        ValidateJob(request);
         if (request.Status == PartnerJobStatus.Published) await EnsurePartnerVerifiedAsync(profile, ct);
         var job = await OwnedJobs(profile.Id).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId, ct)
             ?? throw new PartnerException("JOB_NOT_FOUND", "Job post was not found.", 404);
+        var now = DateTimeOffset.UtcNow;
         var startTimeChanged = job.StartAt?.ToUnixTimeSeconds() / 60 != request.StartAt?.ToUnixTimeSeconds() / 60;
-        if (job.Status == (short)PartnerJobStatus.Published &&
-            (job.StartAt is null || job.StartAt <= DateTimeOffset.UtcNow.AddMinutes(5)) && startTimeChanged)
+        var existingStartTimeLocked = job.Status == (short)PartnerJobStatus.Published &&
+            (job.StartAt is null || job.StartAt <= now.AddMinutes(5));
+        if (existingStartTimeLocked && startTimeChanged)
             throw new PartnerException("JOB_START_TIME_LOCKED", "Thời gian bắt đầu đã được khóa vì bài đăng còn không quá 5 phút để bắt đầu nhận hồ sơ.", 409);
+        var keepStartedStartTime = job.Status == (short)PartnerJobStatus.Published &&
+            job.StartAt.HasValue && job.StartAt <= now.AddMinutes(5) && !startTimeChanged;
+        ValidateJob(request, allowLockedStartAt: keepStartedStartTime);
         var skills = await LoadSkillsAsync(request.Skills, request.Status == PartnerJobStatus.Published, ct);
         var requestedSkills = skills.ToDictionary(x => x.skill.Id);
         foreach (var existing in job.JobSkills.ToList())
@@ -374,7 +378,7 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
     private static IReadOnlyList<string> CleanLines(IReadOnlyList<string>? values) =>
         (values ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal).ToList();
 
-    private static void ValidateJob(SavePartnerJobRequest request)
+    private static void ValidateJob(SavePartnerJobRequest request, bool allowLockedStartAt = false)
     {
         var now = DateTimeOffset.UtcNow;
         ValidateRequired(request.Title, 255, "Title");
@@ -387,9 +391,9 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
             "INVALID_DEADLINE", "A published job must have a future deadline.");
         Require(request.StartAt is null || request.StartAt < request.Deadline,
             "INVALID_DATE_RANGE", "Start date must be before the application deadline.");
-        Require(request.StartAt is null || request.StartAt >= now.AddMinutes(5),
+        Require(request.StartAt is null || request.StartAt >= now.AddMinutes(5) || allowLockedStartAt,
             "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải cách hiện tại ít nhất 5 phút.");
-        Require(request.StartAt is null || request.StartAt.Value.Minute % 15 == 0,
+        Require(request.StartAt is null || request.StartAt.Value.Minute % 15 == 0 || allowLockedStartAt,
             "INVALID_START_AT", "Thời gian bắt đầu nhận hồ sơ phải theo mốc 15 phút.");
         Require(request.MinSalaryVnd is null or >= 1_000_000m && request.MaxSalaryVnd is null or >= 1_000_000m,
             "INVALID_SALARY", "Each provided salary must be at least 1,000,000 VND.");

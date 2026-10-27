@@ -15,9 +15,15 @@ public static class AuthMapping
     public static AccountResponse ToResponse(Account account)
     {
         var p = account.Profile;
+        ProfileResponse? profile = null;
+        if (p is not null)
+        {
+            var websites = PartnerWebsiteLinks.ParseStored(p.Website);
+            profile = new(p.Id, p.FullName, p.Nickname, p.OrganizationName, p.AvatarUrl, p.CoverUrl, p.Bio,
+                p.UniversityName, p.Major, p.StudentCode, p.PartnerType, p.Industry, websites.FirstOrDefault(),
+                p.ContactEmail, p.Phone, p.Address, p.IsVerified) { Websites = websites };
+        }
         return new(account.Id, account.Email, account.Role, account.Status, account.EmailVerified,
-            p is null ? null : new(p.Id, p.FullName, p.Nickname, p.OrganizationName, p.AvatarUrl, p.CoverUrl, p.Bio,
-                p.UniversityName, p.Major, p.StudentCode, p.PartnerType, p.Industry, p.Website,
-                p.ContactEmail, p.Phone, p.Address, p.IsVerified), ProfileComplete(account)) { CreatedAt = account.CreatedAt };
+            profile, ProfileComplete(account)) { CreatedAt = account.CreatedAt };
     }
 }

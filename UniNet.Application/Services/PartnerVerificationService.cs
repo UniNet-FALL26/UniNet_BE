@@ -132,7 +132,8 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
                 taxCode = Clean(taxCode),
                 representativeName = Clean(representativeName),
                 industry = profile.Industry,
-                website = profile.Website,
+                website = PartnerWebsiteLinks.ParseStored(profile.Website).FirstOrDefault(),
+                websites = PartnerWebsiteLinks.ParseStored(profile.Website),
                 contactEmail = profile.ContactEmail,
                 phone = profile.Phone,
                 address = profile.Address
