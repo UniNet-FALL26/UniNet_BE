@@ -26,13 +26,6 @@ public sealed class ProfileService(UniNetDbContext db)
              !email.Contains('.')))
             throw new AuthException("INVALID_PROFILE", "Email liên hệ không đúng định dạng.");
 
-        var website = request.Website?.Trim();
-        if (!string.IsNullOrEmpty(website) &&
-            (!Uri.TryCreate(website, UriKind.Absolute, out var uri) ||
-             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
-             string.IsNullOrWhiteSpace(uri.Host)))
-            throw new AuthException("INVALID_PROFILE", "Website phải là URL http hoặc https hợp lệ.");
-
         var phone = request.Phone?.Trim();
         if (!string.IsNullOrEmpty(phone))
         {
@@ -81,15 +74,28 @@ public sealed class ProfileService(UniNetDbContext db)
         ValidateName(request.OrganizationName);
         if (request.PartnerType is not { } partnerType || !Enum.IsDefined(partnerType)) throw new AuthException("INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
         Max(request.Industry, 150, "Lĩnh vực"); Max(request.ContactEmail, 255, "Email liên hệ"); Max(request.Phone, 30, "Số điện thoại");
-        Max(request.Website, 2048, "Website"); Max(request.Address, 2000, "Địa chỉ");
+        var rawWebsites = PartnerWebsiteLinks.FromRequest(request.Websites, request.Website);
+        if (rawWebsites.Count > 10) throw new AuthException("INVALID_PROFILE", "Tối đa 10 liên kết website.");
+        var websites = new List<string>();
+        foreach (var rawWebsite in rawWebsites)
+        {
+            if (rawWebsite.Length > 2048) throw new AuthException("INVALID_PROFILE", "Mỗi liên kết website tối đa 2.048 ký tự.");
+            var normalizedWebsite = PartnerWebsiteLinks.NormalizeUrl(rawWebsite);
+            if (normalizedWebsite is null) throw new AuthException("INVALID_PROFILE", "Website phải là URL http hoặc https hợp lệ.");
+            if (!websites.Contains(normalizedWebsite, StringComparer.OrdinalIgnoreCase)) websites.Add(normalizedWebsite);
+        }
+        var storedWebsite = PartnerWebsiteLinks.Serialize(websites);
+        Max(request.Address, 2000, "Địa chỉ");
         ValidatePartnerContact(request);
         var account = await Load(accountId, AccountRole.Partner, ct);
         var p = account.Profile!;
         await PortraitAssetPolicy.RetainReference(db, accountId, request.AvatarUrl, p.AvatarUrl, ct);
         await PortraitAssetPolicy.RetainReference(db, accountId, request.CoverUrl, p.CoverUrl, ct);
         var organizationName = request.OrganizationName.Trim();
+        var existingWebsites = PartnerWebsiteLinks.ParseStored(p.Website).Select(PartnerWebsiteLinks.NormalizeUrl).Where(x => x is not null).Select(x => x!).ToArray();
+        var websitesChanged = !existingWebsites.SequenceEqual(websites, StringComparer.OrdinalIgnoreCase);
         var changed = p.FullName != organizationName || p.OrganizationName != organizationName || p.PartnerType != request.PartnerType ||
-            p.Industry != Optional(request.Industry) || p.Website != Optional(request.Website) || p.ContactEmail != Optional(request.ContactEmail) ||
+            p.Industry != Optional(request.Industry) || websitesChanged || p.ContactEmail != Optional(request.ContactEmail) ||
             p.Phone != Optional(request.Phone) || p.Address != Optional(request.Address);
         if (changed)
         {
@@ -107,7 +113,7 @@ public sealed class ProfileService(UniNetDbContext db)
         }
         p.FullName = organizationName; p.Nickname = organizationName[..Math.Min(organizationName.Length, 100)]; p.OrganizationName = organizationName;
         p.AvatarUrl = Optional(request.AvatarUrl); p.CoverUrl = Optional(request.CoverUrl); p.Bio = Optional(request.Bio);
-        p.PartnerType = request.PartnerType; p.Industry = Optional(request.Industry); p.Website = Optional(request.Website);
+        p.PartnerType = request.PartnerType; p.Industry = Optional(request.Industry); p.Website = storedWebsite;
         p.ContactEmail = Optional(request.ContactEmail); p.Phone = Optional(request.Phone); p.Address = Optional(request.Address);
         p.UniversityName = null; p.Major = null; p.StudentCode = null;
         p.UpdatedAt = DateTimeOffset.UtcNow;

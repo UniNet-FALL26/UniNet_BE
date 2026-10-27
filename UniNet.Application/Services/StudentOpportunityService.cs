@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using UniNet.Application;
 using UniNet.Application.Common;
 using UniNet.Application.DTOs.Partner;
 using UniNet.Application.Interfaces;
@@ -75,6 +76,28 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         return ToResponse(job, saved, application, applicantCount);
     }
 
+    public async Task<PublicPartnerProfileResponse> GetPartnerProfileAsync(Guid accountId, Guid jobId, CancellationToken ct)
+    {
+        var student = await GetStudentAsync(accountId, ct);
+        var now = DateTimeOffset.UtcNow;
+        var job = await db.Jobs.AsNoTracking().Include(x => x.Partner)
+            .FirstOrDefaultAsync(x => x.Id == jobId &&
+                ((x.Status == (short)PartnerJobStatus.Published && (x.StartAt == null || x.StartAt <= now) && (x.Deadline == null || x.Deadline > now)) ||
+                 db.JobApplications.Any(app => app.StudentUserId == student.Id && app.JobId == x.Id)), ct)
+            ?? throw new PartnerException("JOB_NOT_FOUND", "Không tìm thấy cơ hội đang tuyển.", 404);
+        var partner = job.Partner;
+        var openJobs = await db.Jobs.AsNoTracking()
+            .Where(x => x.PartnerId == partner.Id && x.Status == (short)PartnerJobStatus.Published &&
+                (x.StartAt == null || x.StartAt <= now) && (x.Deadline == null || x.Deadline > now))
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new PublicPartnerJobResponse(x.Id, x.Title, (JobWorkType)x.WorkType,
+                x.MinSalaryVnd, x.MaxSalaryVnd, x.Location, x.Deadline))
+            .ToListAsync(ct);
+        return new PublicPartnerProfileResponse(partner.Id, partner.OrganizationName ?? partner.FullName,
+            partner.PartnerType, partner.AvatarUrl, partner.CoverUrl, partner.IsVerified, partner.Industry,
+            partner.Bio, partner.Address, partner.ContactEmail, partner.Phone,
+            PartnerWebsiteLinks.ParseStored(partner.Website), openJobs);
+    }
     public async Task<IReadOnlyList<StudentSubmittedApplicationResponse>> GetOwnApplicationsAsync(Guid accountId, Guid jobId, CancellationToken ct)
     {
         var student = await GetStudentAsync(accountId, ct);
@@ -160,6 +183,7 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         try { if (!string.IsNullOrWhiteSpace(job.BenefitsJson)) benefits = JsonSerializer.Deserialize<JobBenefitInput[]>(job.BenefitsJson, JsonOptions) ?? []; }
         catch (JsonException) { }
         var profile = job.Partner;
+        var websites = PartnerWebsiteLinks.ParseStored(profile.Website);
         return new(job.Id, job.Title, (JobWorkType)job.WorkType, job.MinSalaryVnd, job.MaxSalaryVnd,
             job.Location, job.Description, job.StartAt, job.Deadline, Lines("responsibilities"),
             Lines("requiredQualifications"), Lines("preferredQualifications"), Lines("projectAreas"),
@@ -168,7 +192,8 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
                     (JobSkillRequirementType)x.RequirementType)).ToList(), benefits,
             profile.OrganizationName ?? profile.FullName, profile.AvatarUrl, profile.Industry, profile.IsVerified,
             applicantCount, saved, application is not null, application?.Status, application?.AppliedAt, job.CreatedAt,
-            profile.Bio, profile.Address, profile.Website, profile.ContactEmail, profile.Phone);
+            profile.Bio, profile.Address, websites.FirstOrDefault(), profile.ContactEmail, profile.Phone,
+            websites, profile.PartnerType);
     }
 
     private static UniNet.Application.PortfolioResponse? ReadSubmittedPortfolio(string? snapshot)

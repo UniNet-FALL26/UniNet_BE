@@ -11,10 +11,11 @@ public record LoginRequest(string Email, string Password, bool RememberMe = fals
 public record GoogleLoginRequest(string IdToken, AccountRole Role = AccountRole.Student, PartnerType? PartnerType = null);
 public record RefreshRequest(string RefreshToken);
 public record StudentProfileRequest(string FullName, string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, string? StudentCode, string? Nickname = null);
-public record PartnerProfileRequest(string OrganizationName, PartnerType? PartnerType, string? AvatarUrl, string? CoverUrl, string? Bio, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address);
+public record PartnerProfileRequest(string OrganizationName, PartnerType? PartnerType, string? AvatarUrl, string? CoverUrl, string? Bio, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address, IReadOnlyList<string>? Websites = null);
 public record ProfileResponse(Guid Id, string FullName, string Nickname, string? OrganizationName, string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, string? StudentCode, PartnerType? PartnerType, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address, bool IsVerified)
 {
     public string DisplayName => Nickname;
+    public IReadOnlyList<string> Websites { get; init; } = Array.Empty<string>();
 }
 public record AccountResponse(Guid Id, string Email, AccountRole Role, AccountStatus Status, bool EmailVerified, ProfileResponse? Profile, bool ProfileComplete)
 {

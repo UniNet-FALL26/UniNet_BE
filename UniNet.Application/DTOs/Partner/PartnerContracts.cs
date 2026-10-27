@@ -1,3 +1,4 @@
+using UniNet.Domain;
 using UniNet.Domain.Enums;
 
 namespace UniNet.Application.DTOs.Partner;
@@ -18,7 +19,7 @@ public sealed record PartnerDashboardResponse(
     IReadOnlyList<PartnerJobResponse> OpenJobs);
 
 public sealed record JobSkillInput(Guid? SkillId, JobSkillRequirementType RequirementType, string? Name = null);
-public sealed record JobBenefitInput(string Title, string Description);
+public sealed record JobBenefitInput(string Title, string Description, string? Icon = null);
 
 public sealed record SavePartnerJobRequest(
     string Title,
@@ -103,7 +104,9 @@ public sealed record OpportunityJobResponse(
     string? CompanyAddress,
     string? CompanyWebsite,
     string? CompanyContactEmail,
-    string? CompanyPhone);
+    string? CompanyPhone,
+    IReadOnlyList<string>? CompanyWebsites = null,
+    PartnerType? CompanyPartnerType = null);
 
 public sealed record OpportunityJobsResponse(
     int Page,
@@ -111,6 +114,30 @@ public sealed record OpportunityJobsResponse(
     int TotalItems,
     int TotalPages,
     IReadOnlyList<OpportunityJobResponse> Jobs);
+
+public sealed record PublicPartnerJobResponse(
+    Guid Id,
+    string Title,
+    JobWorkType WorkType,
+    decimal? MinSalaryVnd,
+    decimal? MaxSalaryVnd,
+    string? Location,
+    DateTimeOffset? Deadline);
+
+public sealed record PublicPartnerProfileResponse(
+    Guid Id,
+    string OrganizationName,
+    PartnerType? PartnerType,
+    string? AvatarUrl,
+    string? CoverUrl,
+    bool IsVerified,
+    string? Industry,
+    string? Bio,
+    string? Address,
+    string? ContactEmail,
+    string? Phone,
+    IReadOnlyList<string> Websites,
+    IReadOnlyList<PublicPartnerJobResponse> OpenJobs);
 
 public sealed record StudentSubmittedApplicationResponse(
     Guid Id,
