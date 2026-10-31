@@ -1,4 +1,5 @@
 using System.Data;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using UniNet.Application.Interfaces;
@@ -9,8 +10,59 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class AdminProjectVerificationService(UniNetDbContext db) : IAdminProjectVerificationService
+public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfiguration? configuration = null) : IAdminProjectVerificationService
 {
+    public Task<ProjectVerificationResponse> RecoverPaidBookingAsync(Guid id, Guid accountId,
+        RecoverPaidBookingRequest request, CancellationToken ct = default) => MutateAsync(async () =>
+    {
+        await AuthorizeAsync(accountId, ct);
+        ValidateReason(request.Reason);
+        var verification = await db.ProjectVerifications.Include(v => v.Project)
+            .SingleOrDefaultAsync(v => v.Id == id, ct)
+            ?? throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
+        var now = DateTimeOffset.UtcNow;
+        if (verification.Status != ProjectVerificationStatus.Pending || verification.FinalizedAt != null ||
+            verification.MeetingStartAt != null || verification.MeetingEndAt != null ||
+            verification.ScheduledStartAt <= now || verification.ScheduledStartAt == null ||
+            verification.ScheduledEndAt <= verification.ScheduledStartAt || verification.ScheduledEndAt == null ||
+            verification.ReservationId == null ||
+            verification.BookingStatus is not (VerificationBookingStatus.Expired or VerificationBookingStatus.Held))
+            throw Error("BOOKING_RECOVERY_NOT_ALLOWED", "Only an unfinalized paid hold with a future meeting can be recovered.", 409);
+        if (await db.VerificationAssignments.AnyAsync(a => a.ProjectVerificationId == id, ct) ||
+            await db.VerificationReports.AnyAsync(r => r.ProjectVerificationId == id, ct))
+            throw Error("BOOKING_RECOVERY_NOT_ALLOWED", "A case with assignments or reports cannot be recovered.", 409);
+        var payment = await db.Transactions.Include(t => t.VerificationTransaction).Include(t => t.RefundTransactions)
+            .SingleOrDefaultAsync(t => t.Id == request.TransactionId && t.VerificationTransaction != null &&
+                t.VerificationTransaction.VerificationId == id, ct)
+            ?? throw Error("PAYMENT_NOT_FOUND", "Payment does not belong to this verification.", 404);
+        if (payment.Status != PaymentStatus.Success || payment.PackageId != verification.PackageId ||
+            payment.UserId != verification.RequestByUserId ||
+            payment.VerificationTransaction!.ReservationId != verification.ReservationId ||
+            payment.FailureReason is not (TransactionMapping.LatePaymentReview or TransactionMapping.BookingPaymentReview) ||
+            payment.RefundTransactions.Any(r => r.Status is PaymentStatus.Pending or PaymentStatus.Success) ||
+            await db.Transactions.AnyAsync(t => t.Id != payment.Id && t.VerificationTransaction != null &&
+                t.VerificationTransaction.VerificationId == id &&
+                (t.Status == PaymentStatus.Pending || t.Status == PaymentStatus.Success), ct))
+            throw Error("PAYMENT_NOT_RECOVERABLE", "Recovery requires one successful matching payment under booking review and no pending or completed refund.", 409);
+        var settings = configuration ?? new ConfigurationBuilder().Build();
+        await new VerificationEligibility(db, settings).RequireCaseAsync(verification, ct);
+        if (!await new ProjectVerificationService(db, settings).HasConfirmationCapacityAsync(verification, ct))
+            throw Error("BOOKING_CAPACITY_UNAVAILABLE", "The original meeting no longer has available capacity.", 409);
+        verification.BookingStatus = VerificationBookingStatus.Confirmed;
+        verification.BookingConfirmedAt = now;
+        verification.AssignmentEligibleAt = now;
+        verification.UpdatedAt = now;
+        payment.FailureReason = null;
+        payment.UpdatedAt = now;
+        var recipient = await db.UserProfiles.Where(p => p.Id == verification.Project.CreatorId)
+            .Select(p => p.AccountId).SingleAsync(ct);
+        await NotificationService.EnqueueAsync(db, [recipient],
+            new("verification.booking.recovered", "Verification", "Lịch xác minh đã được xác nhận",
+                $"Admin đã xác nhận lại lịch từ giao dịch {payment.Id}. Lý do: {request.Reason.Trim()}",
+                "ProjectVerification", id, EventKey: $"paid-booking-recovery:{id}:{payment.Id}", SenderUserId: accountId), ct);
+        return ProjectVerificationMapping.ToResponse(verification);
+    }, ct);
+
     private async Task<Guid> AuthorizeAsync(Guid accountId, CancellationToken ct)
     {
         var actor = await db.UserProfiles.AsNoTracking().Include(p => p.Account)
