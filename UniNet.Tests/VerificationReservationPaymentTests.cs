@@ -8,6 +8,49 @@ namespace UniNet.Tests;
 
 public sealed partial class TransactionTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task AdminRecoveryChecksPaymentAndCapacity(bool refundPending, bool noCapacity)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var checkout = await f.CheckoutAsync();
+        f.Verification.ReservedUntil = DateTimeOffset.UtcNow.AddSeconds(-1);
+        await f.Db.SaveChangesAsync();
+        await new VerificationReservationTasks(f.Db).ExpireAsync(DateTimeOffset.UtcNow);
+        f.Provider.WebhookResult = FakeProvider.Result(checkout.ProviderOrderCode!, 37000, PaymentStatus.Success);
+        await f.Service.HandlePayOSWebhookAsync(default);
+        f.Other.Role = UniNet.Domain.AccountRole.Admin;
+        if (noCapacity) f.Db.VerificatorAvailabilities.RemoveRange(await f.Db.VerificatorAvailabilities.ToListAsync());
+        if (refundPending)
+            f.Db.RefundTransactions.Add(new UniNet.Domain.Entities.RefundTransaction
+            {
+                TransactionId = checkout.Id, Amount = 37000, Status = PaymentStatus.Pending,
+                Reason = "Refund requested", PaymentProvider = "PayOS"
+            });
+        await f.Db.SaveChangesAsync();
+        var admin = new AdminProjectVerificationService(f.Db, f.Configuration);
+        var request = new RecoverPaidBookingRequest(checkout.Id, "Verified delayed reconciliation; retain original slot");
+        if (refundPending || noCapacity)
+        {
+            var error = await Assert.ThrowsAsync<ProjectVerificationException>(() =>
+                admin.RecoverPaidBookingAsync(f.Verification.Id, f.Other.Id, request));
+            Assert.Equal(refundPending ? "PAYMENT_NOT_RECOVERABLE" : "BOOKING_CAPACITY_UNAVAILABLE", error.Code);
+            return;
+        }
+        var recovered = await admin.RecoverPaidBookingAsync(f.Verification.Id, f.Other.Id, request);
+        Assert.Equal(VerificationBookingStatus.Confirmed, recovered.BookingStatus);
+        Assert.NotNull(recovered.BookingConfirmedAt);
+        var payment = await f.Service.GetAsync(f.Verification.Id, checkout.Id, f.Owner.Id);
+        Assert.Equal(PaymentStatus.Success, payment.Status);
+        Assert.False(payment.RequiresReview);
+        Assert.Null(payment.DiagnosticCode);
+        var repeated = await Assert.ThrowsAsync<ProjectVerificationException>(() =>
+            admin.RecoverPaidBookingAsync(f.Verification.Id, f.Other.Id, request));
+        Assert.Equal("BOOKING_RECOVERY_NOT_ALLOWED", repeated.Code);
+    }
+
     [Fact]
     public async Task CheckoutRequiresLiveHoldAndUsesItsExactDeadline()
     {

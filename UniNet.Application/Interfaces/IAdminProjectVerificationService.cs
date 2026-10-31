@@ -4,6 +4,7 @@ namespace UniNet.Application.Interfaces;
 
 public interface IAdminProjectVerificationService
 {
+    Task<ProjectVerificationResponse> RecoverPaidBookingAsync(Guid id, Guid accountId, RecoverPaidBookingRequest request, CancellationToken ct = default);
     Task<ProjectVerificationsResponse> ListAsync(Guid accountId, ProjectVerificationStatus? status = null,
         DateTimeOffset? from = null, DateTimeOffset? to = null, int page = 1, int pageSize = 10,
         bool pendingAssignment = false, bool overdue = false, CancellationToken ct = default);

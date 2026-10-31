@@ -19,6 +19,11 @@ public sealed class AdminProjectVerificationController(IAdminProjectVerification
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
         => service.ListAsync(AccountId, status, from, to, page, pageSize, ct: ct);
 
+    [HttpPost("{verificationId:guid}/recover-paid-booking")]
+    public Task<ProjectVerificationResponse> RecoverPaidBooking(Guid verificationId,
+        RecoverPaidBookingRequest request, CancellationToken ct)
+        => service.RecoverPaidBookingAsync(verificationId, AccountId, request, ct);
+
     [HttpGet("pending-assignment")]
     public Task<ProjectVerificationsResponse> PendingAssignment([FromQuery] int page = 1,
         [FromQuery] int pageSize = 10, CancellationToken ct = default)
