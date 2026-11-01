@@ -29,7 +29,11 @@ public sealed record PartnerVerificationStatusResponse(
     Guid? Id,
     VerificationStatus? Status,
     string? RejectReason,
-    DateTimeOffset? SubmittedAt);
+    DateTimeOffset? SubmittedAt,
+    DateTimeOffset? ReviewedAt = null,
+    string? OrganizationName = null,
+    string? TaxCode = null,
+    string? RepresentativeName = null);
 
 public sealed record PartnerVerificationQueueItem(
     Guid Id,

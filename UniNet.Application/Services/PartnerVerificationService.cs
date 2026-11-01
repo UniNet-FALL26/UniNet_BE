@@ -19,7 +19,7 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
         var latest = await LatestPartnerVerification(profile.Id).AsNoTracking().FirstOrDefaultAsync(ct);
         return latest is null
             ? new(null, null, null, null)
-            : new(latest.Id, latest.Status, latest.RejectReason, latest.SubmittedAt);
+            : ToStatus(latest);
     }
 
     public async Task<PartnerVerificationStatusResponse> SubmitAsync(Guid accountId, SubmitPartnerVerificationRequest request, CancellationToken ct)
@@ -153,7 +153,7 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
                 RequiredPermission: NotificationPermissionPolicy.PartnerVerificationReview, SenderUserId: accountId), ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return new(verification.Id, verification.Status, null, verification.SubmittedAt);
+        return ToStatus(verification);
     }
 
     public async Task<PartnerVerificationFileContent> GetDocumentAsync(Guid adminAccountId, Guid verificationId, int documentIndex, CancellationToken ct)
@@ -293,6 +293,31 @@ public sealed class PartnerVerificationService(UniNetDbContext db)
         if (page < 1) throw new AuthException("INVALID_PAGE", "Page phải lớn hơn hoặc bằng 1.");
         if (pageSize is < 1 or > 100) throw new AuthException("INVALID_PAGE_SIZE", "Page size phải từ 1 đến 100.");
     }
+
+    private static PartnerVerificationStatusResponse ToStatus(UserVerification x)
+    {
+        string? organizationName = null, taxCode = null, representativeName = null;
+        if (!string.IsNullOrWhiteSpace(x.VerificationData))
+        {
+            try
+            {
+                using var json = JsonDocument.Parse(x.VerificationData);
+                var root = json.RootElement;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    organizationName = SnapshotString(root, "organizationName");
+                    taxCode = SnapshotString(root, "taxCode");
+                    representativeName = SnapshotString(root, "representativeName");
+                }
+            }
+            catch (JsonException) { /* Legacy snapshots may be unreadable; retain their status and review date. */ }
+        }
+        return new(x.Id, x.Status, x.RejectReason, x.SubmittedAt, x.ReviewedAt,
+            organizationName, taxCode, representativeName);
+    }
+
+    private static string? SnapshotString(JsonElement root, string name)
+        => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? Clean(value.GetString()) : null;
 
     private static PartnerVerificationQueueItem ToQueueItem(UserVerification x)
         => new(x.Id, x.UserId, x.User.Account.Email, x.User.OrganizationName ?? x.User.FullName, x.User.PartnerType, x.Status, x.SubmittedAt);
