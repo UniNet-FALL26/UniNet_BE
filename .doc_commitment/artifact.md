@@ -1,3 +1,0 @@
-Reference: D:\SWP490_R2_BM04_Review2_Commitment_1.docx
-SHA256: fc8293411f8f79beaace0149f248a11e7ad8d05c756acffe76e161b02e055d20
-Narrow form fill. Preserve all package parts except word/document.xml. Preserve page geometry, typography, table grids and signature/reviewer areas. Extend mandatory/NFR/fix tables and clone WF05 as WF06. Editable slots: project metadata, commitments, workflow blocks, individual blocks and summaries. Reviewer approvals, student IDs, actual Review2 date and final registration approval remain unconfirmed. Source BM01 ownership conflict D2 explicitly flagged. 64 proposed tests / 46 CI; not execution evidence. Native renderer unavailable; Word PDF fallback for visual QA.
