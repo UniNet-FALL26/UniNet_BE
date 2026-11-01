@@ -58,7 +58,8 @@ public sealed partial class VerificationReservationPostgresTests
             await using var db = store.Open(barrier);
             try
             {
-                await new ReportService(db).SubmitAsync(actorId, new(assignment, "Final report", "Reviewed findings", "Recommendations", ProjectVerificationStatus.Verified));
+                await new ReportService(db).SubmitAsync(actorId, new(assignment, "Final report", "Reviewed findings", "Recommendations", ProjectVerificationStatus.Verified,
+                    AssessmentTestData.Complete()));
                 return true;
             }
             catch (ReportException ex) when (ex.Code is "REPORT_CONFLICT" or "REPORT_EXISTS" or "VERIFICATION_LOCKED") { return false; }

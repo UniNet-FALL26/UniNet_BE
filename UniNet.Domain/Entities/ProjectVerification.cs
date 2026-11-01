@@ -11,6 +11,8 @@ namespace UniNet.Domain.Entities
     {
         public Guid Id { get; set; }
         public Guid ProjectId { get; set; }
+        // Immutable rubric snapshot for this case. Null only on historical cases.
+        public string? AssessmentRubricJson { get; set; }
         // Nullable only for legacy cases. New cases pin a passed level-1 decision.
         public Guid? EvidenceModerationId { get; set; }
         public ProjectModeration? EvidenceModeration { get; set; }

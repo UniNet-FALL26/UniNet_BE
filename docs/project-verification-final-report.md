@@ -1,5 +1,10 @@
 # Đợt D + E — Report một lần, bỏ Admin review, audit refund
 
+> Cập nhật 01/11/2026: cách nhập outcome trực tiếp đã được thay bằng chấm theo
+> tiêu chí, snapshot phiên bản và kết quả InsufficientEvidence. Xem hợp đồng
+> hiện hành tại [project-assessment-api.md](frontend-integration/project-assessment-api.md).
+> Các quy tắc một báo cáo, bất biến và không cần Admin duyệt vẫn giữ nguyên.
+
 Ngày: 18/10/2026. Giữ nguyên tên các bảng lịch sử, ngừng sử dụng trong luồng vận hành mới theo lựa chọn người dùng.
 
 ## Report và phân công

@@ -13,6 +13,8 @@ namespace UniNet.Domain.Entities
         public Guid? ProjectVerificationId { get; set; }
         // Frozen original row before legacy revision consolidation; never exposed as a version API.
         public string? LegacyOriginalJson { get; set; }
+        // Frozen rubric, criterion scores, mandatory checks and computed outcome.
+        public string? AssessmentJson { get; set; }
         public VerificationAssignment VerificationAssignment { get; set; } = null!;
         public string Summary { get; set; } = null!;
         public string? Findings { get; set; }

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using UniNet.Application.Interfaces;
@@ -32,13 +33,19 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
             "MEETING_NOT_COMPLETED", "The meeting must end before submitting a report.", 409);
         Require(!await db.VerificationReports.AnyAsync(r => r.VerificationAssignment.ProjectVerificationId == verification.Id, ct),
             "REPORT_EXISTS", "This case already has its final report.", 409);
-        Validate(request.Summary, request.Findings, request.Recommendations, request.Outcome);
+        Validate(request.Summary, request.Findings, request.Recommendations);
+        var rubric = ProjectAssessmentPolicy.ReadRubric(verification.AssessmentRubricJson)
+            ?? throw new ReportException("RUBRIC_NOT_ASSIGNED", "This case needs a rubric assigned by migration before assessment.", 409);
+        var assessment = ProjectAssessmentPolicy.Evaluate(rubric, request.Assessment);
+        Require(!request.Outcome.HasValue || request.Outcome == assessment.Outcome,
+            "REPORT_OUTCOME_MISMATCH", "Outcome is calculated by the server from scores and mandatory conditions.");
         var now = DateTimeOffset.UtcNow;
         var report = new VerificationReport
         {
             Id = Guid.NewGuid(), AssignmentId = assignment.Id, ProjectVerificationId = verification.Id, VerificationAssignment = assignment,
             Summary = request.Summary.Trim(), Findings = request.Findings.Trim(),
-            Recommendations = request.Recommendations.Trim(), Outcome = request.Outcome,
+            Recommendations = request.Recommendations.Trim(), Outcome = assessment.Outcome,
+            AssessmentJson = JsonSerializer.Serialize(assessment),
             SubmittedByUserId = actor.Id, SubmittetAt = now, CreatedAt = now, UpdatedAt = now
         };
         db.VerificationReports.Add(report);
@@ -46,11 +53,16 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
         assignment.Status = VerificationAssignmentStatus.Completed;
         assignment.CompletedAt = now;
         assignment.UpdatedAt = now;
-        Finalize(verification, request.Outcome!.Value, actor.Id, now);
+        Finalize(verification, assessment.Outcome, actor.Id, now);
         var ownerAccountId = await db.Projects.Where(p => p.Id == verification.ProjectId).Select(p => p.Creator.AccountId).SingleAsync(ct);
         await NotificationService.EnqueueAsync(db, [ownerAccountId],
             new("verification.project.finalized", "Verification", "Có kết quả xác minh dự án",
-                request.Outcome == ProjectVerificationStatus.Verified ? "Dự án của bạn đã được xác minh thành công." : "Dự án của bạn chưa đạt xác minh. Mở hồ sơ để xem kết quả.",
+                assessment.Outcome switch
+                {
+                    ProjectVerificationStatus.Verified => "Dự án của bạn đã đạt thẩm định.",
+                    ProjectVerificationStatus.InsufficientEvidence => "Dự án của bạn chưa đủ cơ sở đánh giá. Mở hồ sơ để xem minh chứng còn thiếu.",
+                    _ => "Dự án của bạn chưa đạt thẩm định. Mở hồ sơ để xem kết quả."
+                },
                 "ProjectVerification", verification.Id, EventKey: $"project-verification:{verification.Id}:finalized", SenderUserId: accountId), ct);
         return ReportMapping.ToResponse(report);
     }, ct);
@@ -95,7 +107,7 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
         (actor.Account.Role is AccountRole.Student or AccountRole.Partner) && a.ProjectVerification.Project.CreatorId == actor.Id,
         "FORBIDDEN", "You cannot access this report.", 403);
 
-    private static void Validate(string summary, string findings, string recommendations, ProjectVerificationStatus? outcome)
+    private static void Validate(string summary, string findings, string recommendations)
     {
         Require(!string.IsNullOrWhiteSpace(summary) && summary.Trim().Length <= 10000,
             "INVALID_SUMMARY", "Summary must contain 1 to 10000 characters.");
@@ -103,8 +115,6 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
             "INVALID_FINDINGS", "Findings must contain 1 to 30000 characters.");
         Require(!string.IsNullOrWhiteSpace(recommendations) && recommendations.Trim().Length <= 10000,
             "INVALID_RECOMMENDATIONS", "Recommendations must contain 1 to 10000 characters.");
-        Require(outcome is ProjectVerificationStatus.Verified or ProjectVerificationStatus.Failed,
-            "INVALID_REPORT_OUTCOME", "Outcome must be Verified or Failed.");
     }
 
     private static void Finalize(ProjectVerification verification, ProjectVerificationStatus outcome, Guid actorId, DateTimeOffset now)
