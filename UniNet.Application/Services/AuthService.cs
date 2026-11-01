@@ -111,8 +111,8 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
             throw new AuthException("FORBIDDEN", "Only an active Admin can create staff accounts.", 403);
         await NotificationPermissionPolicy.RequireAsync(db, adminAccountId, NotificationPermissionPolicy.StaffManage, ct);
 
-        Require(request.Role is AccountRole.Moderator or AccountRole.Verificator,
-            "INVALID_ROLE", "Only Moderator or Verificator accounts can be created.");
+        Require(request.Role is AccountRole.Moderator or AccountRole.Assessor or AccountRole.Verifier or AccountRole.Accountant,
+            "INVALID_ROLE", "Only operational staff roles can be created.");
         var email = Email(request.Email);
         ValidateCredentials(email, request.Password, request.ConfirmPassword, request.FullName);
         var fullName = request.FullName.Trim();

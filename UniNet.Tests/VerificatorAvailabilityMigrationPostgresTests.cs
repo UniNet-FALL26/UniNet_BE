@@ -40,7 +40,7 @@ public sealed class VerificatorAvailabilityMigrationPostgresTests
                     Profile = new() { FullName = name, Nickname = name }
                 };
                 var owner = User("Owner", AccountRole.Student);
-                var staff = User("Staff", AccountRole.Verificator);
+                var staff = User("Staff", AccountRole.Assessor);
                 var admin = User("Admin", AccountRole.Admin);
                 db.Accounts.AddRange(owner, staff, admin);
                 var project = new Project { Creator = owner.Profile!, Title = "Completed", Description = "Done",

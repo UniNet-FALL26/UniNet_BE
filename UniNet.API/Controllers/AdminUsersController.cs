@@ -5,7 +5,7 @@ using UniNet.Application.Services;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Admin,Moderator,Verificator"), Route("api/admin/users"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+[ApiController, Authorize(Roles = "Admin,Moderator,Assessor,Verifier,Accountant"), Route("api/admin/users"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AdminUsersController(AdminUsersService users) : ControllerBase
 {
     private Guid Actor => Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)!.Value);
@@ -16,7 +16,7 @@ public sealed class AdminUsersController(AdminUsersService users) : ControllerBa
     [HttpPost("{id:guid}/unlock")] public Task<AdminUserItem> Unlock(Guid id, ChangeAccountStatusRequest request, CancellationToken ct) => users.ChangeStatusAsync(Actor, id, false, request.Reason, ct);
 }
 
-[ApiController, Authorize(Roles = "Admin,Moderator,Verificator"), Route("api/admin/management"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+[ApiController, Authorize(Roles = "Admin,Moderator,Assessor,Verifier,Accountant"), Route("api/admin/management"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AdminManagementController(AdminPermissionService permissions) : ControllerBase
 {
     [HttpGet] public Task<AdminCapabilities> Capabilities(CancellationToken ct) => permissions.CapabilitiesAsync(Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)!.Value), ct);

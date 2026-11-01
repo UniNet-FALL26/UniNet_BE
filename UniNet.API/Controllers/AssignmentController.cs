@@ -18,12 +18,12 @@ public sealed class AssignmentController(IAssignmentService assignments) : Contr
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
         => assignments.GetAllAssignmentsAsync(AccountId, status, page, pageSize, ct);
 
-    [HttpGet("me"), Authorize(Roles = "Verificator")]
+    [HttpGet("me"), Authorize(Roles = "Assessor")]
     public Task<AssignmentsResponse> GetMyAssignments([FromQuery] VerificationAssignmentStatus? status = null,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
         => assignments.GetMyAssignmentsAsync(AccountId, status, page, pageSize, ct);
 
-    [HttpGet("{id:guid}"), Authorize(Roles = "Admin,Verificator")]
+    [HttpGet("{id:guid}"), Authorize(Roles = "Admin,Assessor")]
     public Task<AssignmentDetailResponse> GetAssignment(Guid id, CancellationToken ct)
         => assignments.GetDetailAsync(id, AccountId, ct);
 

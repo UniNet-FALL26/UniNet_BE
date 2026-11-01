@@ -16,10 +16,11 @@ public sealed class AdminUsersService(UniNetDbContext db)
     public async Task<AdminPage<AdminUserItem>> ListAsync(Guid actor, AdminUserQuery request, CancellationToken ct)
     {
         await NotificationPermissionPolicy.RequireAsync(db, actor, NotificationPermissionPolicy.UsersView, ct);
+        if (request.StaffOnly) await NotificationPermissionPolicy.RequireAsync(db, actor, NotificationPermissionPolicy.StaffManage, ct);
         ValidatePage(request.Page, request.PageSize);
         if (request.Search?.Length > 255 || request.Role.HasValue && !Enum.IsDefined(request.Role.Value) || request.Status.HasValue && !Enum.IsDefined(request.Status.Value)) throw Invalid();
         var query = db.Accounts.AsNoTracking().Where(a => a.Status != AccountStatus.Deleted);
-        if (request.StaffOnly) query = query.Where(a => a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Verificator);
+        if (request.StaffOnly) query = query.Where(a => a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Assessor || a.Role == AccountRole.Verifier || a.Role == AccountRole.Accountant);
         else query = query.Where(a => a.Role == AccountRole.Student || a.Role == AccountRole.Partner);
         if (request.Role.HasValue) query = query.Where(a => a.Role == request.Role);
         if (request.Status.HasValue) query = query.Where(a => a.Status == request.Status);
@@ -61,6 +62,7 @@ public sealed class AdminUsersService(UniNetDbContext db)
     {
         await NotificationPermissionPolicy.RequireAsync(db, actor, NotificationPermissionPolicy.UsersDetail, ct);
         var account = await db.Accounts.AsNoTracking().Include(a => a.Profile).SingleOrDefaultAsync(a => a.Id == id && a.Status != AccountStatus.Deleted, ct) ?? throw Missing();
+        if (account.Role is not (AccountRole.Student or AccountRole.Partner)) await NotificationPermissionPolicy.RequireAsync(db, actor, NotificationPermissionPolicy.StaffManage, ct);
         var history = await db.UserVerifications.AsNoTracking().Where(v => v.User.AccountId == id).OrderByDescending(v => v.SubmittedAt).ThenByDescending(v => v.Id)
             .Select(v => new AdminVerificationHistory(v.Id, v.VerificationType, v.Status, v.SubmittedAt, v.ReviewedAt, v.RejectReason, v.ReviewedBy, v.Reviewer == null || v.Reviewer.Profile == null ? null : v.Reviewer.Profile.FullName)).ToListAsync(ct);
         var changes = await db.Set<AccountStatusChange>().AsNoTracking().Where(c => c.AccountId == id).OrderByDescending(c => c.CreatedAt)

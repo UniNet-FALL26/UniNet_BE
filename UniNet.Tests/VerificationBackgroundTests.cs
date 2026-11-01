@@ -178,7 +178,7 @@ public sealed partial class ProjectVerificationTests
     private static async Task<VerificationAssignment> PrepareOverdueAsync(Fixture f, Guid id, DateTimeOffset meetingEnd)
     {
         f.Other.Role = AccountRole.Admin;
-        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         var v = await f.Db.ProjectVerifications.SingleAsync(v => v.Id == id);
         v.MeetingStartAt = meetingEnd.AddHours(-1); v.MeetingEndAt = meetingEnd;
         var a = new VerificationAssignment { Id = Guid.NewGuid(), ProjectVerificationId = id, AssignedToUserId = staff.Id,
@@ -196,15 +196,16 @@ public sealed partial class ProjectVerificationTests
         await f.PayAsync(id, f.Owner);
         var now = DateTimeOffset.UtcNow;
         var original = await PrepareOverdueAsync(f, id, now.AddHours(-48));
-        f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Verificator));
+        f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Assessor));
         await f.Db.SaveChangesAsync();
+        var noticeCount = await f.Db.Set<VerificationNotification>().CountAsync();
         var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
         await tasks.MarkOverdueAndEscalateAsync(now.AddTicks(-1), default);
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         await tasks.MarkOverdueAndEscalateAsync(now, default);
         await tasks.MarkOverdueAndEscalateAsync(now, default);
         Assert.Equal(VerificationAssignmentStatus.Overdue, (await f.Db.VerificationAssignments.AsNoTracking().SingleAsync()).Status);
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         await tasks.MarkOverdueAndEscalateAsync(now.AddHours(24), default);
         await tasks.MarkOverdueAndEscalateAsync(now.AddHours(24), default);
         var assignments = await f.Db.VerificationAssignments.AsNoTracking().ToListAsync();
@@ -223,12 +224,13 @@ public sealed partial class ProjectVerificationTests
         var id = (await f.CreateVerificationAsync()).Verification.Id;
         var now = DateTimeOffset.UtcNow;
         var a = await PrepareOverdueAsync(f, id, now.AddHours(-48));
+        var noticeCount = await f.Db.Set<VerificationNotification>().CountAsync();
         var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
         await tasks.MarkOverdueOrReplaceAsync(a.Id, now, default);
         await tasks.MarkOverdueOrReplaceAsync(a.Id, now.AddHours(24), default);
         await tasks.MarkOverdueOrReplaceAsync(a.Id, now.AddHours(25), default);
         Assert.Single(await f.Db.VerificationAssignments.ToListAsync());
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         Assert.NotNull((await f.Db.VerificationAssignments.SingleAsync()).EscalatedAt);
     }
 
@@ -241,10 +243,11 @@ public sealed partial class ProjectVerificationTests
         var a = await PrepareOverdueAsync(f, id, now.AddDays(-5));
         f.Db.VerificationReports.Add(new() { Id = Guid.NewGuid(), AssignmentId = a.Id, ProjectVerificationId = id, Summary = "Completed report" });
         await f.Db.SaveChangesAsync();
+        var noticeCount = await f.Db.Set<VerificationNotification>().CountAsync();
         var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
         await tasks.MarkOverdueAndEscalateAsync(now, default);
         await tasks.RefundTimeoutsAsync(now, default);
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
     }
 
@@ -258,6 +261,23 @@ public sealed partial class ProjectVerificationTests
         { CreateCalls++; RequestKey = request.RequestKey; throw new OperationCanceledException(); }
         public Task<ProviderRefundResult> LookupAsync(ProviderRefundRequest request, CancellationToken ct)
         { LookupCalls++; Assert.Equal(RequestKey, request.RequestKey); return Task.FromResult(new ProviderRefundResult(request.RequestKey, request.Amount, PaymentStatus.Success, "refund-confirmed")); }
+    }
+
+    [Fact]
+    public async Task FinanceApprovalBlocksBothWorkerSelectionAndDirectDispatch()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var id = (await f.CreateVerificationAsync()).Verification.Id;
+        await f.PayAsync(id, f.Owner);
+        var payment = await f.Db.Transactions.SingleAsync();
+        var refund = new RefundTransaction { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = 100, Status = PaymentStatus.Pending,
+            Approval = RefundApproval.Pending, PaymentProvider = "Test", Reason = "Review first", CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow };
+        f.Db.Add(refund); await f.Db.SaveChangesAsync();
+        var probe = new RefundProbe(); var tasks = new VerificationRefundTasks(f.Db, probe);
+        await tasks.RunAsync(DateTimeOffset.UtcNow, default);
+        await tasks.ProcessAsync(refund.Id, DateTimeOffset.UtcNow, default);
+        Assert.Equal(0, probe.CreateCalls); Assert.Equal(0, probe.LookupCalls);
+        Assert.Null((await f.Db.RefundTransactions.SingleAsync()).DispatchStartedAt);
     }
 
     [Fact]
@@ -296,9 +316,10 @@ public sealed partial class ProjectVerificationTests
         await f.Db.SaveChangesAsync();
         await new VerificationDeadlineTasks(f.Db, f.Configuration).RefundTimeoutAsync(id, now, default);
         var tasks = new VerificationRefundTasks(f.Db, new ManualRefundProvider());
+        var noticeCount = await f.Db.Set<VerificationNotification>().CountAsync();
         await tasks.RunAsync(now, default); await tasks.RunAsync(now.AddHours(2), default);
         Assert.Equal(PaymentStatus.Pending, (await f.Db.RefundTransactions.AsNoTracking().SingleAsync()).Status);
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         Assert.Equal("MANUAL_REFUND_REQUIRED", (await f.Db.RefundTransactions.SingleAsync()).FailureReason);
     }
 

@@ -126,6 +126,11 @@ public sealed class ProjectTaskTests
 
             Assert.Equal(1, result.TotalTasks);
             Assert.Contains(result.Tasks, x => x.Id == created.Id && x.AssignedUsers.Any(a => a.UserId == scenario.MemberProfile.Id));
+            var notice = await db.Set<VerificationNotification>().SingleAsync(n => n.RecipientUserId == scenario.MemberAccount.Id);
+            Assert.Equal(created.Id, notice.TargetId);
+            Assert.Equal("Task", notice.TargetType);
+            await tasks.AssignUsersAsync(scenario.Project.Id, created.Id, scenario.LeaderAccount.Id, [scenario.MemberProfile.Id], default);
+            Assert.Equal(1, await db.Set<VerificationNotification>().CountAsync(n => n.RecipientUserId == scenario.MemberAccount.Id));
         }
     }
 

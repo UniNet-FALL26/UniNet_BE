@@ -10,7 +10,7 @@ namespace UniNet.Tests;
 
 public class GeminiPortraitTests
 {
-    private const string Contour = "{\"boxes\":[{\"mask\":[[250,0],[750,0],[750,1000],[250,1000]]}]}";
+    private const string Contour = "{\"assessment\":\"clear\",\"boxes\":[{\"mask\":[[250,0],[750,0],[750,1000],[250,1000]]}]}";
     private static byte[] Source()
     {
         using var image = new SKBitmap(new SKImageInfo(8, 8, SKColorType.Rgba8888, SKAlphaType.Unpremul));
@@ -39,6 +39,39 @@ public class GeminiPortraitTests
     private static GeminiPortraitProcessor Processor(Handler handler, string? key = "fixture-key") => new(new HttpClient(handler),
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?> { ["Gemini:ApiKey"] = key }).Build());
 
+    [Theory]
+    [InlineData("heavily_occluded")]
+    [InlineData("cluttered")]
+    [InlineData("no_clear_person")]
+    public async Task UnsuitablePortraitIsRejectedEvenWhenTheModelProvidesAValidContour(string assessment)
+    {
+        var error = await Assert.ThrowsAsync<AuthException>(() => Processor(new(Contour.Replace("clear", assessment))).Process(Source(), default));
+        Assert.Equal(422, error.Status);
+        Assert.Contains("chọn ảnh", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MissingSuitabilityAssessmentDoesNotReturnAPartialPortrait()
+    {
+        var error = await Assert.ThrowsAsync<AuthException>(() => Processor(new(Contour.Replace("\"assessment\":\"clear\",", ""))).Process(Source(), default));
+        Assert.Equal(422, error.Status);
+    }
+
+    private sealed class UnexpectedLocal : IPortraitProcessor
+    {
+        public int Calls;
+        public Task<byte[]> Process(byte[] source, CancellationToken ct) { Calls++; throw new Exception("Quality rejection must not fall back."); }
+    }
+
+    [Fact]
+    public async Task OccludedPortraitNeverFallsBackToAnUncheckedLocalCutout()
+    {
+        var local = new UnexpectedLocal();
+        var pipeline = new FallbackPortraitProcessor(Processor(new(Contour.Replace("clear", "heavily_occluded"))), local, true);
+        var error = await Assert.ThrowsAsync<AuthException>(() => pipeline.Process(Source(), default));
+        Assert.Equal("PORTRAIT_TOO_OCCLUDED", error.Code); Assert.Equal(0, local.Calls);
+    }
+
     [Fact] public async Task UsesSupportedThinkingLevelForGemini38Flash()
     {
         var handler = new Handler { InspectRequest = body => {
@@ -63,9 +96,9 @@ public class GeminiPortraitTests
         }
     }
     [Theory]
-    [InlineData("{\"boxes\":[]}")]
-    [InlineData("{\"boxes\":[{\"mask\":[[0,0],[1000,0],[1000,1000],[0,1000]]}]}")]
-    [InlineData("{\"boxes\":[{\"mask\":[[-1,0],[500,0],[500,500]]}]}")]
+    [InlineData("{\"assessment\":\"clear\",\"boxes\":[]}")]
+    [InlineData("{\"assessment\":\"clear\",\"boxes\":[{\"mask\":[[0,0],[1000,0],[1000,1000],[0,1000]]}]}")]
+    [InlineData("{\"assessment\":\"clear\",\"boxes\":[{\"mask\":[[-1,0],[500,0],[500,500]]}]}")]
     [InlineData("not JSON")]
     public async Task RejectsInvalidOrOpaqueContour(string contour)
         => Assert.Equal(502, (await Assert.ThrowsAsync<AuthException>(() => Processor(new(contour)).Process(Source(), default))).Status);

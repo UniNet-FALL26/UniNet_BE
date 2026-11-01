@@ -41,7 +41,7 @@ public sealed partial class VerificationReservationPostgresTests
         Guid actorId, firstId, secondId;
         await using (var seed = store.Open())
         {
-            var staff = await seed.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+            var staff = await seed.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Assessor);
             var admin = new Account { Email = "admin@test.com", Role = AccountRole.Admin, Profile = new() { FullName = "Admin", Nickname = "Admin" } };
             seed.Accounts.Add(admin); await seed.SaveChangesAsync();
             VerificationAssignment Assignment() => new() { Id = Guid.NewGuid(), ProjectVerificationId = store.First,

@@ -64,7 +64,7 @@ public sealed class MeetingService(UniNetDbContext db, IConfiguration configurat
         var assignment = await db.VerificationAssignments.Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
             .Include(a => a.ReplacedBy).FirstOrDefaultAsync(a => a.Id == assignmentId, ct)
             ?? throw new MeetingException("ASSIGNMENT_NOT_FOUND", "Assignment not found.", 404);
-        var assigned = user.Account.Role == AccountRole.Verificator && assignment.AssignedToUserId == user.Id;
+        var assigned = user.Account.Role == AccountRole.Assessor && assignment.AssignedToUserId == user.Id;
         var leader = !verificatorOnly && (assignment.ProjectVerification.Project.CreatorId == user.Id ||
             await db.ProjectMembers.AnyAsync(m =>
             m.ProjectId == assignment.ProjectVerification.ProjectId && m.UserId == user.Id &&

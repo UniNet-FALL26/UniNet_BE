@@ -72,7 +72,6 @@ public sealed partial class ProjectVerificationTests
 
     [Theory]
     [InlineData("attempt")]
-    [InlineData("notification")]
     [InlineData("case")]
     public async Task DatabaseRejectsEvidenceReferencesToSubmission(string target)
     {
@@ -86,12 +85,26 @@ public sealed partial class ProjectVerificationTests
             await f.CreateVerificationAsync();
             (await f.Db.ProjectVerifications.SingleAsync()).EvidenceModerationId = submission.Id;
         }
-        else if (target == "attempt")
-            f.Db.EvidenceModerationAttempts.Add(new() { ModerationId = submission.Id, Number = 1, StartedAt = DateTimeOffset.UtcNow });
         else
-            f.Db.Add(new VerificationNotification { Id = Guid.NewGuid(), RecipientUserId = f.Owner.Profile!.Id,
-                EvidenceModerationId = submission.Id, EventKey = "test", Message = "test", CreatedAt = DateTimeOffset.UtcNow });
+            f.Db.EvidenceModerationAttempts.Add(new() { ModerationId = submission.Id, Number = 1, StartedAt = DateTimeOffset.UtcNow });
         await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task NotificationsStoreAccountRecipientAndPolymorphicTargetWithoutBusinessForeignKeys()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var target = Guid.NewGuid();
+        await NotificationService.EnqueueAsync(f.Db, [f.Owner.Id],
+            new("verification.evidence.updated", "Verification", "Cập nhật minh chứng", "Có cập nhật minh chứng.",
+                "EvidenceModeration", target, EventKey: "polymorphic-test"));
+        await f.Db.SaveChangesAsync();
+        var notice = await f.Db.Set<VerificationNotification>().SingleAsync();
+        Assert.Equal(f.Owner.Id, notice.RecipientUserId);
+        Assert.Equal(target, notice.TargetId);
+        Assert.Equal("EvidenceModeration", notice.TargetType);
+        Assert.DoesNotContain(f.Db.Model.FindEntityType(typeof(VerificationNotification))!.GetForeignKeys(),
+            fk => fk.Properties.Any(p => p.Name == nameof(VerificationNotification.TargetId)));
     }
 
     [Theory]

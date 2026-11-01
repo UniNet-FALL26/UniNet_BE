@@ -11,7 +11,7 @@ public sealed class AdminPermissionService(UniNetDbContext db)
 {
     public async Task<AdminCapabilities> CapabilitiesAsync(Guid actor, CancellationToken ct)
     {
-        if (!await db.Accounts.AnyAsync(a => a.Id == actor && a.Status == AccountStatus.Active && (a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Verificator), ct))
+        if (!await db.Accounts.AnyAsync(a => a.Id == actor && a.Status == AccountStatus.Active && (a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Assessor || a.Role == AccountRole.Verifier || a.Role == AccountRole.Accountant), ct))
             throw new AuthException("FORBIDDEN", "Tài khoản không có quyền quản trị.", 403);
         var permissions = await NotificationPermissionPolicy.EffectiveAsync(db, actor, ct);
         Task<int> Pending(VerificationType type) => db.UserVerifications.CountAsync(v => v.VerificationType == type && v.Status == VerificationStatus.Pending, ct);
@@ -22,7 +22,7 @@ public sealed class AdminPermissionService(UniNetDbContext db)
     public async Task<List<AdminPermissionEntry>> GetAsync(Guid actor, Guid target, CancellationToken ct)
     {
         await RequireManager(actor, ct);
-        if (!await db.Accounts.AnyAsync(a => a.Id == target && (a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Verificator), ct)) throw new AuthException("INVALID_STAFF", "Không tìm thấy nhân viên.", 404);
+        if (!await db.Accounts.AnyAsync(a => a.Id == target && (a.Role == AccountRole.Admin || a.Role == AccountRole.Moderator || a.Role == AccountRole.Assessor || a.Role == AccountRole.Verifier || a.Role == AccountRole.Accountant), ct)) throw new AuthException("INVALID_STAFF", "Không tìm thấy nhân viên.", 404);
         var overrides = await db.Set<NotificationPermissionOverride>().Where(p => p.AccountId == target).ToDictionaryAsync(p => p.Permission, p => p.IsGranted, ct);
         var result = new List<AdminPermissionEntry>();
         var effective = await NotificationPermissionPolicy.EffectiveAsync(db, target, ct);
@@ -37,8 +37,11 @@ public sealed class AdminPermissionService(UniNetDbContext db)
         if (target == actor || !NotificationPermissionPolicy.All.Contains(permission)) throw new AuthException("INVALID_PERMISSION_CHANGE", "Không được thay đổi quyền bản thân hoặc quyền không tồn tại.", 403);
         if (granted && permission is NotificationPermissionPolicy.Manage or NotificationPermissionPolicy.StaffManage or NotificationPermissionPolicy.PermissionsManage)
             throw new AuthException("ADMIN_ONLY_PERMISSION", "Quyền này chỉ dành cho quản trị viên.", 403);
-        if (!await db.Accounts.AnyAsync(a => a.Id == target && (a.Role == AccountRole.Moderator || a.Role == AccountRole.Verificator), ct))
+        if (!await db.Accounts.AnyAsync(a => a.Id == target && (a.Role == AccountRole.Moderator || a.Role == AccountRole.Assessor || a.Role == AccountRole.Verifier || a.Role == AccountRole.Accountant), ct))
             throw new AuthException("PROTECTED_ACCOUNT", "Chỉ được cấu hình quyền của nhân viên, không thay đổi quyền quản trị viên.", 403);
+        var targetRole = await db.Accounts.Where(a => a.Id == target).Select(a => a.Role).SingleAsync(ct);
+        if (granted && !NotificationPermissionPolicy.Roles(permission).Contains(targetRole))
+            throw new AuthException("ROLE_SCOPE", "Permission is outside this staff role.", 403);
         var row = await db.Set<NotificationPermissionOverride>().FindAsync([target, permission], ct);
         if (row == null) db.Set<NotificationPermissionOverride>().Add(new() { AccountId = target, Permission = permission, IsGranted = granted });
         else row.IsGranted = granted;

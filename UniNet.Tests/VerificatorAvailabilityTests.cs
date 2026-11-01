@@ -12,7 +12,7 @@ public sealed partial class ProjectVerificationTests
 {
     private static async Task<Account> ClearCalendarAsync(Fixture f)
     {
-        var staff = await f.Db.Accounts.Include(a => a.Profile).SingleAsync(a => a.Role == AccountRole.Verificator);
+        var staff = await f.Db.Accounts.Include(a => a.Profile).SingleAsync(a => a.Role == AccountRole.Assessor);
         f.Db.VerificatorAvailabilities.RemoveRange(await f.Db.VerificatorAvailabilities.ToListAsync());
         await f.Db.SaveChangesAsync();
         return staff;
@@ -31,7 +31,7 @@ public sealed partial class ProjectVerificationTests
         Assert.Equal(TimeSpan.Zero, created.StartAt.Offset);
         Assert.Equal(slot.StartAt, created.StartAt);
         Assert.Equal(created.Id, Assert.Single(await service.ListAsync(staff.Id, slot.StartAt, slot.EndAt)).Id);
-        var otherStaff = Fixture.Account("OtherStaff", AccountRole.Verificator);
+        var otherStaff = Fixture.Account("OtherStaff", AccountRole.Assessor);
         f.Db.Accounts.Add(otherStaff);
         await f.Db.SaveChangesAsync();
         await Error("AVAILABILITY_NOT_FOUND", () => service.SaveAsync(otherStaff.Id, created.Id, new(slot.StartAt, slot.EndAt)));
@@ -120,7 +120,7 @@ public sealed partial class ProjectVerificationTests
         await f.Service.ScheduleMeetingAsync(first, f.Owner.Id, slot);
         Assert.Empty((await f.Service.GetAvailableMeetingSlotsAsync(second, f.Other.Id, slot.StartAt, slot.EndAt)).Slots);
         await Error("MEETING_SLOT_UNAVAILABLE", () => f.Service.ScheduleMeetingAsync(second, f.Other.Id, slot));
-        var another = Fixture.Account("Another", AccountRole.Verificator);
+        var another = Fixture.Account("Another", AccountRole.Assessor);
         f.Db.Accounts.Add(another);
         await f.Db.SaveChangesAsync();
         var available = await f.Service.GetAvailableMeetingSlotsAsync(second, f.Other.Id, slot.StartAt, slot.EndAt);
@@ -133,7 +133,7 @@ public sealed partial class ProjectVerificationTests
     public async Task ProjectMemberCannotSupplyBookingAvailability()
     {
         await using var f = await Fixture.CreateAsync(passed: false);
-        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         f.Db.ProjectMembers.Add(new() { Id = Guid.NewGuid(), ProjectId = f.Project.Id, UserId = staff.Id, Role = "Member" });
         await f.Db.SaveChangesAsync();
         await f.SeedPassedAsync(f.Project.Id);
@@ -161,7 +161,7 @@ public sealed partial class ProjectVerificationTests
         var window = await service.SaveAsync(staff.Id, null, new(slot.StartAt, slot.EndAt));
         var assigned = await assignments.CreateAsync(f.Other.Id, new(id, staff.Profile!.Id));
         await Error("AVAILABILITY_IN_USE", () => service.DeleteAsync(staff.Id, window.Id));
-        var next = Fixture.Account("Next", AccountRole.Verificator);
+        var next = Fixture.Account("Next", AccountRole.Assessor);
         next.Profile!.VerificatorAvailabilities.Clear();
         f.Db.Accounts.Add(next);
         await f.Db.SaveChangesAsync();

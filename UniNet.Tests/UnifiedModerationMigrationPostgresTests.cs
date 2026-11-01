@@ -16,6 +16,7 @@ public sealed class UnifiedModerationMigrationPostgresTests
     private const string Policy = "{\"unchanged\":\"policy\"}";
     private const string Results = "[{\"preserved\":true}]";
     private const string Before = "20261018041023_SingleVerificationReportAndRefundAudit";
+    private const string After = "20261024095804_AddWorkspaceChat";
 
     private sealed class Store : IAsyncDisposable
     {
@@ -99,7 +100,7 @@ VALUES ({Guid.NewGuid()},{seed.Project},{seed.User},{seed.Package},0,'2026-10-17
         var oldAttempts = await RowsAsync(db, "EvidenceModerationAttempts");
         var oldNotifications = await RowsAsync(db, "VerificationNotification");
         var oldCases = await RowsAsync(db, "ProjectVerifications");
-        await db.Database.MigrateAsync(); db.ChangeTracker.Clear();
+        await db.GetService<IMigrator>().MigrateAsync(After); db.ChangeTracker.Clear();
         var migrated = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectEvidence).OrderBy(m => m.Version).ToListAsync();
         Assert.Equal(new[] { ProjectModerationStatus.Pending, ProjectModerationStatus.Processing, ProjectModerationStatus.Passed,
             ProjectModerationStatus.Rejected, ProjectModerationStatus.NeedsEvidence, ProjectModerationStatus.Error }, migrated.Select(m => m.Status));
@@ -108,7 +109,8 @@ VALUES ({Guid.NewGuid()},{seed.Project},{seed.User},{seed.Package},0,'2026-10-17
         Assert.All(migrated.Take(5), m => Assert.NotNull(m.SupersededAt));
         Assert.Null(migrated.Last().SupersededAt);
         Assert.Equal(6, await db.EvidenceModerationAttempts.CountAsync());
-        Assert.Equal(6, await db.Set<VerificationNotification>().CountAsync());
+        // This test intentionally stops before the Notifications migration; use that historical table's schema.
+        Assert.Equal(6, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*)::integer AS \"Value\" FROM \"VerificationNotification\"").SingleAsync());
         Assert.Equal(ids[2], (await db.ProjectVerifications.Include(v => v.EvidenceModeration).SingleAsync()).EvidenceModeration!.Id);
         Assert.Equal(6, await db.ProjectModerations.CountAsync(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission));
         await db.GetService<IMigrator>().MigrateAsync(Before); db.ChangeTracker.Clear();
@@ -130,7 +132,7 @@ INSERT INTO "ProjectModerations" ("Id","ProjectId","Status","ContentResult","Lin
 VALUES ({id},{seed.Project},3,0,0,'original',1,0,now(),now());
 """);
         var before = await RowsAsync(db, "ProjectEvidenceModerations");
-        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(After));
         Assert.Contains("ID collision", error.MessageText);
         Assert.Equal(before, await RowsAsync(db, "ProjectEvidenceModerations"));
         Assert.DoesNotContain("20261019072056_UnifyProjectModerationPurposes", await db.Database.GetAppliedMigrationsAsync());
@@ -142,7 +144,7 @@ VALUES ({id},{seed.Project},3,0,0,'original',1,0,now(),now());
         await using var store = new Store(); await store.InitializeAsync();
         await using var db = store.Open();
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE extra_evidence_reference (id uuid REFERENCES \"ProjectEvidenceModerations\"(\"Id\"));");
-        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(After));
         Assert.Contains("Unexpected FK", error.MessageText);
         Assert.Equal("[]", await RowsAsync(db, "ProjectEvidenceModerations"));
     }

@@ -62,7 +62,7 @@ public sealed partial class ProjectVerificationTests
         await Error("LEVEL1_STALE", () => f.Service.ScheduleMeetingAsync(id, f.Owner.Id, slot));
         var checkout = new TransactionService(f.Db, new NoPayments(), f.Configuration, NullLogger<TransactionService>.Instance);
         await Error("LEVEL1_STALE", () => checkout.CreateAsync(id, f.Owner.Id));
-        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         await Error("LEVEL1_STALE", () => new AssignmentService(f.Db, f.Configuration).CreateAsync(f.Other.Id, new(id, staff.Id)));
         f.Db.ChangeTracker.Clear();
         var stored = await f.Db.ProjectVerifications.SingleAsync();
@@ -145,7 +145,7 @@ public sealed partial class ProjectVerificationTests
         verification.ScheduledStartAt = Fixture.Slot().StartAt;
         verification.ScheduledEndAt = Fixture.Slot().EndAt;
         await f.Db.SaveChangesAsync();
-        var staff = await f.Db.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var staff = await f.Db.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         var assignments = new AssignmentService(f.Db, f.Configuration);
         var error = await Assert.ThrowsAsync<AssignmentException>(() => assignments.CreateAsync(f.Other.Id, new(id, staff.Id)));
         Assert.Equal("BOOKING_NOT_CONFIRMED", error.Code);
@@ -181,7 +181,7 @@ public sealed partial class ProjectVerificationTests
         await f.PayAsync(id, f.Owner);
         var now = DateTimeOffset.UtcNow;
         await PrepareOverdueAsync(f, id, now.AddHours(-48));
-        f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Verificator));
+        f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Assessor));
         await f.Db.SaveChangesAsync();
         var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
         await tasks.MarkOverdueAndEscalateAsync(now, default);

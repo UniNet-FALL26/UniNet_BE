@@ -15,7 +15,7 @@ public sealed partial class ProjectVerificationTests
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync();
         var id = (await f.CreateVerificationAsync()).Verification.Id;
         await f.PayAsync(id, f.Owner);
-        var staff = await f.Db.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var staff = await f.Db.UserProfiles.Include(p => p.Account).SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         var assignment = await new AssignmentService(f.Db, f.Configuration).CreateAsync(f.Other.Id, new(id, staff.Id));
         var v = await f.Db.ProjectVerifications.SingleAsync();
         v.ScheduledStartAt = DateTimeOffset.UtcNow.AddHours(-3); v.ScheduledEndAt = DateTimeOffset.UtcNow.AddHours(-1);
@@ -56,7 +56,7 @@ public sealed partial class ProjectVerificationTests
         (await f.Db.ProjectVerifications.SingleAsync()).MeetingEndAt = null; await f.Db.SaveChangesAsync();
         var error = await Assert.ThrowsAsync<ReportException>(() => new ReportService(f.Db).SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment)));
         Assert.Equal("MEETING_NOT_COMPLETED", error.Code);
-        var stranger = Fixture.Account("Stranger", AccountRole.Verificator); f.Db.Accounts.Add(stranger); await f.Db.SaveChangesAsync();
+        var stranger = Fixture.Account("Stranger", AccountRole.Assessor); f.Db.Accounts.Add(stranger); await f.Db.SaveChangesAsync();
         error = await Assert.ThrowsAsync<ReportException>(() => new ReportService(f.Db).SubmitAsync(stranger.Id, FinalReport(data.Assignment)));
         Assert.Equal("ASSIGNMENT_NOT_FOUND", error.Code);
         Assert.Empty(await f.Db.ReportAuditLogs.ToListAsync());
@@ -66,7 +66,7 @@ public sealed partial class ProjectVerificationTests
     public async Task ReplacedStaffCannotSubmitButNewStaffCanFinishAfterMeeting()
     {
         await using var f = await Fixture.CreateAsync(); var data = await PrepareFinalReportAsync(f);
-        var next = Fixture.Account("NewStaff", AccountRole.Verificator); f.Db.Accounts.Add(next); await f.Db.SaveChangesAsync();
+        var next = Fixture.Account("NewStaff", AccountRole.Assessor); f.Db.Accounts.Add(next); await f.Db.SaveChangesAsync();
         var replacement = await new AssignmentService(f.Db, f.Configuration).ReplaceVerificatorAsync(data.Assignment, f.Other.Id,
             new(next.Profile!.Id, "Reassign before report"));
         var error = await Assert.ThrowsAsync<ReportException>(() => new ReportService(f.Db).SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment)));
@@ -111,7 +111,7 @@ public sealed partial class ProjectVerificationTests
     public async Task EvidenceWorkerPersistsFailureAndRetriesWithoutNotificationTable()
     {
         await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
-        await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE VerificationNotification");
+        await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE Notifications");
         var content = new ContentChecker { Error = new("Unavailable", true) }; var worker = EvidenceWorker(f, content, new());
         var now = DateTimeOffset.UtcNow;
         await worker.RunAsync(now, default); await worker.RunAsync(now.AddMinutes(2), default);
@@ -128,7 +128,7 @@ public sealed partial class ProjectVerificationTests
         await f.PayAsync(id, f.Owner);
         var now = DateTimeOffset.UtcNow;
         (await f.Db.ProjectVerifications.SingleAsync()).AssignmentEligibleAt = now.AddHours(-24);
-        await f.Db.SaveChangesAsync(); await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE VerificationNotification");
+        await f.Db.SaveChangesAsync(); await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE Notifications");
         await new VerificationDeadlineTasks(f.Db, f.Configuration).RefundTimeoutsAsync(now, default);
         var refund = await f.Db.RefundTransactions.SingleAsync();
         Assert.Equal(RefundRequestSource.System, refund.RequestSource); Assert.Null(refund.RequestedByUserId);
@@ -145,8 +145,8 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync(); var id = (await f.CreateVerificationAsync()).Verification.Id;
         await f.PayAsync(id, f.Owner); var now = DateTimeOffset.UtcNow;
         await PrepareOverdueAsync(f, id, now.AddHours(-48));
-        f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Verificator)); await f.Db.SaveChangesAsync();
-        await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE VerificationNotification");
+        f.Db.Accounts.Add(Fixture.Account("Replacement", AccountRole.Assessor)); await f.Db.SaveChangesAsync();
+        await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE Notifications");
         var tasks = new VerificationDeadlineTasks(f.Db, f.Configuration);
         await tasks.MarkOverdueAndEscalateAsync(now, default); await tasks.MarkOverdueAndEscalateAsync(now.AddHours(24), default);
         Assert.Equal(2, await f.Db.VerificationAssignments.CountAsync());

@@ -79,11 +79,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("Role")
                         .IsUnique()
                         .HasDatabaseName("IX_Accounts_SingleAdmin")
-                        .HasFilter("\"Role\" = 2");
+                        .HasFilter("\"Role\" = 6");
 
                     b.ToTable("Accounts", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 4");
+                            t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 6");
 
                             t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3");
                         });
@@ -1863,8 +1863,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<short>("Approval")
+                        .HasColumnType("smallint");
+
                     b.Property<DateTimeOffset>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConfirmedByAccountId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1874,6 +1880,14 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<string>("FailureReason")
                         .HasColumnType("text");
+
+                    b.Property<string>("ManualBankReference")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("ManualPayingAccount")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
 
                     b.Property<DateTimeOffset?>("NextReconciliationAt")
                         .HasColumnType("timestamp with time zone");
@@ -1894,6 +1908,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<Guid?>("RequestKey")
+                        .HasColumnType("uuid");
+
                     b.Property<short>("RequestSource")
                         .HasColumnType("smallint");
 
@@ -1901,6 +1918,16 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("RequestedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReviewReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByAccountId")
                         .HasColumnType("uuid");
 
                     b.Property<short>("Status")
@@ -1914,7 +1941,17 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ConfirmedByAccountId");
+
+                    b.HasIndex("RequestKey")
+                        .IsUnique();
+
                     b.HasIndex("RequestedByUserId");
+
+                    b.HasIndex("ReviewedByAccountId");
+
+                    b.HasIndex("ManualPayingAccount", "ManualBankReference")
+                        .IsUnique();
 
                     b.HasIndex("TransactionId", "Status");
 
@@ -2531,6 +2568,161 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("VerificatorAvailabilities", null, t =>
                         {
                             t.HasCheckConstraint("CK_VerificatorAvailabilities_Interval", "\"EndAt\" > \"StartAt\"");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WalletEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("SourceReference")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<Guid?>("WithdrawalId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorAccountId");
+
+                    b.HasIndex("WithdrawalId")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "SourceReference")
+                        .IsUnique();
+
+                    b.ToTable("WalletEntries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WalletEntries_Amount", "\"Amount\" <> 0 AND ((\"Amount\" > 0 AND \"WithdrawalId\" IS NULL) OR (\"Amount\" < 0 AND \"WithdrawalId\" IS NOT NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WalletWithdrawal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<string>("BankAccountHolder")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("BankAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("BankReference")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConfirmedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("OrderedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("OrderedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayingAccount")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RejectedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("RequestKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReviewReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("State")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfirmedBy");
+
+                    b.HasIndex("OrderedBy");
+
+                    b.HasIndex("RejectedBy");
+
+                    b.HasIndex("ReviewedBy");
+
+                    b.HasIndex("AccountId", "RequestKey")
+                        .IsUnique();
+
+                    b.HasIndex("PayingAccount", "BankReference")
+                        .IsUnique();
+
+                    b.HasIndex("State", "CreatedAt");
+
+                    b.ToTable("WalletWithdrawals", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WalletWithdrawals_Amount", "\"Amount\" > 0");
+
+                            t.HasCheckConstraint("CK_WalletWithdrawals_State", "\"State\" BETWEEN 0 AND 5");
                         });
                 });
 
@@ -3563,9 +3755,19 @@ namespace UniNet.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("UniNet.Domain.Entities.RefundTransaction", b =>
                 {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ConfirmedByAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UniNet.Domain.UserProfile", null)
                         .WithMany()
                         .HasForeignKey("RequestedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByAccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("UniNet.Domain.Entities.Transaction", "Transaction")
@@ -3834,6 +4036,55 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WalletEntry", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ActorAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.WalletWithdrawal", null)
+                        .WithMany()
+                        .HasForeignKey("WithdrawalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.WalletWithdrawal", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ConfirmedBy")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OrderedBy")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("RejectedBy")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedBy")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.WorkspaceChannel", b =>

@@ -15,6 +15,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        if (ChangeTracker.Entries<WalletEntry>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Wallet ledger entries are immutable.");
+
         if (ChangeTracker.Entries<AccountStatusChange>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Account status history cannot be changed or deleted.");
         foreach (var entry in ChangeTracker.Entries<VerificationNotification>().Where(e => e.State == EntityState.Added).ToList())
@@ -131,6 +134,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     protected override void OnModelCreating(ModelBuilder model)
     {
         AdminManagementConfiguration.Configure(model);
+        FinanceConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         NotificationConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
@@ -145,10 +149,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         });
         model.Entity<Account>(e =>
         {
-            e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 4"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);
+            e.ToTable("Accounts", t => { t.HasCheckConstraint("CK_Accounts_Role", "\"Role\" BETWEEN 0 AND 6"); t.HasCheckConstraint("CK_Accounts_Status", "\"Status\" BETWEEN 0 AND 3"); }); e.HasKey(x => x.Id);
             e.Property(x => x.Email).HasMaxLength(255).IsRequired(); e.HasIndex(x => x.Email).IsUnique();
             e.HasIndex(x => x.Role).HasDatabaseName("IX_Accounts_SingleAdmin")
-                .IsUnique().HasFilter("\"Role\" = 2");
+                .IsUnique().HasFilter("\"Role\" = 6");
             e.Property(x => x.PasswordHash).HasColumnType("text");
             e.Property(x => x.GoogleId).HasMaxLength(255); e.HasIndex(x => x.GoogleId).IsUnique().HasFilter("\"GoogleId\" IS NOT NULL");
             e.Property(x => x.GoogleEmail).HasMaxLength(255);

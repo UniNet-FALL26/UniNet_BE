@@ -21,7 +21,7 @@ internal sealed class VerificationAvailabilityCalendar
         => (this.windows, this.busy, this.bookings, this.eligible) = (windows, busy, bookings, eligible);
 
     public static IQueryable<UserProfile> EligibleUsers(UniNetDbContext db, ProjectVerification v) =>
-        db.UserProfiles.Where(p => p.Account.Role == AccountRole.Verificator && p.Account.Status == AccountStatus.Active &&
+        db.UserProfiles.Where(p => p.Account.Role == AccountRole.Assessor && p.Account.Status == AccountStatus.Active &&
             p.Id != v.RequestByUserId && !db.Projects.Any(project => project.Id == v.ProjectId && project.CreatorId == p.Id) &&
             !db.ProjectMembers.Any(m => m.ProjectId == v.ProjectId && m.UserId == p.Id));
 

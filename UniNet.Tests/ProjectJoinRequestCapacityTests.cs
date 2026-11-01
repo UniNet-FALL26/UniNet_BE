@@ -42,6 +42,9 @@ public sealed class ProjectJoinRequestCapacityTests
         var invites = new ProjectInvitationService(db);
         var competing = await joins.SendAsync(project.Id, applicant.Id, new(" developer "));
         var competingInvite = await invites.SendAsync(project.Id, owner.Id, new(applicant.Profile!.Id, "Developer"));
+        var invitationNotice = await db.Set<VerificationNotification>().SingleAsync(n => n.RecipientUserId == applicant.Id);
+        Assert.Equal("ProjectInvitation", invitationNotice.TargetType);
+        Assert.Equal(competingInvite.Id, invitationNotice.TargetId);
         if (viaInvitation)
         {
             var invitation = await invites.SendAsync(project.Id, owner.Id, new(selected.Profile!.Id, "Developer"));
@@ -51,6 +54,9 @@ public sealed class ProjectJoinRequestCapacityTests
         {
             var request = await joins.SendAsync(project.Id, selected.Id, new("Developer"));
             Assert.Equal(ProjectJoinRequestStatus.Accepted, (await joins.AcceptAsync(request.Id, owner.Id)).Status);
+            var acceptedNotice = await db.Set<VerificationNotification>().SingleAsync(n => n.RecipientUserId == selected.Id);
+            Assert.Equal("project.join-request.reviewed", acceptedNotice.Type);
+            Assert.Equal(project.Id, acceptedNotice.TargetId);
         }
         Assert.Equal(quantity == 1 ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
             (await db.ProjectJoinRequests.FindAsync(competing.Id))!.Status);

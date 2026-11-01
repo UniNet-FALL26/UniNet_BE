@@ -22,7 +22,7 @@ public sealed class FallbackPortraitTests
         Assert.Equal(1, primary.Calls); Assert.Equal(1, local.Calls);
     }
     [Theory]
-    [InlineData(400)] [InlineData(401)] [InlineData(403)]
+    [InlineData(400)] [InlineData(401)] [InlineData(403)] [InlineData(422)]
     public async Task InvalidOrUnauthorizedInputsDoNotFallBack(int status)
     {
         var primary = new Processor(_ => throw new AuthException("INVALID_IMAGE", "Invalid", status));

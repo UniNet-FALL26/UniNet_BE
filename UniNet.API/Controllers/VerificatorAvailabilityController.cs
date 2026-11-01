@@ -7,7 +7,7 @@ using UniNet.Application.Services;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Verificator"), Route("api/verificators/me/availability")]
+[ApiController, Authorize(Roles = "Assessor"), Route("api/verificators/me/availability")]
 public sealed class VerificatorAvailabilityController(VerificatorAvailabilityService availability) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)

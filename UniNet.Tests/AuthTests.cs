@@ -11,6 +11,23 @@ namespace UniNet.Tests;
 
 public sealed class AuthTests
 {
+    [Fact]
+    public async Task AdminCreatesCanonicalStaffRolesWithoutDelegatingAccountCreation()
+    {
+        var (connection, db, auth, _) = await Setup();
+        await using (connection) await using (db)
+        {
+            var admin = new Account { Email = "role-admin@auth.test", Role = AccountRole.Admin };
+            db.Add(admin); await db.SaveChangesAsync();
+            foreach (var role in new[] { AccountRole.Assessor, AccountRole.Verifier, AccountRole.Moderator, AccountRole.Accountant })
+            {
+                var created = await auth.CreateStaffAccount(admin.Id, new(role.ToString(), $"{role}@auth.test", "Password123", "Password123", role), default);
+                Assert.Equal(role, created.Role);
+                await Assert.ThrowsAsync<AuthException>(() => auth.CreateStaffAccount(created.Id, new("Other staff", $"other-{role}@auth.test", "Password123", "Password123", AccountRole.Accountant), default));
+            }
+            await Assert.ThrowsAsync<AuthException>(() => auth.CreateStaffAccount(admin.Id, new("Other admin", "other-admin@auth.test", "Password123", "Password123", AccountRole.Admin), default));
+        }
+    }
     private static async Task<(SqliteConnection, UniNetDbContext, AuthService, ProfileService)> Setup()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

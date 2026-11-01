@@ -6,6 +6,7 @@ using UniNet.Application;
 using UniNet.Application.DTOs.Verification;
 using UniNet.Application.Services;
 using UniNet.Domain;
+using UniNet.Domain.Entities;
 using UniNet.Infrastructure.Data;
 using Xunit;
 
@@ -15,6 +16,38 @@ public sealed class StudentVerificationTests
 {
     private static readonly SubmitStudentVerificationRequest Request = new("Trịnh Trọng Quyền", "Any College", "SE170347");
     private static readonly StudentVerificationDocument Document = new("card.pdf", "application/pdf", "%PDF-1.7\nprivate"u8.ToArray());
+
+    [Fact]
+    public async Task NotificationsUseAccountIdsAndCommitWithVerification()
+    {
+        await using var f = await Fixture.Create();
+        Assert.NotEqual(f.Student.Id, f.Student.Profile!.Id);
+        var submitted = await f.Service.SubmitAsync(f.Student.Id, Request, Document, default);
+        var pending = await f.Db.Set<VerificationNotification>().SingleAsync();
+        Assert.Equal(f.Admin.Id, pending.RecipientUserId);
+        await f.Service.ReviewAsync(f.Admin.Id, submitted.Id!.Value, false, "Ảnh chưa rõ", default);
+        var ownerNotice = await f.Db.Set<VerificationNotification>().SingleAsync(n => n.RecipientUserId == f.Student.Id);
+        Assert.Equal(submitted.Id, ownerNotice.UserVerificationId);
+        Assert.Contains("Ảnh chưa rõ", ownerNotice.Message);
+    }
+
+    [Fact]
+    public async Task RevokedReviewPermissionBlocksPendingDetailDocumentAndReview()
+    {
+        await using var f = await Fixture.Create();
+        var submitted = await f.Service.SubmitAsync(f.Student.Id, Request, Document, default);
+        f.Db.Set<NotificationPermissionOverride>().Add(new()
+        {
+            AccountId = f.Admin.Id, Permission = NotificationPermissionPolicy.StudentVerificationReview, IsGranted = false
+        });
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => f.Service.ListAsync(f.Admin.Id, null, 1, 20, default))).Status);
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => f.Service.GetDetailAsync(f.Admin.Id, submitted.Id!.Value, default))).Status);
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => f.Service.GetDocumentAsync(f.Admin.Id, submitted.Id!.Value, default))).Status);
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => f.Service.ReviewAsync(f.Admin.Id, submitted.Id!.Value, true, null, default))).Status);
+        Assert.Equal(VerificationStatus.Pending, (await f.Db.UserVerifications.SingleAsync()).Status);
+        Assert.Empty(await f.Db.Set<VerificationNotification>().Where(n => n.RecipientUserId == f.Student.Id).ToListAsync());
+    }
 
     [Fact]
     public async Task SubmitIsPrivatePendingAndCannotBeDuplicatedOrSelfApproved()

@@ -13,7 +13,7 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
         var account = await notifications.ActiveAccountAsync(accountId, ct);
         var profileId = await db.UserProfiles.Where(p => p.AccountId == accountId).Select(p => (Guid?)p.Id).SingleOrDefaultAsync(ct);
         if (n.TargetId is not Guid id) return NotificationService.IsSafeUrl(n.TargetUrl) ? n.TargetUrl : null;
-        var staff = account.Role is AccountRole.Admin or AccountRole.Moderator or AccountRole.Verificator;
+        var staff = account.Role is AccountRole.Admin or AccountRole.Moderator or AccountRole.Assessor or AccountRole.Verifier or AccountRole.Accountant;
         string? url = null;
         switch (n.TargetType) {
             case "User":
@@ -65,14 +65,14 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
             case "ProjectVerification":
                 var projectVerification = await db.ProjectVerifications.AsNoTracking().SingleOrDefaultAsync(v => v.Id == id, ct);
                 if (projectVerification == null) break;
-                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct)) url = account.Role == AccountRole.Admin ? "/admin/projects" : "/verificator/projects";
+                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct)) url = account.Role == AccountRole.Admin ? "/admin/projects" : "/assessor/projects";
                 else if (await IsMemberAsync(projectVerification.ProjectId, profileId, ct)) url = $"/group/verification/{projectVerification.ProjectId}";
                 break;
             case "EvidenceModeration": case "ProjectModeration":
                 var moderation = await db.ProjectModerations.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id, ct);
                 if (moderation == null) break;
                 var permission = n.TargetType == "EvidenceModeration" ? NotificationPermissionPolicy.EvidenceReview : NotificationPermissionPolicy.ProjectReview;
-                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, permission, ct)) url = account.Role == AccountRole.Admin ? "/admin/projects" : account.Role == AccountRole.Moderator ? "/moderator/projects" : "/verificator/projects";
+                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, permission, ct)) url = account.Role == AccountRole.Admin ? "/admin/projects" : account.Role == AccountRole.Moderator ? "/moderator/projects" : "/assessor/projects";
                 else if (await IsMemberAsync(moderation.ProjectId, profileId, ct)) url = $"/group/{moderation.ProjectId}";
                 break;
             case "Project":

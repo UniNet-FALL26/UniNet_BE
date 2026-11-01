@@ -18,7 +18,7 @@ public sealed partial class VerificationReservationPostgresTests
         await using var store = new Store();
         await store.InitializeAsync();
         await using var db = store.Open();
-        var staff = await db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Verificator);
+        var staff = await db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         var admin = CreateAdmin();
         db.Accounts.Add(admin);
         await db.SaveChangesAsync();

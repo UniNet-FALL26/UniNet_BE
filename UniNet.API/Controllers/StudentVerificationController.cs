@@ -10,7 +10,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.API.Controllers;
 
-[ApiController, Authorize(Roles = "Student,Admin,Moderator,Verificator"), Route("api/student/verification"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+[ApiController, Authorize(Roles = "Student,Admin,Moderator,Assessor,Verifier,Accountant"), Route("api/student/verification"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class StudentVerificationController(StudentVerificationService verifications) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
@@ -30,7 +30,7 @@ public sealed class StudentVerificationController(StudentVerificationService ver
             new(form.Document.FileName, form.Document.ContentType, buffer.ToArray()), ct);
     }
 
-    [HttpGet("{verificationId:guid}/document"), Authorize(Roles = "Student,Admin,Moderator,Verificator")]
+    [HttpGet("{verificationId:guid}/document"), Authorize(Roles = "Student,Admin,Moderator,Assessor,Verifier,Accountant")]
     public async Task<IActionResult> Document(Guid verificationId, CancellationToken ct)
     {
         var document = await verifications.GetDocumentAsync(AccountId, verificationId, ct);
@@ -48,7 +48,7 @@ public sealed class StudentVerificationForm
     [Required] public IFormFile Document { get; set; } = null!;
 }
 
-[ApiController, Authorize(Roles = "Admin,Moderator,Verificator"), Route("api/admin/student-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+[ApiController, Authorize(Roles = "Admin,Moderator,Assessor,Verifier,Accountant"), Route("api/admin/student-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AdminStudentVerificationsController(StudentVerificationService verifications, UniNetDbContext db) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)

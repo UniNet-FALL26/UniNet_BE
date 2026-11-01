@@ -9,6 +9,14 @@ namespace UniNet.Domain.Entities
 {
     public sealed class RefundTransaction
     {
+        public RefundApproval Approval { get; set; }
+        public Guid? RequestKey { get; set; }
+        public string? ManualPayingAccount { get; set; }
+        public Guid? ReviewedByAccountId { get; set; }
+        public DateTimeOffset? ReviewedAt { get; set; }
+        public string? ReviewReason { get; set; }
+        public string? ManualBankReference { get; set; }
+        public Guid? ConfirmedByAccountId { get; set; }
         public Guid Id { get; set; }
         public Guid TransactionId { get; set; }
         public Guid? RequestedByUserId { get; set; }

@@ -12,7 +12,7 @@ public sealed partial class ProjectVerificationTests
 {
     [Theory]
     [InlineData(AccountRole.Student)]
-    [InlineData(AccountRole.Verificator)]
+    [InlineData(AccountRole.Assessor)]
     public async Task MeetingRejectsUnrelatedParticipantAcrossEveryOperation(AccountRole role)
     {
         await using var f = await Fixture.CreateAsync();
@@ -38,7 +38,7 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         var data = await PrepareMeetingAsync(f);
         var room = await data.Service.GetOrCreateRoomAsync(data.Assignment, data.Staff.AccountId);
-        var next = Fixture.Account("NextVerificator", AccountRole.Verificator);
+        var next = Fixture.Account("NextVerificator", AccountRole.Assessor);
         f.Db.Accounts.Add(next);
         await f.Db.SaveChangesAsync();
         var old = await f.Db.VerificationAssignments.SingleAsync();

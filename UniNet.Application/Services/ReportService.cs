@@ -80,10 +80,10 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
         var actor = await db.UserProfiles.Include(p => p.Account).FirstOrDefaultAsync(p => p.AccountId == accountId, ct)
             ?? throw new ReportException("FORBIDDEN", "An active account is required.", 403);
         Require(actor.Account.Status == AccountStatus.Active && (write
-            ? actor.Account.Role == AccountRole.Verificator
-            : actor.Account.Role is AccountRole.Verificator or AccountRole.Admin or AccountRole.Student or AccountRole.Partner),
+            ? actor.Account.Role == AccountRole.Assessor
+            : actor.Account.Role is AccountRole.Assessor or AccountRole.Admin or AccountRole.Student or AccountRole.Partner),
             "FORBIDDEN", "Your account cannot access verification reports.", 403);
-        if (actor.Account.Role is AccountRole.Admin or AccountRole.Verificator)
+        if (actor.Account.Role is AccountRole.Admin or AccountRole.Assessor)
             Require(await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct),
                 "FORBIDDEN", "Bạn không có quyền xem hoặc xử lý báo cáo xác minh.", 403);
         return actor;
@@ -91,7 +91,7 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
 
     private static void AuthorizeRead(VerificationAssignment a, UserProfile actor) => Require(
         actor.Account.Role == AccountRole.Admin ||
-        actor.Account.Role == AccountRole.Verificator && a.AssignedToUserId == actor.Id ||
+        actor.Account.Role == AccountRole.Assessor && a.AssignedToUserId == actor.Id ||
         (actor.Account.Role is AccountRole.Student or AccountRole.Partner) && a.ProjectVerification.Project.CreatorId == actor.Id,
         "FORBIDDEN", "You cannot access this report.", 403);
 

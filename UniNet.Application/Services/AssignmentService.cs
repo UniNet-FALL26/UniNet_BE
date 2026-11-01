@@ -30,7 +30,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
         VerificationAssignmentStatus? status = null, int page = 1, int pageSize = 10,
         CancellationToken ct = default)
     {
-        var user = await GetActorAsync(accountId, AccountRole.Verificator, ct);
+        var user = await GetActorAsync(accountId, AccountRole.Assessor, ct);
         return await ListAsync(AssignmentQuery().AsNoTracking().Where(a => a.AssignedToUserId == user.Id),
             status, page, pageSize, ct);
     }
@@ -145,7 +145,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             ?? throw new AssignmentException("PROFILE_NOT_FOUND", "User profile not found.", 404);
         Require(user.Account.Status == AccountStatus.Active &&
             (role.HasValue ? user.Account.Role == role.Value :
-                user.Account.Role is AccountRole.Admin or AccountRole.Verificator),
+                user.Account.Role is AccountRole.Admin or AccountRole.Assessor),
             "FORBIDDEN", "An active account with the required assignment role is required.", 403);
         Require(await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct),
             "FORBIDDEN", "Bạn không có quyền xử lý xác minh dự án.", 403);

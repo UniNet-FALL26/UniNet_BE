@@ -138,18 +138,19 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
         CancellationToken ct = default) => MutateAsync(async () =>
     {
         var actor = await AuthorizeAsync(accountId, ct);
+        await NotificationPermissionPolicy.RequireAsync(db, accountId, NotificationPermissionPolicy.RefundCreate, ct);
         ValidateReason(request.Reason);
         if (!await db.ProjectVerifications.AnyAsync(v => v.Id == id, ct)) throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
         var payment = await db.Transactions.Include(t => t.RefundTransactions).SingleOrDefaultAsync(t =>
             t.Id == request.TransactionId && t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == id, ct)
             ?? throw Error("PAYMENT_NOT_FOUND", "Payment does not belong to this verification.", 404);
         if (payment.Status != PaymentStatus.Success) throw Error("PAYMENT_NOT_SUCCESSFUL", "Only successful payments can be refunded.", 409);
-        var reserved = payment.RefundTransactions.Where(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success).Sum(r => r.Amount);
+        var reserved = RefundReservations.Reserved(payment.RefundTransactions);
         if (request.Amount <= 0 || decimal.Truncate(request.Amount) != request.Amount || request.Amount > payment.Amount - reserved)
             throw Error("INVALID_REFUND_AMOUNT", "Refund must be a positive whole VND amount within the unreserved payment balance.", 409);
         var now = DateTimeOffset.UtcNow;
         var refund = new RefundTransaction { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = request.Amount,
-            Status = PaymentStatus.Pending, PaymentProvider = payment.PaymentMethod ?? "Manual", Reason = request.Reason.Trim(), RequestedByUserId = actor, RequestedAt = now, RequestSource = RefundRequestSource.Admin, CreatedAt = now, UpdatedAt = now };
+            Approval = RefundApproval.Pending, Status = PaymentStatus.Pending, PaymentProvider = payment.PaymentMethod ?? "Manual", Reason = request.Reason.Trim(), RequestedByUserId = actor, RequestedAt = now, RequestSource = RefundRequestSource.Admin, CreatedAt = now, UpdatedAt = now };
         payment.UpdatedAt = now;
         db.RefundTransactions.Add(refund);
         return new VerificationRefundResponse(refund.Id, refund.Amount, refund.Status, refund.Reason, null, refund.RequestedByUserId, refund.RequestedAt, refund.RequestSource);

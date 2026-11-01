@@ -84,7 +84,7 @@ public sealed class PartnerVerificationMultipleForm
     public List<IFormFile> Files { get; set; } = [];
 }
 
-[ApiController, Authorize(Roles = "Admin,Moderator,Verificator"), Route("api/admin/partner-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+[ApiController, Authorize(Roles = "Admin,Moderator,Assessor"), Route("api/admin/partner-verifications"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AdminPartnerVerificationsController(PartnerVerificationService verifications, UniNetDbContext db) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)

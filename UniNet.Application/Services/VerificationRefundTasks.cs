@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Application.Interfaces;
 using UniNet.Domain.Enums;
+using UniNet.Domain.Entities;
 using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
@@ -11,7 +12,7 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
 {
     public async Task RunAsync(DateTimeOffset now, CancellationToken ct)
     {
-        var ids = await db.RefundTransactions.AsNoTracking().Where(r => r.Status == PaymentStatus.Pending &&
+        var ids = await db.RefundTransactions.AsNoTracking().Where(r => r.Status == PaymentStatus.Pending && (r.Approval == RefundApproval.NotRequired || r.Approval == RefundApproval.Approved) &&
             r.Transaction.VerificationTransaction != null && (r.NextReconciliationAt == null || r.NextReconciliationAt <= now))
             .OrderBy(r => r.UpdatedAt).Select(r => r.Id).Take(50).ToListAsync(ct);
         foreach (var id in ids) await ProcessAsync(id, now, ct);
@@ -26,7 +27,7 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
         {
             var refund = await db.RefundTransactions.Include(r => r.Transaction).ThenInclude(p => p.VerificationTransaction)
                 .SingleAsync(r => r.Id == id, ct);
-            if (refund.Status != PaymentStatus.Pending || refund.NextReconciliationAt > now || refund.Transaction.VerificationTransaction == null) return;
+            if (refund.Approval is not (RefundApproval.NotRequired or RefundApproval.Approved) || refund.Status != PaymentStatus.Pending || refund.NextReconciliationAt > now || refund.Transaction.VerificationTransaction == null) return;
             if (refund.Transaction.Status != PaymentStatus.Success)
                 throw new InvalidOperationException("A refund cannot be dispatched for an unsuccessful payment.");
             if (!provider.Supports(refund.PaymentProvider))

@@ -391,7 +391,7 @@ public sealed partial class TransactionTests
                 BookingStatus = VerificationBookingStatus.Held, ReservationId = Guid.NewGuid(),
                 ReservedUntil = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds()),
                 ScheduledStartAt = DateTimeOffset.UtcNow.AddDays(2), ScheduledEndAt = DateTimeOffset.UtcNow.AddDays(2).AddHours(1) };
-            db.Accounts.AddRange(owner, other, new Account { Email = "staff@test.com", Role = AccountRole.Verificator,
+            db.Accounts.AddRange(owner, other, new Account { Email = "staff@test.com", Role = AccountRole.Assessor,
                 Profile = new() { FullName = "Staff", Nickname = "Staff", VerificatorAvailabilities = [new()
                 {
                     StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31)

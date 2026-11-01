@@ -29,6 +29,7 @@ public sealed class VerificationHistoryArchivePostgresTests
 {
     private const string Before = "20261019072056_UnifyProjectModerationPurposes";
     private const string BeforeDE = "20261018033831_AddVerificationSlotReservations";
+    private const string After = "20261024095804_AddWorkspaceChat";
 
     private sealed class Store : IAsyncDisposable
     {
@@ -59,7 +60,7 @@ public sealed class VerificationHistoryArchivePostgresTests
         var time = new DateTimeOffset(2026, 10, 18, 1, 0, 0, TimeSpan.Zero);
         Account User(string name, AccountRole role) => new() { Email = name + "@g2.test", Role = role,
             Profile = new() { FullName = name, Nickname = name } };
-        var owner = User("Owner", AccountRole.Student); var admin = User("Admin", AccountRole.Admin); var staff = User("Staff", AccountRole.Verificator);
+        var owner = User("Owner", AccountRole.Student); var admin = User("Admin", AccountRole.Admin); var staff = User("Staff", AccountRole.Assessor);
         var project = new Project { Creator = owner.Profile!, Title = "Legacy", Description = "History", ProjectField = "IT", MemberTarget = 1, Status = ProjectStatus.Completed };
         var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verify", Price = 100, IsActive = true };
         db.Accounts.AddRange(owner, admin, staff); db.Projects.Add(project); db.Packages.Add(package); await db.SaveChangesAsync();
@@ -144,7 +145,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         await using var store = new Store(); await store.InitializeAsync();
         await using var db = store.Open(); await SeedAsync(db);
         var actions = await RowsAsync(db, "VerificationAdminAction"); var versions = await RowsAsync(db, "VerificationReportVersions");
-        await db.Database.MigrateAsync();
+        await db.GetService<IMigrator>().MigrateAsync(After);
         var connection = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("UNINET_TEST_POSTGRES")!);
         var clone = "g2_restore_" + Guid.NewGuid().ToString("N");
         var dump = Path.Combine(Path.GetTempPath(), clone + ".dump");
@@ -178,7 +179,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE external_history_reference (action_id uuid REFERENCES \"VerificationAdminAction\"(\"Id\"), version_id uuid REFERENCES \"VerificationReportVersions\"(\"Id\"));");
         var tables = new[] { "VerificationAdminAction", "VerificationReportVersions", "VerificationReports", "RefundTransactions", "ReportAuditLogs", "ProjectVerifications" };
         var before = new Dictionary<string, string>(); foreach (var table in tables) before[table] = await RowsAsync(db, table);
-        await db.Database.MigrateAsync(); db.ChangeTracker.Clear();
+        await db.GetService<IMigrator>().MigrateAsync(After); db.ChangeTracker.Clear();
         foreach (var table in tables)
             Assert.Equal(before[table], await RowsAsync(db, table, table is "VerificationAdminAction" or "VerificationReportVersions" ? store.Archive : null));
         Assert.DoesNotContain(db.Model.GetEntityTypes(), e => e.ClrType.Name is "VerificationAdminAction" or "VerificationReportVersion");
@@ -212,7 +213,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         await using var store = new Store(); await store.InitializeAsync();
         await using var db = store.Open(); await SeedAsync(db); await db.Database.ExecuteSqlRawAsync(sql);
         var before = await RowsAsync(db, "VerificationAdminAction");
-        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(After));
         Assert.Contains(errorText, error.MessageText);
         Assert.Equal(before, await RowsAsync(db, "VerificationAdminAction"));
         Assert.DoesNotContain("20261019131816_ArchiveVerificationHistory", await db.Database.GetAppliedMigrationsAsync());
@@ -226,7 +227,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
     public async Task ArchiveRejectsAllRuntimeWrites(string verb, string suffix)
     {
         await using var store = new Store(); await store.InitializeAsync();
-        await using var db = store.Open(); await SeedAsync(db); await db.Database.MigrateAsync();
+        await using var db = store.Open(); await SeedAsync(db); await db.GetService<IMigrator>().MigrateAsync(After);
         var before = await RowsAsync(db, "VerificationAdminAction", store.Archive);
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync($"{verb} {store.Archive}.\"VerificationAdminAction\"{suffix}"));
         Assert.Contains("read-only", error.MessageText);
@@ -240,7 +241,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         await using var db = store.Open(); var seed = await SeedAsync(db);
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"ProjectVerifications\" SET \"FinalizedByUserId\" = {seed.Admin} WHERE \"Id\" = {seed.Case}");
         var before = await RowsAsync(db, "ProjectVerifications");
-        await db.Database.MigrateAsync();
+        await db.GetService<IMigrator>().MigrateAsync(After);
         Assert.Equal(before, await RowsAsync(db, "ProjectVerifications"));
         Assert.Contains("Uphold", await RowsAsync(db, "VerificationAdminAction", store.Archive));
     }
@@ -251,7 +252,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
     public async Task MissingArchiveRefusesRollbackWithoutCreatingEmptyReplacement(string table)
     {
         await using var store = new Store(); await store.InitializeAsync();
-        await using var db = store.Open(); await SeedAsync(db); await db.Database.MigrateAsync();
+        await using var db = store.Open(); await SeedAsync(db); await db.GetService<IMigrator>().MigrateAsync(After);
         await db.Database.ExecuteSqlRawAsync($"DROP TABLE {store.Archive}.\"{table}\"");
         var actions = await RowsAsync(db, "VerificationAdminAction", store.Archive);
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(Before));
@@ -264,7 +265,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
     public async Task TamperedArchiveRefusesRollbackAtomically()
     {
         await using var store = new Store(); await store.InitializeAsync();
-        await using var db = store.Open(); await SeedAsync(db); await db.Database.MigrateAsync();
+        await using var db = store.Open(); await SeedAsync(db); await db.GetService<IMigrator>().MigrateAsync(After);
         await db.Database.ExecuteSqlRawAsync($"ALTER TABLE {store.Archive}.\"VerificationReportVersions\" DISABLE TRIGGER \"G2_HistoryReadOnly\"; UPDATE {store.Archive}.\"VerificationReportVersions\" SET \"Summary\" = 'tampered';");
         var actions = await RowsAsync(db, "VerificationAdminAction", store.Archive);
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(Before));
@@ -279,7 +280,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         await using var store = new Store(); await store.InitializeAsync();
         await using var db = store.Open(); await SeedAsync(db);
         await db.Database.ExecuteSqlRawAsync($"CREATE SCHEMA {store.Archive}");
-        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync(After));
         Assert.Contains("already exists", error.MessageText);
         Assert.NotEqual("[]", await RowsAsync(db, "VerificationReportVersions"));
     }

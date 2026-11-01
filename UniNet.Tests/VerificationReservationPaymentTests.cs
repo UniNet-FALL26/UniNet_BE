@@ -171,7 +171,7 @@ public sealed partial class TransactionTests
     {
         await using var f = await Fixture.CreateAsync();
         var checkout = await f.CheckoutAsync();
-        var staff = await f.Db.Accounts.SingleAsync(a => a.Role == UniNet.Domain.AccountRole.Verificator);
+        var staff = await f.Db.Accounts.SingleAsync(a => a.Role == UniNet.Domain.AccountRole.Assessor);
         staff.Status = UniNet.Domain.AccountStatus.Suspended;
         await f.Db.SaveChangesAsync();
         f.Provider.WebhookResult = FakeProvider.Result(checkout.ProviderOrderCode!, 37000, PaymentStatus.Success);

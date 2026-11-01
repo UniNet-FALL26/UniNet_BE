@@ -54,7 +54,7 @@ public sealed class VerificatorAvailabilityService(UniNetDbContext db)
         }, ct);
 
     private async Task<Guid> RequireActorAsync(Guid accountId, CancellationToken ct) =>
-        await db.UserProfiles.Where(p => p.AccountId == accountId && p.Account.Role == AccountRole.Verificator &&
+        await db.UserProfiles.Where(p => p.AccountId == accountId && p.Account.Role == AccountRole.Assessor &&
             p.Account.Status == AccountStatus.Active).Select(p => (Guid?)p.Id).SingleOrDefaultAsync(ct)
         ?? throw new ProjectVerificationException("FORBIDDEN", "An active Verificator account is required.", 403);
 

@@ -228,11 +228,12 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync();
         f.Configuration["EvidenceModeration:PolicyVersion"] = null; await CompleteAsync(f);
+        var noticeCount = await f.Db.Set<VerificationNotification>().CountAsync();
         var content = new ContentChecker(); var worker = EvidenceWorker(f, content, new());
         await worker.RunAsync(DateTimeOffset.UtcNow, default); await worker.RunAsync(DateTimeOffset.UtcNow.AddDays(1), default);
         var m = await f.Db.ProjectModerations.SingleAsync();
         Assert.Equal(ProjectModerationStatus.Error, m.Status); Assert.Null(m.NextRetryAt); Assert.Equal(0, content.Calls);
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         f.Configuration["EvidenceModeration:PolicyVersion"] = "fixed-v2";
         await worker.RunAsync(DateTimeOffset.UtcNow.AddDays(2), default);
         Assert.Equal(2, await f.Db.ProjectModerations.CountAsync());
@@ -244,6 +245,7 @@ public sealed partial class ProjectVerificationTests
     {
         await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f);
         f.Other.Role = AccountRole.Admin; await f.Db.SaveChangesAsync(); await CompleteAsync(f);
+        var noticeCount = await f.Db.Set<VerificationNotification>().CountAsync();
         var content = new ContentChecker { Error = new("Unavailable", true) }; var worker = EvidenceWorker(f, content, new());
         var now = DateTimeOffset.UtcNow;
         for (var i = 0; i < 5; i++)
@@ -254,7 +256,7 @@ public sealed partial class ProjectVerificationTests
         }
         await worker.RunAsync(now, default);
         Assert.Equal(5, content.Calls); Assert.Equal(5, await f.Db.EvidenceModerationAttempts.CountAsync());
-        Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
+        Assert.Equal(noticeCount, await f.Db.Set<VerificationNotification>().CountAsync());
         Assert.Null((await f.Db.ProjectModerations.SingleAsync()).NextRetryAt);
     }
 

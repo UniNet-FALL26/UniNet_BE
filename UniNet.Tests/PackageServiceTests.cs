@@ -20,7 +20,7 @@ public sealed class PackageServiceTests
     [InlineData(AccountRole.Student)]
     [InlineData(AccountRole.Partner)]
     [InlineData(AccountRole.Moderator)]
-    [InlineData(AccountRole.Verificator)]
+    [InlineData(AccountRole.Assessor)]
     public async Task NonAdminsCannotMutatePackages(AccountRole role)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

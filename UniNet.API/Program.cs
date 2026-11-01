@@ -22,6 +22,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AdminUsersService>();
 builder.Services.AddScoped<AdminSkillsService>();
 builder.Services.AddScoped<AdminPermissionService>();
+builder.Services.AddScoped<FinanceService>();
 builder.Services.AddScoped<AdminVerificationQueries>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();

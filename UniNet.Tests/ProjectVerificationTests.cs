@@ -249,12 +249,12 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         f.Configuration["ProjectVerification:Capacity"] = "5";
         var first = (await f.CreateVerificationAsync(true)).Verification.Id;
-        var staff = await f.Db.Accounts.SingleAsync(a => a.Role == AccountRole.Verificator);
+        var staff = await f.Db.Accounts.SingleAsync(a => a.Role == AccountRole.Assessor);
         staff.Status = AccountStatus.Suspended;
         await f.Db.SaveChangesAsync();
         await Error("MEETING_SLOT_UNAVAILABLE", () => f.Service.ScheduleMeetingAsync(first, f.Owner.Id, Fixture.Slot()));
         staff.Status = AccountStatus.Active;
-        f.Db.Accounts.Add(Fixture.Account("Staff2", AccountRole.Verificator));
+        f.Db.Accounts.Add(Fixture.Account("Staff2", AccountRole.Assessor));
         var secondProject = Fixture.ProjectFor(f.Owner);
         f.Db.Projects.Add(secondProject);
         await f.Db.SaveChangesAsync();
@@ -405,7 +405,7 @@ public sealed partial class ProjectVerificationTests
         {
             Email = name + "@test.com", Role = role,
             Profile = new() { FullName = name, Nickname = name,
-                VerificatorAvailabilities = role == AccountRole.Verificator ? [new()
+                VerificatorAvailabilities = role == AccountRole.Assessor ? [new()
                 {
                     StartAt = DateTimeOffset.UtcNow.AddDays(-365), EndAt = DateTimeOffset.UtcNow.AddDays(365),
                     CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
@@ -473,7 +473,7 @@ public sealed partial class ProjectVerificationTests
             await db.Database.EnsureCreatedAsync();
             var owner = Account("Owner");
             var other = Account("Other");
-            db.Accounts.AddRange(owner, other, Account("Staff", AccountRole.Verificator));
+            db.Accounts.AddRange(owner, other, Account("Staff", AccountRole.Assessor));
             var project = ProjectFor(owner);
             var package = new Package { Id = Guid.NewGuid(), Code = "VERIFICATION", Name = "Verification",
                 Type = PackageType.Verification, Role = TargetRole.Student, IsActive = true, Price = 32000 };

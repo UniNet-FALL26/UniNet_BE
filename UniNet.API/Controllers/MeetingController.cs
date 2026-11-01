@@ -24,11 +24,11 @@ public sealed class MeetingController(IMeetingService meetings) : ControllerBase
     public Task<MeetingJoinResponse> Join(Guid assignmentId, CancellationToken ct)
         => meetings.JoinAsync(assignmentId, AccountId, ct);
 
-    [HttpPost("api/verificator/assignments/{assignmentId:guid}/meeting/start"), Authorize(Roles = "Verificator")]
+    [HttpPost("api/verificator/assignments/{assignmentId:guid}/meeting/start"), Authorize(Roles = "Assessor")]
     public Task<MeetingResponse> Start(Guid assignmentId, CancellationToken ct)
         => meetings.StartAsync(assignmentId, AccountId, ct);
 
-    [HttpPost("api/verificator/assignments/{assignmentId:guid}/meeting/end"), Authorize(Roles = "Verificator")]
+    [HttpPost("api/verificator/assignments/{assignmentId:guid}/meeting/end"), Authorize(Roles = "Assessor")]
     public Task<MeetingResponse> End(Guid assignmentId, CancellationToken ct)
         => meetings.EndAsync(assignmentId, AccountId, ct);
 }

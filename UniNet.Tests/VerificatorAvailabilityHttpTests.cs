@@ -66,7 +66,7 @@ public sealed partial class ProjectVerificationTests
         }
         Authenticate(f.Owner.Id, "Student");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(route)).StatusCode);
-        Authenticate(staff.Id, "Verificator");
+        Authenticate(staff.Id, "Assessor");
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(route)).StatusCode);
         var slot = Fixture.Slot();
         var response = await client.PostAsJsonAsync(route, new SaveVerificatorAvailabilityRequest(slot.StartAt, slot.EndAt));

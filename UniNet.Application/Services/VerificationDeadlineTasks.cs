@@ -62,8 +62,7 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Exte
         {
             // Failed automatic refunds also retain their reservation until an operator resolves them.
             // Never silently generate a new provider request after a definitive failure.
-            var reserved = payment.RefundTransactions.Where(r => r.Status != PaymentStatus.Failed ||
-                r.Reason == AssignmentTimeout || r.Reason == ReplacementTimeout).Sum(r => r.Amount);
+            var reserved = RefundReservations.Reserved(payment.RefundTransactions);
             var balance = payment.Amount - reserved;
             if (balance <= 0) continue;
             db.RefundTransactions.Add(new() { Id = Guid.NewGuid(), TransactionId = payment.Id, Amount = balance,
@@ -114,7 +113,7 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Exte
             logger?.LogWarning("Report for assignment {AssignmentId} escalated at {EscalatedAt}", a.Id, a.EscalatedAt);
             var admin = await db.UserProfiles.Where(p => p.Account.Role == AccountRole.Admin && p.Account.Status == AccountStatus.Active)
                 .OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
-            var replacement = await db.UserProfiles.Where(p => p.Account.Role == AccountRole.Verificator && p.Account.Status == AccountStatus.Active &&
+            var replacement = await db.UserProfiles.Where(p => p.Account.Role == AccountRole.Assessor && p.Account.Status == AccountStatus.Active &&
                 p.Id != v.RequestByUserId && p.Id != v.Project.CreatorId &&
                 !db.ProjectMembers.Any(m => m.ProjectId == v.ProjectId && m.UserId == p.Id) &&
                 !db.VerificationAssignments.Any(old => old.ProjectVerificationId == v.Id && old.AssignedToUserId == p.Id) &&
