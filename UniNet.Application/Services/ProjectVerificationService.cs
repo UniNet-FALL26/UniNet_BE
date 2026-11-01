@@ -36,6 +36,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var verification = new ProjectVerification
         {
             Id = Guid.NewGuid(), ProjectId = project.Id, Project = project,
+            AssessmentRubricJson = ProjectAssessmentPolicy.CurrentSnapshot(),
             RequestByUserId = leader.Id, RequestByUser = leader, PackageId = package.Id, Package = package,
             EvidenceModerationId = moderation.Id, EvidenceModeration = moderation,
             Status = ProjectVerificationStatus.Pending, SubmittedAt = now, CreatedAt = now, UpdatedAt = now

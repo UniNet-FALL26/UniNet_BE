@@ -25,7 +25,8 @@ public sealed partial class ProjectVerificationTests
     }
 
     private static SubmitReportRequest FinalReport(Guid assignment, ProjectVerificationStatus outcome = ProjectVerificationStatus.Verified)
-        => new(assignment, "Final assessment", "Reviewed task evidence and meeting", "Recommended next steps", outcome);
+        => new(assignment, "Final assessment", "Reviewed task evidence and meeting", "Recommended next steps", outcome,
+            AssessmentTestData.Complete(outcome == ProjectVerificationStatus.Verified ? 80 : 40));
 
     [Theory]
     [InlineData(ProjectVerificationStatus.Verified)]

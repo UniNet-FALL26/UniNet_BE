@@ -1031,7 +1031,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         {
             e.ToTable("ProjectVerifications", t =>
             {
-                t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3");
+                t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 4");
                 t.HasCheckConstraint("CK_ProjectVerifications_BookingStatus", "\"BookingStatus\" BETWEEN 0 AND 5");
                 t.HasCheckConstraint("CK_ProjectVerifications_Reservation", "\"BookingStatus\" NOT IN (1, 2) OR (\"ReservationId\" IS NOT NULL AND \"ReservedUntil\" IS NOT NULL AND \"ScheduledStartAt\" IS NOT NULL AND \"ScheduledEndAt\" IS NOT NULL AND \"ScheduledEndAt\" > \"ScheduledStartAt\")");
                 t.HasCheckConstraint("CK_ProjectVerifications_ConfirmedBooking", "\"BookingStatus\" <> 2 OR (\"BookingConfirmedAt\" IS NOT NULL AND \"AssignmentEligibleAt\" IS NOT NULL)");
@@ -1052,6 +1052,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.AiSummary).HasColumnType("text");
             e.Property(x => x.AiScore).HasPrecision(5, 2);
             e.Property(x => x.AiAdditionalEvidenceJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.AssessmentRubricJson).HasColumnType("jsonb")
+                .Metadata.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Throw);
             e.Property(x => x.CancellationReason).HasColumnType("text");
             e.Property(x => x.SubmittedAt).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
@@ -1119,6 +1121,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasOne<VerificationAssignment>().WithMany().HasForeignKey(x => new { x.AssignmentId, x.ProjectVerificationId })
                 .HasPrincipalKey(x => new { x.Id, x.ProjectVerificationId }).OnDelete(DeleteBehavior.Restrict);
             e.Property(x => x.LegacyOriginalJson).HasColumnType("jsonb");
+            e.Property(x => x.AssessmentJson).HasColumnType("jsonb");
             e.Property(x => x.Summary).HasColumnType("text").IsRequired();
             e.Property(x => x.Findings).HasColumnType("text");
             e.Property(x => x.Recommendations).HasColumnType("text");

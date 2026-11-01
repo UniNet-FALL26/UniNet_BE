@@ -16,5 +16,6 @@ public static class AssignmentMapping
             a.ProjectVerification.Project.ProjectField, a.ProjectVerification.Project.Description,
             a.ProjectVerification.Project.Status, a.ProjectVerification.Project.CreatorId),
         a.ProjectVerification.EvidenceModeration == null ? null : EvidenceModerationMapping.ToResponse(a.ProjectVerification.EvidenceModeration),
-        a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report));
+        a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report),
+        Services.ProjectAssessmentPolicy.ReadRubric(a.ProjectVerification.AssessmentRubricJson));
 }

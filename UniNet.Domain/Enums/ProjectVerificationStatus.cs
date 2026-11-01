@@ -11,6 +11,7 @@ namespace UniNet.Domain.Enums
         Pending = 0,
        Verified = 1, 
        Failed = 2,
-       Cancelled = 3
+       Cancelled = 3,
+       InsufficientEvidence = 4
     }
 }
