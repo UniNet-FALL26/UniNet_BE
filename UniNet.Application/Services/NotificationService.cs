@@ -97,7 +97,7 @@ public sealed class NotificationService(UniNetDbContext db)
 
     public static bool IsSafeUrl(string? url) => url == null || url.Length <= 500 && url.StartsWith('/') && !url.StartsWith("//") &&
         !url.Contains('\\') && !url.Any(char.IsControl) && !url.Contains('%') &&
-        new[] { "/notifications", "/settings", "/opportunities", "/jobs", "/applicants", "/verification", "/group/", "/workspace/", "/admin/", "/moderator/", "/verificator/", "/assessor/", "/verifier/", "/accountant/", "/(company)/", "/(tabs)/" }
+        new[] { "/notifications", "/settings", "/opportunities", "/jobs", "/applicants", "/verification", "/group/", "/workspace/", "/admin/", "/moderator/", "/verificator/", "/assessor/", "/verifier/", "/accountant/", "/(company)/", "/(tabs)/", "/assessor-community", "/assessor-messages", "/assessor-assessments", "/assessor-notifications", "/assessor-profile", "/assessor-availability" }
             .Any(prefix => prefix.EndsWith('/') ? url.StartsWith(prefix, StringComparison.Ordinal) : url == prefix || url.StartsWith(prefix + "?", StringComparison.Ordinal) || url.StartsWith(prefix + "/", StringComparison.Ordinal));
 
     public static void Validate(NotificationContent c)

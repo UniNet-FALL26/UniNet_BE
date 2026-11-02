@@ -12,7 +12,11 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
         var n = await notifications.GetOwnedAsync(accountId, notificationId, ct);
         var account = await notifications.ActiveAccountAsync(accountId, ct);
         var profileId = await db.UserProfiles.Where(p => p.AccountId == accountId).Select(p => (Guid?)p.Id).SingleOrDefaultAsync(ct);
-        if (n.TargetId is not Guid id) return NotificationService.IsSafeUrl(n.TargetUrl) ? n.TargetUrl : null;
+        if (n.TargetId is not Guid id)
+        {
+            if (account.Role == AccountRole.Assessor && n.TargetUrl is "/assessor/projects" or "/verificator/projects") return "/assessor-assessments";
+            return NotificationService.IsSafeUrl(n.TargetUrl) ? n.TargetUrl : null;
+        }
         var staff = account.Role is AccountRole.Admin or AccountRole.Moderator or AccountRole.Assessor or AccountRole.Verifier or AccountRole.Accountant;
         string? url = null;
         switch (n.TargetType) {
@@ -65,14 +69,32 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
             case "ProjectVerification":
                 var projectVerification = await db.ProjectVerifications.AsNoTracking().SingleOrDefaultAsync(v => v.Id == id, ct);
                 if (projectVerification == null) break;
-                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct)) url = account.Role == AccountRole.Admin ? "/admin/projects" : "/assessor/projects";
+                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct))
+                {
+                    if (account.Role == AccountRole.Assessor)
+                    {
+                        var ownAssignment = await db.VerificationAssignments.AsNoTracking().Where(a => a.ProjectVerificationId == id && a.AssignedToUserId == profileId)
+                            .OrderByDescending(a => a.AssignedAt).ThenBy(a => a.Id).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
+                        url = ownAssignment is Guid ownId ? $"/assessor-assessments/{ownId}" : null;
+                    }
+                    else url = "/admin/projects";
+                }
                 else if (await IsMemberAsync(projectVerification.ProjectId, profileId, ct)) url = $"/group/verification/{projectVerification.ProjectId}";
                 break;
             case "EvidenceModeration": case "ProjectModeration":
                 var moderation = await db.ProjectModerations.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id, ct);
                 if (moderation == null) break;
                 var permission = n.TargetType == "EvidenceModeration" ? NotificationPermissionPolicy.EvidenceReview : NotificationPermissionPolicy.ProjectReview;
-                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, permission, ct)) url = account.Role == AccountRole.Admin ? "/admin/projects" : account.Role == AccountRole.Moderator ? "/moderator/projects" : "/assessor/projects";
+                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, permission, ct))
+                {
+                    if (account.Role == AccountRole.Assessor)
+                    {
+                        var ownAssignment = await db.VerificationAssignments.AsNoTracking().Where(a => a.ProjectVerification.EvidenceModerationId == id && a.AssignedToUserId == profileId)
+                            .OrderByDescending(a => a.AssignedAt).ThenBy(a => a.Id).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
+                        url = ownAssignment is Guid ownId ? $"/assessor-assessments/{ownId}" : null;
+                    }
+                    else url = account.Role == AccountRole.Admin ? "/admin/projects" : "/moderator/projects";
+                }
                 else if (await IsMemberAsync(moderation.ProjectId, profileId, ct)) url = $"/group/{moderation.ProjectId}";
                 break;
             case "Project":
