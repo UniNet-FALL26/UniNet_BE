@@ -1702,6 +1702,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("AiSummary")
                         .HasColumnType("text");
 
+                    b.Property<string>("AssessmentRubricJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTimeOffset?>("AssignmentEligibleAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1814,7 +1817,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProjectVerifications_Reservation", "\"BookingStatus\" NOT IN (1, 2) OR (\"ReservationId\" IS NOT NULL AND \"ReservedUntil\" IS NOT NULL AND \"ScheduledStartAt\" IS NOT NULL AND \"ScheduledEndAt\" IS NOT NULL AND \"ScheduledEndAt\" > \"ScheduledStartAt\")");
 
-                            t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 3");
+                            t.HasCheckConstraint("CK_ProjectVerifications_Status", "\"Status\" BETWEEN 0 AND 4");
                         });
                 });
 
@@ -2463,6 +2466,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AssessmentJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<Guid>("AssignmentId")
                         .HasColumnType("uuid");

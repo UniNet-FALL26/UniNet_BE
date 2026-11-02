@@ -12,6 +12,9 @@ public sealed class ReportController(IReportService reports) : ControllerBase
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
         && id != Guid.Empty ? id : throw new ReportException("UNAUTHORIZED", "Invalid login session.", 401);
 
+    [HttpGet("api/reports/rubric"), Authorize(Roles = "Assessor,Student,Partner,Admin")]
+    public ActionResult<AssessmentRubric> GetRubric() => UniNet.Application.Services.ProjectAssessmentPolicy.Current;
+
     [HttpPost("api/reports"), Authorize(Roles = "Assessor")]
     public async Task<ActionResult<ReportResponse>> Submit([FromBody] SubmitReportRequest request, CancellationToken ct)
     {

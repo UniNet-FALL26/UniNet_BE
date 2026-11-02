@@ -16,7 +16,8 @@ public record ProjectVerificationsResponse(int Page, int PageSize, int TotalItem
 public record VerificationProjectResponse(Guid Id, string Title, string ProjectField, string Description,
     ProjectStatus Status, Guid LeaderId);
 public record VerificationReportResponse(Guid Id, Guid AssignmentId, string Summary, string? Findings,
-    string? Recommendations, DateTimeOffset SubmittedAt);
+    string? Recommendations, DateTimeOffset SubmittedAt,
+    ProjectVerificationStatus? Outcome = null, ProjectAssessmentResult? Assessment = null);
 public record VerificationAssignmentResponse(Guid Id, Guid AssignedToUserId, VerificationAssignmentStatus Status,
     DateTimeOffset AssignedAt, VerificationReportResponse? Report);
 public record VerificationPaymentResponse(Guid TransactionId, Guid PackageId, PaymentStatus Status,
@@ -32,6 +33,7 @@ public record ProjectVerificationDetailResponse(ProjectVerificationResponse Veri
     UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration,
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt,
     List<VerificationAssignmentResponse> Assignments, List<VerificationPaymentResponse> Payments,
-    VerificationFinalResultResponse? FinalResult, string? CancellationReason, DateTimeOffset? CancelledAt);
+    VerificationFinalResultResponse? FinalResult, string? CancellationReason, DateTimeOffset? CancelledAt,
+    AssessmentRubric? AssessmentRubric = null);
 public record VerificationMeetingSlotResponse(DateTimeOffset StartAt, DateTimeOffset EndAt, int RemainingCapacity);
 public record VerificationMeetingSlotsResponse(string TimeZoneId, List<VerificationMeetingSlotResponse> Slots);

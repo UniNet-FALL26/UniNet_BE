@@ -13,7 +13,8 @@ public record AssignmentResponse(Guid Id, Guid ProjectVerificationId, Guid Assig
     DateTimeOffset? ScheduledStartAt, DateTimeOffset? ScheduledEndAt,
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt, DateTimeOffset? CompletedAt = null);
 public record AssignmentDetailResponse(AssignmentResponse Assignment, VerificationProjectResponse Project,
-    UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration, VerificationReportResponse? Report);
+    UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration, VerificationReportResponse? Report,
+    AssessmentRubric? AssessmentRubric = null);
 public record AssignmentsResponse(int Page, int PageSize, int TotalItems, int TotalPages,
     List<AssignmentResponse> Assignments);
 public record SuitableVerificatorResponse(Guid UserId, string FullName);

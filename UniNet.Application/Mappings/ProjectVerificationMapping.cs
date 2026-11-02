@@ -14,14 +14,15 @@ public static class ProjectVerificationMapping
         verification.ReservationId, verification.ReservedUntil, verification.BookingConfirmedAt, verification.AssignmentEligibleAt);
 
     public static VerificationReportResponse ToReportResponse(VerificationReport report) => new(
-        report.Id, report.AssignmentId, report.Summary, report.Findings, report.Recommendations, report.SubmittetAt);
+        report.Id, report.AssignmentId, report.Summary, report.Findings, report.Recommendations, report.SubmittetAt,
+        report.Outcome, Services.ProjectAssessmentPolicy.ReadResult(report.AssessmentJson));
 
     public static VerificationFinalResultResponse? ToFinalResponse(ProjectVerification verification)
     {
         var reports = verification.Assignments.Where(a => a.Report != null)
             .OrderBy(a => a.Report!.SubmittetAt).ThenBy(a => a.Id)
             .Select(a => ToReportResponse(a.Report!)).ToList();
-        return reports.Count > 0 || verification.Status is ProjectVerificationStatus.Verified or ProjectVerificationStatus.Failed
+        return reports.Count > 0 || verification.Status is ProjectVerificationStatus.Verified or ProjectVerificationStatus.Failed or ProjectVerificationStatus.InsufficientEvidence
             ? new(verification.Status, verification.FinalizedAt, verification.FinalizedByUserId, reports) : null;
     }
 
@@ -41,5 +42,6 @@ public static class ProjectVerificationMapping
                         r.Status == PaymentStatus.Success ? r.CompletedAt : null, r.RequestedByUserId, r.RequestedAt, r.RequestSource)).ToList(),
                 v.Transaction.FailureReason is TransactionMapping.LatePaymentReview or TransactionMapping.BookingPaymentReview or
                     TransactionMapping.DuplicatePaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", v.Transaction.FailureReason)).ToList(),
-        ToFinalResponse(verification), verification.CancellationReason, verification.CancelledAt);
+        ToFinalResponse(verification), verification.CancellationReason, verification.CancelledAt,
+        Services.ProjectAssessmentPolicy.ReadRubric(verification.AssessmentRubricJson));
 }
