@@ -54,16 +54,20 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         var applications = (await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == student.Id && ids.Contains(x.JobId))
             .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id).ToListAsync(ct))
             .GroupBy(x => x.JobId).ToDictionary(group => group.Key, group => group.First());
-        var applicantCounts = await db.JobApplications.AsNoTracking().Where(x => ids.Contains(x.JobId)).GroupBy(x => x.JobId)
-            .Select(g => new { JobId = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.JobId, x => x.Count, ct);
         return new(page, pageSize, totalItems, (int)(((long)totalItems + pageSize - 1) / pageSize),
-            jobs.Select(job => ToResponse(job, savedIds.Contains(job.Id), applications.GetValueOrDefault(job.Id), applicantCounts.GetValueOrDefault(job.Id))).ToList());
+            jobs.Select(job => ToResponse(job, savedIds.Contains(job.Id), applications.GetValueOrDefault(job.Id))).ToList());
     }
 
     public async Task<OpportunityJobResponse> GetAsync(Guid accountId, Guid jobId, CancellationToken ct)
     {
         var student = await GetStudentAsync(accountId, ct);
         var now = DateTimeOffset.UtcNow;
+        var updatedRows = await db.Jobs.Where(x => x.Id == jobId &&
+            ((x.Status == (short)PartnerJobStatus.Published && (x.StartAt == null || x.StartAt <= now) && (x.Deadline == null || x.Deadline > now)) ||
+             db.JobApplications.Any(app => app.StudentUserId == student.Id && app.JobId == x.Id)))
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.ViewCount, x => x.ViewCount + 1), ct);
+        if (updatedRows == 0)
+            throw new PartnerException("JOB_NOT_FOUND", "Không tìm thấy cơ hội đang tuyển.", 404);
         var job = await db.Jobs.AsNoTracking().Include(x => x.Partner).Include(x => x.JobSkills).ThenInclude(x => x.Skill)
             .FirstOrDefaultAsync(x => x.Id == jobId &&
                 ((x.Status == (short)PartnerJobStatus.Published && (x.StartAt == null || x.StartAt <= now) && (x.Deadline == null || x.Deadline > now)) ||
@@ -72,8 +76,7 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         var saved = await db.StudentSavedJobs.AnyAsync(x => x.StudentUserId == student.Id && x.JobId == jobId, ct);
         var application = await db.JobApplications.AsNoTracking().Where(x => x.StudentUserId == student.Id && x.JobId == jobId)
             .OrderByDescending(x => x.AppliedAt).ThenByDescending(x => x.Id).FirstOrDefaultAsync(ct);
-        var applicantCount = await db.JobApplications.CountAsync(x => x.JobId == jobId, ct);
-        return ToResponse(job, saved, application, applicantCount);
+        return ToResponse(job, saved, application);
     }
 
     public async Task<PublicPartnerProfileResponse> GetPartnerProfileAsync(Guid accountId, Guid jobId, CancellationToken ct)
@@ -91,6 +94,7 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
                 (x.StartAt == null || x.StartAt <= now) && (x.Deadline == null || x.Deadline > now))
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new PublicPartnerJobResponse(x.Id, x.Title, (JobWorkType)x.WorkType,
+                (JobEmploymentType)x.EmploymentType, x.JobField,
                 x.MinSalaryVnd, x.MaxSalaryVnd, x.Location, x.Deadline))
             .ToListAsync(ct);
         return new PublicPartnerProfileResponse(partner.Id, partner.OrganizationName ?? partner.FullName,
@@ -178,7 +182,7 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
             ?? throw new PartnerException("JOB_NOT_FOUND", "Cơ hội này không còn nhận hồ sơ.", 404);
     }
 
-    private static OpportunityJobResponse ToResponse(Job job, bool saved, JobApplication? application, int applicantCount)
+    private static OpportunityJobResponse ToResponse(Job job, bool saved, JobApplication? application)
     {
         using var document = ParseRequirements(job.RequiredJson);
         string[] Lines(string name) => document.RootElement.ValueKind == JsonValueKind.Object &&
@@ -190,14 +194,15 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         catch (JsonException) { }
         var profile = job.Partner;
         var websites = PartnerWebsiteLinks.ParseStored(profile.Website);
-        return new(job.Id, job.Title, (JobWorkType)job.WorkType, job.MinSalaryVnd, job.MaxSalaryVnd,
+        return new(job.Id, job.Title, (JobWorkType)job.WorkType, (JobEmploymentType)job.EmploymentType, job.JobField,
+            job.MinSalaryVnd, job.MaxSalaryVnd,
             job.Location, job.Description, job.StartAt, job.Deadline, Lines("responsibilities"),
             Lines("requiredQualifications"), Lines("preferredQualifications"), Lines("projectAreas"),
             job.JobSkills.OrderBy(x => x.RequirementType).ThenBy(x => x.Skill.Name)
                 .Select(x => new JobSkillResponse(x.SkillId, x.Skill.Name, x.Skill.Category is { } category ? (short)category : null,
-                    (JobSkillRequirementType)x.RequirementType)).ToList(), benefits,
+                    (JobSkillRequirementType)x.RequirementType, x.Skill.IconUrl)).ToList(), benefits,
             profile.OrganizationName ?? profile.FullName, profile.AvatarUrl, profile.Industry, profile.IsVerified,
-            applicantCount, saved, application is not null, application?.Status, application?.AppliedAt, job.CreatedAt,
+            saved, application is not null, application?.Status, application?.AppliedAt, job.CreatedAt,
             profile.Bio, profile.Address, websites.FirstOrDefault(), profile.ContactEmail, profile.Phone,
             websites, profile.PartnerType);
     }
