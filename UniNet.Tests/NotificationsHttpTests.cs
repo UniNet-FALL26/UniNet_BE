@@ -33,38 +33,88 @@ namespace UniNet.Tests;
 
 public sealed class NotificationsHttpTests
 {
+    [Theory]
+    [InlineData("Assessor")]
+    [InlineData("2")]
+    [InlineData("Student")]
+    public async Task WalletUsesCurrentAccountRoleRatherThanTokenRole(string tokenRole)
+    {
+        await using var api = await Api.StartAsync();
+        var assessor = new Account { Email = "wallet-owner@finance.test", Role = AccountRole.Assessor };
+        await using (var scope = api.App.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+            db.Add(assessor); await db.SaveChangesAsync();
+        }
+        using var owner = api.Client(assessor, tokenRole);
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/api/wallet")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync("/api/admin/finance/summary")).StatusCode);
+        foreach (var role in Enum.GetValues<AccountRole>().Where(role => role != AccountRole.Assessor))
+        {
+            var account = role == AccountRole.Admin ? api.Admin : new Account { Email = $"wallet-denied-{role}@finance.test", Role = role };
+            await using (var scope = api.App.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+                if (role != AccountRole.Admin) { db.Add(account); await db.SaveChangesAsync(); }
+            }
+            using var denied = api.Client(account, "Assessor");
+            Assert.Equal(HttpStatusCode.Forbidden, (await denied.GetAsync("/api/wallet")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await denied.PostAsJsonAsync("/api/wallet/withdrawals",
+                new { requestKey = Guid.NewGuid(), amount = "1", bankName = "Bank", bankAccountNumber = "123", bankAccountHolder = "Owner" })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await denied.PostAsync($"/api/wallet/withdrawals/{Guid.NewGuid()}/cancel", null)).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.Unauthorized, (await api.Http.GetAsync("/api/wallet")).StatusCode);
+        await using (var scope = api.App.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+            (await db.Accounts.SingleAsync(a => a.Id == assessor.Id)).Role = AccountRole.Student;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync("/api/wallet")).StatusCode);
+    }
+
     [Fact]
     public async Task FinanceHttpEnforcesRoleOwnershipRevocationAndExactMoneyContract()
     {
         await using var api = await Api.StartAsync();
         var accountant = new Account { Email = "accountant-http@finance.test", Role = AccountRole.Accountant, Profile = new() { FullName = "Accountant" } };
         var moderator = new Account { Email = "moderator-http@finance.test", Role = AccountRole.Moderator };
+        var assessor = new Account { Email = "assessor-http@finance.test", Role = AccountRole.Assessor };
+        var otherAssessor = new Account { Email = "other-assessor-http@finance.test", Role = AccountRole.Assessor };
         await using (var scope = api.App.Services.CreateAsyncScope()) {
-            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>(); db.AddRange(accountant, moderator); await db.SaveChangesAsync();
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>(); db.AddRange(accountant, moderator, assessor, otherAssessor); await db.SaveChangesAsync();
         }
         using var finance = api.Client(accountant); using var mod = api.Client(moderator); using var student = api.Client(api.Student); using var partner = api.Client(api.Partner); using var admin = api.Client(api.Admin);
+        using var owner = api.Client(assessor); using var otherOwner = api.Client(otherAssessor);
         Assert.Equal(HttpStatusCode.Forbidden, (await student.GetAsync("/api/admin/finance/summary")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await mod.GetAsync("/api/admin/finance/summary")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await finance.GetAsync("/api/admin/finance/summary")).StatusCode);
-        var credit = await finance.PostAsJsonAsync("/api/admin/finance/wallet/credits", new { accountId = api.Student.Id, amount = "9007199254740993", sourceReference = "EXACT-INCOME", reason = "Documented income" });
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/api/admin/finance/summary")).StatusCode);
+        var credit = await finance.PostAsJsonAsync("/api/admin/finance/wallet/credits", new { accountId = assessor.Id, amount = "9007199254740993", sourceReference = "EXACT-INCOME", reason = "Documented income" });
         credit.EnsureSuccessStatusCode();
         using var posted = await credit.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Equal("9007199254740993", posted!.RootElement.GetProperty("amount").GetString());
-        var walletResponse = await student.GetAsync("/api/wallet"); Assert.True(walletResponse.Headers.CacheControl?.NoStore);
+        var walletResponse = await owner.GetAsync("/api/wallet"); Assert.True(walletResponse.Headers.CacheControl?.NoStore);
         using var wallet = await walletResponse.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Equal("9007199254740993", wallet!.RootElement.GetProperty("balance").GetProperty("available").GetString());
         var requestKey = Guid.NewGuid();
-        var request = await student.PostAsJsonAsync("/api/wallet/withdrawals", new { requestKey, amount = "700", bankName = "Bank", bankAccountNumber = "123", bankAccountHolder = "Owner" }); request.EnsureSuccessStatusCode();
+        var request = await owner.PostAsJsonAsync("/api/wallet/withdrawals", new { requestKey, amount = "700", bankName = "Bank", bankAccountNumber = "123", bankAccountHolder = "Owner" }); request.EnsureSuccessStatusCode();
         using var row = await request.Content.ReadFromJsonAsync<JsonDocument>(); var id = row!.RootElement.GetProperty("id").GetGuid();
         Assert.Equal(0, row.RootElement.GetProperty("state").GetInt32());
         Assert.False(row.RootElement.TryGetProperty("payingAccount", out _));
         Assert.False(row.RootElement.TryGetProperty("reviewedBy", out _));
-        Assert.Equal(HttpStatusCode.NotFound, (await partner.PostAsync($"/api/wallet/withdrawals/{id}/cancel", null)).StatusCode);
+        using var otherWallet = await otherOwner.GetFromJsonAsync<JsonDocument>($"/api/wallet?accountId={assessor.Id}");
+        Assert.Equal("0", otherWallet!.RootElement.GetProperty("balance").GetProperty("available").GetString());
+        Assert.Empty(otherWallet.RootElement.GetProperty("withdrawals").EnumerateArray());
+        Assert.Equal(HttpStatusCode.OK, (await finance.GetAsync("/api/admin/finance/withdrawals")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/api/admin/finance/withdrawals")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await otherOwner.PostAsync($"/api/wallet/withdrawals/{id}/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await partner.PostAsync($"/api/wallet/withdrawals/{id}/cancel", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await admin.GetAsync("/api/wallet")).StatusCode);
         await using (var scope = api.App.Services.CreateAsyncScope()) {
             var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>(); db.Add(new NotificationPermissionOverride { AccountId = accountant.Id, Permission = NotificationPermissionPolicy.WalletCredit, IsGranted = false }); await db.SaveChangesAsync();
         }
-        Assert.Equal(HttpStatusCode.Forbidden, (await finance.PostAsJsonAsync("/api/admin/finance/wallet/credits", new { accountId = api.Student.Id, amount = "1", sourceReference = "DENIED", reason = "Denied" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await finance.PostAsJsonAsync("/api/admin/finance/wallet/credits", new { accountId = assessor.Id, amount = "1", sourceReference = "DENIED", reason = "Denied" })).StatusCode);
     }
     private sealed class SkillIconCloud : ICloudImageStorage
     {
@@ -307,13 +357,13 @@ public sealed class NotificationsHttpTests
         public Account Partner => accounts[1];
         public Account Admin => accounts[2];
         public HttpClient Http { get; } = new() { BaseAddress = new Uri(app.Urls.Single()) };
-        private static string Token(Account account) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
-            Issuer, Issuer, [new(JwtRegisteredClaimNames.Sub, account.Id.ToString()), new(ClaimTypes.Role, account.Role.ToString()), new("session_version", account.SessionVersion.ToString())],
+        private static string Token(Account account, string? tokenRole = null) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+            Issuer, Issuer, [new(JwtRegisteredClaimNames.Sub, account.Id.ToString()), new(ClaimTypes.Role, tokenRole ?? account.Role.ToString()), new("session_version", account.SessionVersion.ToString())],
             expires: DateTime.UtcNow.AddMinutes(5), signingCredentials: new(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Key)), SecurityAlgorithms.HmacSha256)));
-        public HttpClient Client(Account account)
+        public HttpClient Client(Account account, string? tokenRole = null)
         {
             var client = new HttpClient { BaseAddress = Http.BaseAddress };
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token(account));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token(account, tokenRole));
             return client;
         }
         public async Task<Guid> SendAsync(Guid accountId, string key)

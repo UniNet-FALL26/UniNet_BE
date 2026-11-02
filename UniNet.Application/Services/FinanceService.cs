@@ -30,8 +30,8 @@ public sealed partial class FinanceService(UniNetDbContext db)
     }
     private async Task Owner(Guid owner, CancellationToken ct)
     {
-        if (!await db.Accounts.AnyAsync(a => a.Id == owner && a.Status == AccountStatus.Active && (a.Role == AccountRole.Student || a.Role == AccountRole.Partner), ct))
-            throw Error("INVALID_WALLET", "Wallet requires an active Student or Partner account.", 403);
+        if (!await db.Accounts.AnyAsync(a => a.Id == owner && a.Status == AccountStatus.Active && a.Role == AccountRole.Assessor, ct))
+            throw Error("INVALID_WALLET", "Wallet requires an active Assessor account.", 403);
     }
     private async Task<T> Mutate<T>(Guid resource, Func<Task<T>> action, CancellationToken ct)
     {

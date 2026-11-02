@@ -18,7 +18,7 @@ public sealed partial class FinanceService
         await NotificationPermissionPolicy.RequireAsync(db, actor, NotificationPermissionPolicy.WalletCredit, ct);
         if (string.IsNullOrWhiteSpace(search) || search.Trim().Length < 3) return [];
         var text = Text(search, 255).ToLowerInvariant();
-        return await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Active && (a.Role == AccountRole.Student || a.Role == AccountRole.Partner) &&
+        return await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Active && a.Role == AccountRole.Assessor &&
             (a.Email.ToLower().Contains(text) || a.Profile != null && a.Profile.FullName.ToLower().Contains(text)))
             .OrderBy(a => a.Email).Select(a => new FinanceRecipient(a.Id, a.Email, a.Profile == null ? "" : a.Profile.FullName)).Take(20).ToListAsync(ct);
     }

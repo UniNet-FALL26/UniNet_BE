@@ -22,7 +22,9 @@ public sealed record OwnerWithdrawalResponse(Guid Id, decimal Amount, string Ban
     public static OwnerWithdrawalResponse From(WalletWithdrawal w) => new(w.Id, w.Amount, w.BankName, w.BankAccountNumber, w.BankAccountHolder, w.State, w.CreatedAt, w.RejectionReason ?? w.ReviewReason, w.BankReference);
 }
 
-[UniNet.API.Services.FinanceJson, ApiController, Authorize(Roles = "Student,Partner"), Route("api/wallet"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+// FinanceService checks the active owner's current database role on every wallet operation.
+// A cached role claim must not prevent a role-2 account from opening its own wallet.
+[UniNet.API.Services.FinanceJson, ApiController, Authorize, Route("api/wallet"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class WalletController(FinanceService finance) : ControllerBase
 {
     private Guid Actor => Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)!.Value);

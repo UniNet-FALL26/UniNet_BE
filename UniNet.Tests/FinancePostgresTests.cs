@@ -57,7 +57,7 @@ public sealed class FinancePostgresTests
     {
         if (Environment.GetEnvironmentVariable("UNINET_FINANCE_TEST_POSTGRES") is null) return;
         await using var store = new Store(); await store.Start(); await using var db = store.Open(); await db.Database.MigrateAsync();
-        var owner = new Account { Email = "owner@finance.test", Role = AccountRole.Student };
+        var owner = new Account { Email = "owner@finance.test", Role = AccountRole.Assessor };
         var actor = new Account { Email = "accountant@finance.test", Role = AccountRole.Accountant };
         db.AddRange(owner, actor); await db.SaveChangesAsync();
         await new FinanceService(db).CreditAsync(actor.Id, new(owner.Id, 1000, "INCOME", "Income"), default);
@@ -77,7 +77,7 @@ public sealed class FinancePostgresTests
     {
         if (Environment.GetEnvironmentVariable("UNINET_FINANCE_TEST_POSTGRES") is null) return;
         await using var store = new Store(); await store.Start(); await using var db = store.Open(); await db.Database.MigrateAsync();
-        var owner = new Account { Email = "payout-owner@finance.test", Role = AccountRole.Student, Profile = new() { FullName = "Owner" } };
+        var owner = new Account { Email = "payout-owner@finance.test", Role = AccountRole.Assessor, Profile = new() { FullName = "Owner" } };
         var actor = new Account { Email = "payout-accountant@finance.test", Role = AccountRole.Accountant, Profile = new() { FullName = "Accountant" } };
         var reviewer = new Account { Email = "payout-reviewer@finance.test", Role = AccountRole.Admin };
         db.AddRange(owner, actor, reviewer); await db.SaveChangesAsync();

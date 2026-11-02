@@ -7,6 +7,8 @@ using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Infrastructure.Data;
 using Xunit;
+using Microsoft.AspNetCore.Authorization;
+using UniNet.API.Controllers;
 
 namespace UniNet.Tests;
 
@@ -15,7 +17,7 @@ public sealed class FinanceWalletTests : IAsyncLifetime
     private readonly SqliteConnection connection = new("Data Source=:memory:");
     private UniNetDbContext db = null!;
     private FinanceService service = null!;
-    private readonly Account owner = Make(AccountRole.Student);
+    private readonly Account owner = Make(AccountRole.Assessor);
     private readonly Account accountant = Make(AccountRole.Accountant);
     private readonly Account moderator = Make(AccountRole.Moderator);
     private static Account Make(AccountRole role) => new() { Email = Guid.NewGuid() + "@finance.test", Role = role, PasswordHash = "fixture", Profile = new() { FullName = role.ToString() } };
@@ -28,6 +30,43 @@ public sealed class FinanceWalletTests : IAsyncLifetime
     public async Task DisposeAsync() { await db.DisposeAsync(); await connection.DisposeAsync(); }
     private async Task Credit(decimal amount = 1000) => await service.CreditAsync(accountant.Id, new(owner.Id, amount, "INCOME-001", "Project income"), default);
     private WithdrawalRequest Request(decimal amount = 600) => new(Guid.NewGuid(), amount, "Bank", "123456", "OWNER");
+
+    [Theory]
+    [InlineData(AccountRole.Student)]
+    [InlineData(AccountRole.Partner)]
+    [InlineData(AccountRole.Verifier)]
+    [InlineData(AccountRole.Moderator)]
+    [InlineData(AccountRole.Accountant)]
+    [InlineData(AccountRole.Admin)]
+    public async Task WalletEligibilityRejectsNonAssessorOwners(AccountRole role)
+    {
+        var account = Make(role); db.Add(account); await db.SaveChangesAsync();
+        var error = await Assert.ThrowsAsync<AuthException>(() => service.HistoryAsync(account.Id, default));
+        Assert.Equal(403, error.Status);
+        await Assert.ThrowsAsync<AuthException>(() => service.RequestAsync(account.Id, Request(), default));
+        await Assert.ThrowsAsync<AuthException>(() => service.CreditAsync(accountant.Id, new(account.Id, 100, "ROLE-TEST", "Income"), default));
+    }
+
+    [Fact]
+    public async Task WalletEligibilityAllowsOnlyActiveAssessorAndRecipientLookupMatches()
+    {
+        var assessor = Make(AccountRole.Assessor); var student = Make(AccountRole.Student); var partner = Make(AccountRole.Partner);
+        db.AddRange(assessor, student, partner); await db.SaveChangesAsync();
+        Assert.Equal(0, (await service.HistoryAsync(assessor.Id, default)).Balance.Available);
+        var recipients = await service.RecipientsAsync(accountant.Id, "@finance.test", default);
+        Assert.Contains(recipients, item => item.AccountId == assessor.Id);
+        Assert.DoesNotContain(recipients, item => item.AccountId == student.Id || item.AccountId == partner.Id);
+        assessor.Status = AccountStatus.Suspended; await db.SaveChangesAsync();
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => service.HistoryAsync(assessor.Id, default))).Status);
+    }
+
+    [Fact]
+    public void WalletControllerRequiresAuthenticationAndDelegatesCurrentRoleCheckToService()
+    {
+        var attribute = (AuthorizeAttribute)Assert.Single(typeof(WalletController).GetCustomAttributes(typeof(AuthorizeAttribute), true));
+        Assert.Null(attribute.Roles);
+        Assert.Empty(typeof(WalletController).GetCustomAttributes(typeof(AllowAnonymousAttribute), true));
+    }
 
     [Fact]
     public async Task ReservationsPreventOverdrawAndCancellationReleasesThem()
