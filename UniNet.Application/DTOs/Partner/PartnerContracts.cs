@@ -24,6 +24,8 @@ public sealed record JobBenefitInput(string Title, string Description, string? I
 public sealed record SavePartnerJobRequest(
     string Title,
     JobWorkType WorkType,
+    JobEmploymentType EmploymentType,
+    string JobField,
     decimal? MinSalaryVnd,
     decimal? MaxSalaryVnd,
     string Location,
@@ -44,6 +46,8 @@ public sealed record PartnerJobResponse(
     Guid Id,
     string Title,
     JobWorkType WorkType,
+    JobEmploymentType EmploymentType,
+    string JobField,
     decimal? MinSalaryVnd,
     decimal? MaxSalaryVnd,
     string? Location,
@@ -58,10 +62,11 @@ public sealed record PartnerJobResponse(
     IReadOnlyList<JobSkillResponse> Skills,
     IReadOnlyList<JobBenefitInput> Benefits,
     int ApplicantCount,
+    int ViewCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed record JobSkillResponse(Guid? SkillId, string Name, short? Category, JobSkillRequirementType RequirementType);
+public sealed record JobSkillResponse(Guid? SkillId, string Name, short? Category, JobSkillRequirementType RequirementType, string? IconUrl = null);
 
 public sealed record PartnerJobsResponse(
     int Page,
@@ -78,6 +83,8 @@ public sealed record OpportunityJobResponse(
     Guid Id,
     string Title,
     JobWorkType WorkType,
+    JobEmploymentType EmploymentType,
+    string JobField,
     decimal? MinSalaryVnd,
     decimal? MaxSalaryVnd,
     string? Location,
@@ -94,7 +101,6 @@ public sealed record OpportunityJobResponse(
     string? CompanyAvatarUrl,
     string? CompanyIndustry,
     bool CompanyIsVerified,
-    int ApplicantCount,
     bool IsSaved,
     bool IsApplied,
     short? ApplicationStatus,
@@ -119,6 +125,8 @@ public sealed record PublicPartnerJobResponse(
     Guid Id,
     string Title,
     JobWorkType WorkType,
+    JobEmploymentType EmploymentType,
+    string JobField,
     decimal? MinSalaryVnd,
     decimal? MaxSalaryVnd,
     string? Location,

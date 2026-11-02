@@ -99,7 +99,8 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         {
             Id = Guid.NewGuid(), PartnerId = profile.Id, Partner = profile,
             Title = request.Title.Trim(),
-            WorkType = (short)request.WorkType, MinSalaryVnd = request.MinSalaryVnd, MaxSalaryVnd = request.MaxSalaryVnd,
+            WorkType = (short)request.WorkType, EmploymentType = (short)request.EmploymentType, JobField = request.JobField.Trim(),
+            MinSalaryVnd = request.MinSalaryVnd, MaxSalaryVnd = request.MaxSalaryVnd,
             Location = request.Location.Trim(), Description = request.Description.Trim(),
             RequiredJson = SerializeRequirements(request), BenefitsJson = JsonSerializer.Serialize(request.Benefits ?? [], JsonOptions),
             Status = (short)request.Status, StartAt = request.StartAt, Deadline = request.Deadline,
@@ -147,6 +148,8 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         }
         job.Title = request.Title.Trim();
         job.WorkType = (short)request.WorkType;
+        job.EmploymentType = (short)request.EmploymentType;
+        job.JobField = request.JobField.Trim();
         job.MinSalaryVnd = request.MinSalaryVnd;
         job.MaxSalaryVnd = request.MaxSalaryVnd;
         job.Location = request.Location.Trim();
@@ -318,17 +321,18 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
     private static PartnerJobResponse ToJob(Job job, int applicantCount)
     {
         var requirements = DeserializeRequirements(job.RequiredJson);
-        return new(job.Id, job.Title, (JobWorkType)job.WorkType, job.MinSalaryVnd, job.MaxSalaryVnd,
+        return new(job.Id, job.Title, (JobWorkType)job.WorkType, (JobEmploymentType)job.EmploymentType, job.JobField,
+            job.MinSalaryVnd, job.MaxSalaryVnd,
             job.Location, job.Description, GetStatus(job), job.StartAt, job.Deadline,
             requirements.Responsibilities, requirements.RequiredQualifications, requirements.PreferredQualifications,
             requirements.ProjectAreas,
             job.JobSkills.OrderBy(x => x.RequirementType).ThenBy(x => x.Skill.Name)
-                .Select(x => new JobSkillResponse(x.SkillId, x.Skill.Name, x.Skill.Category is { } category ? (short)category : null, (JobSkillRequirementType)x.RequirementType))
+                .Select(x => new JobSkillResponse(x.SkillId, x.Skill.Name, x.Skill.Category is { } category ? (short)category : null, (JobSkillRequirementType)x.RequirementType, x.Skill.IconUrl))
                 .Concat(job.Status == (short)PartnerJobStatus.Draft
                     ? (requirements.PendingSkills ?? []).Select(skill => new JobSkillResponse(null, skill.Name, null, skill.RequirementType))
                     : [])
                 .ToList(),
-            DeserializeBenefits(job.BenefitsJson), applicantCount, job.CreatedAt, job.UpdatedAt);
+            DeserializeBenefits(job.BenefitsJson), applicantCount, job.ViewCount, job.CreatedAt, job.UpdatedAt);
     }
 
     private static PartnerApplicantResponse ToApplicant(JobApplication application, int applicationRound) => new(
@@ -386,6 +390,8 @@ public sealed class PartnerService(UniNetDbContext db) : IPartnerService
         Require(!string.IsNullOrWhiteSpace(request.Description), "INVALID_DESCRIPTION", "Description is required.");
         ValidateMax(request.Description, 20000, "Description");
         Require(Enum.IsDefined(request.WorkType), "INVALID_WORK_TYPE", "Work type is invalid.");
+        Require(Enum.IsDefined(request.EmploymentType), "INVALID_EMPLOYMENT_TYPE", "Employment type is invalid.");
+        ValidateRequired(request.JobField, 150, "JobField");
         ValidateStatus(request.Status, allowExpired: false);
         Require(request.Deadline > now || request.Status == PartnerJobStatus.Draft,
             "INVALID_DEADLINE", "A published job must have a future deadline.");
