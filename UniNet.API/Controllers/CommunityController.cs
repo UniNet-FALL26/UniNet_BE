@@ -51,6 +51,13 @@ public class CommunityController : ControllerBase
         }
     }
 
+    [HttpGet("posts/mine")]
+    public async Task<IActionResult> MyPosts([FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
+    {
+        try { return Ok(await _communityService.GetOwnPostsAsync(GetCurrentUserId(), page, pageSize, ct)); }
+        catch (CommunityException ex) { return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message }); }
+    }
+
     [HttpPost("posts/{id}/react")]
     public async Task<IActionResult> ToggleReaction(Guid id)
     {

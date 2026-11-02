@@ -50,7 +50,25 @@ public class CommunityService : ICommunityService
             .Skip((page - 1) * pageSize)
             .Take(pageSize);
 
-        var posts = await postsQuery.Select(p => new PostResponse
+        return await PostResponses(postsQuery, actualUserId).ToListAsync();
+    }
+
+    public async Task<List<PostResponse>> GetOwnPostsAsync(Guid currentUserId, int page, int pageSize, CancellationToken ct = default)
+    {
+        if (page < 1 || page > 1000000 || pageSize < 1 || pageSize > 50)
+            throw new CommunityException("INVALID_PAGE", "Thông tin phân trang không hợp lệ.");
+        var profileId = await _context.UserProfiles.AsNoTracking()
+            .Where(p => p.AccountId == currentUserId && p.Account.Status == UniNet.Domain.AccountStatus.Active)
+            .Select(p => (Guid?)p.Id).SingleOrDefaultAsync(ct)
+            ?? throw new CommunityException("FORBIDDEN", "Tài khoản không có quyền xem bài đăng này.", 403);
+        var query = _context.CommunityPosts.AsNoTracking()
+            .Where(p => p.AuthorUserId == profileId && !p.IsDeleted && p.Status == (short)CommunityContentStatus.Published)
+            .OrderByDescending(p => p.CreatedAt).ThenByDescending(p => p.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize);
+        return await PostResponses(query, profileId).ToListAsync(ct);
+    }
+
+    private IQueryable<PostResponse> PostResponses(IQueryable<CommunityPost> postsQuery, Guid actualUserId) => postsQuery.Select(p => new PostResponse
         {
             Id = p.Id,
             AuthorUserId = p.AuthorUserId,
@@ -66,10 +84,7 @@ public class CommunityService : ICommunityService
             IsSaved = actualUserId != Guid.Empty && _context.CommunityPostBookmarks.Any(b => b.PostId == p.Id && b.UserId == actualUserId),
             CreatedAt = p.CreatedAt,
             UpdatedAt = p.UpdatedAt
-        }).ToListAsync();
-
-        return posts;
-    }
+        });
 
     public async Task<Guid> CreatePostAsync(Guid currentUserId, CreatePostRequest request, CancellationToken ct = default)
     {
