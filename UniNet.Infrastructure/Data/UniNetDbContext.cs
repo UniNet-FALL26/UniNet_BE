@@ -173,16 +173,25 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         });
         model.Entity<UserProfile>(e =>
         {
-            e.ToTable("Users", t => t.HasCheckConstraint("CK_Users_PartnerType", "\"PartnerType\" IS NULL OR \"PartnerType\" BETWEEN 0 AND 4")); e.HasKey(x => x.Id);
+            e.ToTable("Users", t => t.HasCheckConstraint("CK_Users_PartnerType", "\"PartnerJson\" ->> 'PartnerType' IS NULL OR CAST(\"PartnerJson\" ->> 'PartnerType' AS INTEGER) BETWEEN 0 AND 4")); e.HasKey(x => x.Id);
             e.HasIndex(x => x.AccountId).IsUnique();
             e.HasOne(x => x.Account).WithOne(x => x.Profile).HasForeignKey<UserProfile>(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
             e.Property(x => x.FullName).HasMaxLength(255).IsRequired();
             e.Property(x => x.Nickname).HasMaxLength(100).IsRequired();
-            e.Property(x => x.OrganizationName).HasMaxLength(255);
-            e.HasIndex(x => new { x.UniversityName, x.Major });
-            e.Property(x => x.UniversityName).HasMaxLength(255); e.Property(x => x.Major).HasMaxLength(255);
-            e.Property(x => x.StudentCode).HasMaxLength(50); e.Property(x => x.PartnerType).HasConversion<short?>();
-            e.Property(x => x.Industry).HasMaxLength(150); e.Property(x => x.ContactEmail).HasMaxLength(255);
+            e.OwnsOne(x => x.StudentJson, json =>
+            {
+                json.ToJson("StudentJson");
+                json.Property(x => x.UniversityName).HasMaxLength(255); json.Property(x => x.Major).HasMaxLength(255);
+                json.Property(x => x.StudentCode).HasMaxLength(50);
+            });
+            e.OwnsOne(x => x.PartnerJson, json =>
+            {
+                json.ToJson("PartnerJson");
+                json.Property(x => x.OrganizationName).HasMaxLength(255);
+                json.Property(x => x.PartnerType).HasConversion<short?>(); json.Property(x => x.Industry).HasMaxLength(150);
+            });
+            e.OwnsOne(x => x.AssessorJson, json => json.ToJson("AssessorJson"));
+            e.Property(x => x.ContactEmail).HasMaxLength(255);
             e.Property(x => x.Phone).HasMaxLength(30);
         });
         model.Entity<UserVerification>(e =>

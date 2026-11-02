@@ -27,7 +27,7 @@ public sealed class AdminUsersService(UniNetDbContext db)
         if (!string.IsNullOrWhiteSpace(request.Search)) {
             var text = request.Search.Trim().ToLowerInvariant(); var id = Guid.TryParse(text, out var parsed) ? parsed : Guid.Empty;
             query = query.Where(a => a.Id == id || a.Email.ToLower().Contains(text) || a.Profile != null &&
-                (a.Profile.FullName.ToLower().Contains(text) || a.Profile.Nickname.ToLower().Contains(text) || a.Profile.OrganizationName != null && a.Profile.OrganizationName.ToLower().Contains(text)));
+                (a.Profile.FullName.ToLower().Contains(text) || a.Profile.Nickname.ToLower().Contains(text) || a.Profile.PartnerJson != null && a.Profile.PartnerJson.OrganizationName != null && a.Profile.PartnerJson.OrganizationName.ToLower().Contains(text)));
         }
         query = request.Verification switch {
             null or "" => query,

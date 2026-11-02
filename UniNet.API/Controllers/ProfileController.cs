@@ -30,4 +30,8 @@ public sealed class ProfileController(ProfileService profiles, AuthService auth,
     public Task<AccountResponse> Student(StudentProfileRequest request, CancellationToken ct) => profiles.Student(AccountId, request, ct);
     [Authorize(Roles = "Partner"), HttpPut("partner")]
     public Task<AccountResponse> Partner(PartnerProfileRequest request, CancellationToken ct) => profiles.Partner(AccountId, request, ct);
+    [HttpPut("assessor"), RequestSizeLimit(32768)]
+    public Task<AccountResponse> Assessor(AssessorProfileRequest request, CancellationToken ct) => profiles.Assessor(AccountId, request, ct);
+    [HttpDelete("assessor")]
+    public Task<AccountResponse> ClearAssessor(CancellationToken ct) => profiles.ClearAssessor(AccountId, ct);
 }

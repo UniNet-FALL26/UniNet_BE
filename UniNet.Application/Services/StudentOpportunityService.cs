@@ -37,7 +37,7 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         {
             var term = keyword.Trim();
             query = query.Where(x => x.Title.Contains(term) || (x.Description != null && x.Description.Contains(term)) ||
-                (x.Location != null && x.Location.Contains(term)) || (x.Partner.OrganizationName != null && x.Partner.OrganizationName.Contains(term)) ||
+                (x.Location != null && x.Location.Contains(term)) || (x.Partner.PartnerJson != null && x.Partner.PartnerJson.OrganizationName != null && x.Partner.PartnerJson.OrganizationName.Contains(term)) ||
                 x.Partner.FullName.Contains(term) || x.JobSkills.Any(skill => skill.Skill.Name.Contains(term)));
         }
         if (workType.HasValue) query = query.Where(x => x.WorkType == (short)workType.Value);

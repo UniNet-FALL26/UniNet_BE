@@ -23,7 +23,7 @@ public sealed class DatabaseDesignTests
     {
         using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
             .UseNpgsql("Host=localhost;Database=model_test;Username=postgres").Options);
-        var entities = db.GetService<IDesignTimeModel>().Model.GetEntityTypes().ToDictionary(x => x.GetTableName()!);
+        var entities = db.GetService<IDesignTimeModel>().Model.GetEntityTypes().Where(x => !x.IsOwned()).ToDictionary(x => x.GetTableName()!);
         foreach (var table in new[] { "Accounts", "CareerProfiles", "RefreshTokens", "Skills", "UserVerifications", "Users" })
             Assert.Contains(table, entities.Keys);
         var user = entities["Users"];

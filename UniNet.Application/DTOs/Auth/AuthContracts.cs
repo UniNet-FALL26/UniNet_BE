@@ -12,10 +12,15 @@ public record GoogleLoginRequest(string IdToken, AccountRole Role = AccountRole.
 public record RefreshRequest(string RefreshToken);
 public record StudentProfileRequest(string FullName, string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, string? StudentCode, string? Nickname = null);
 public record PartnerProfileRequest(string OrganizationName, PartnerType? PartnerType, string? AvatarUrl, string? CoverUrl, string? Bio, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address, IReadOnlyList<string>? Websites = null);
+public sealed record AssessorProfileDetails(string? JobTitle, string? CompanyName, int YearsOfExperience, string[]? Expertise,
+    string? Education, string? University, string? LinkedInUrl, string? GitHubUrl, string? PortfolioUrl);
+public sealed record AssessorProfileRequest(string FullName, string? Nickname, string? AvatarUrl, string? CoverUrl, string? Bio,
+    string? ContactEmail, string? Phone, string? Address, AssessorProfileDetails? AssessorJson);
 public record ProfileResponse(Guid Id, string FullName, string Nickname, string? OrganizationName, string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, string? StudentCode, PartnerType? PartnerType, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address, bool IsVerified)
 {
     public string DisplayName => Nickname;
     public IReadOnlyList<string> Websites { get; init; } = Array.Empty<string>();
+    public AssessorProfileDetails? AssessorJson { get; init; }
 }
 public record AccountResponse(Guid Id, string Email, AccountRole Role, AccountStatus Status, bool EmailVerified, ProfileResponse? Profile, bool ProfileComplete)
 {

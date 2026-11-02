@@ -5,7 +5,7 @@ using UniNet.Domain;
 
 namespace UniNet.Application.Services;
 
-public sealed class ProfileService(UniNetDbContext db)
+public sealed partial class ProfileService(UniNetDbContext db)
 {
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static void ValidateName(string value)
@@ -17,16 +17,16 @@ public sealed class ProfileService(UniNetDbContext db)
     {
         if (value?.Length > limit) throw new AuthException("INVALID_PROFILE", $"{field} quá dài.");
     }
-    private static void ValidatePartnerContact(PartnerProfileRequest request)
+    private static void ValidateContact(string? contactEmail, string? contactPhone)
     {
-        var email = request.ContactEmail?.Trim();
+        var email = contactEmail?.Trim();
         if (!string.IsNullOrEmpty(email) &&
             (!System.Net.Mail.MailAddress.TryCreate(email, out var address) ||
              !string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase) ||
              !email.Contains('.')))
             throw new AuthException("INVALID_PROFILE", "Email liên hệ không đúng định dạng.");
 
-        var phone = request.Phone?.Trim();
+        var phone = contactPhone?.Trim();
         if (!string.IsNullOrEmpty(phone))
         {
             var digitCount = phone.Count(char.IsDigit);
@@ -86,7 +86,7 @@ public sealed class ProfileService(UniNetDbContext db)
         }
         var storedWebsite = PartnerWebsiteLinks.Serialize(websites);
         Max(request.Address, 2000, "Địa chỉ");
-        ValidatePartnerContact(request);
+        ValidateContact(request.ContactEmail, request.Phone);
         var account = await Load(accountId, AccountRole.Partner, ct);
         var p = account.Profile!;
         await PortraitAssetPolicy.RetainReference(db, accountId, request.AvatarUrl, p.AvatarUrl, ct);

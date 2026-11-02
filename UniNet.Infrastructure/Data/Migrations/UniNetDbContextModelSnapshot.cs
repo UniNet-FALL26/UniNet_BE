@@ -2963,57 +2963,29 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<string>("Industry")
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying(150)");
-
                     b.Property<bool>("IsVerified")
                         .HasColumnType("boolean");
-
-                    b.Property<string>("Major")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("Nickname")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<string>("OrganizationName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<short?>("PartnerType")
-                        .HasColumnType("smallint");
-
                     b.Property<string>("Phone")
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
-                    b.Property<string>("StudentCode")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("UniversityName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Website")
-                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId")
                         .IsUnique();
 
-                    b.HasIndex("UniversityName", "Major");
-
                     b.ToTable("Users", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Users_PartnerType", "\"PartnerType\" IS NULL OR \"PartnerType\" BETWEEN 0 AND 4");
+                            t.HasCheckConstraint("CK_Users_PartnerType", "\"PartnerJson\" ->> 'PartnerType' IS NULL OR CAST(\"PartnerJson\" ->> 'PartnerType' AS INTEGER) BETWEEN 0 AND 4");
                         });
                 });
 
@@ -4166,7 +4138,112 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.OwnsOne("UniNet.Domain.AssessorProfileData", "AssessorJson", b1 =>
+                        {
+                            b1.Property<Guid>("UserProfileId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("CompanyName")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Education")
+                                .HasColumnType("text");
+
+                            b1.Property<string[]>("Expertise")
+                                .IsRequired()
+                                .HasColumnType("text[]");
+
+                            b1.Property<string>("GitHubUrl")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("JobTitle")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("LinkedInUrl")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("PortfolioUrl")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("University")
+                                .HasColumnType("text");
+
+                            b1.Property<int>("YearsOfExperience")
+                                .HasColumnType("integer");
+
+                            b1.HasKey("UserProfileId");
+
+                            b1.ToTable("Users");
+
+                            b1.ToJson("AssessorJson");
+
+                            b1.WithOwner()
+                                .HasForeignKey("UserProfileId");
+                        });
+
+                    b.OwnsOne("UniNet.Domain.PartnerProfileData", "PartnerJson", b1 =>
+                        {
+                            b1.Property<Guid>("UserProfileId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("Industry")
+                                .HasMaxLength(150)
+                                .HasColumnType("character varying(150)");
+
+                            b1.Property<string>("OrganizationName")
+                                .HasMaxLength(255)
+                                .HasColumnType("character varying(255)");
+
+                            b1.Property<short?>("PartnerType")
+                                .HasColumnType("smallint");
+
+                            b1.Property<string>("Website")
+                                .HasColumnType("text");
+
+                            b1.HasKey("UserProfileId");
+
+                            b1.ToTable("Users");
+
+                            b1.ToJson("PartnerJson");
+
+                            b1.WithOwner()
+                                .HasForeignKey("UserProfileId");
+                        });
+
+                    b.OwnsOne("UniNet.Domain.StudentProfileData", "StudentJson", b1 =>
+                        {
+                            b1.Property<Guid>("UserProfileId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("Major")
+                                .HasMaxLength(255)
+                                .HasColumnType("character varying(255)");
+
+                            b1.Property<string>("StudentCode")
+                                .HasMaxLength(50)
+                                .HasColumnType("character varying(50)");
+
+                            b1.Property<string>("UniversityName")
+                                .HasMaxLength(255)
+                                .HasColumnType("character varying(255)");
+
+                            b1.HasKey("UserProfileId");
+
+                            b1.ToTable("Users");
+
+                            b1.ToJson("StudentJson");
+
+                            b1.WithOwner()
+                                .HasForeignKey("UserProfileId");
+                        });
+
                     b.Navigation("Account");
+
+                    b.Navigation("AssessorJson");
+
+                    b.Navigation("PartnerJson");
+
+                    b.Navigation("StudentJson");
                 });
 
             modelBuilder.Entity("UniNet.Domain.UserVerification", b =>

@@ -1,4 +1,5 @@
 using UniNet.Domain.Entities;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace UniNet.Domain;
 
@@ -9,16 +10,20 @@ public sealed class UserProfile
     public Account Account { get; set; } = null!;
     public string FullName { get; set; } = "";
     public string Nickname { get; set; } = "";
-    public string? OrganizationName { get; set; }
+    public StudentProfileData? StudentJson { get; set; }
+    public PartnerProfileData? PartnerJson { get; set; }
+    public AssessorProfileData? AssessorJson { get; set; }
+    // Keep the existing application interface while persisting role fields only in JSON.
+    [NotMapped] public string? OrganizationName { get => PartnerJson?.OrganizationName; set { if (value != null || PartnerJson != null) (PartnerJson ??= new()).OrganizationName = value; } }
     public string? AvatarUrl { get; set; }
     public string? CoverUrl { get; set; }
     public string? Bio { get; set; }
-    public string? UniversityName { get; set; }
-    public string? Major { get; set; }
-    public string? StudentCode { get; set; }
-    public PartnerType? PartnerType { get; set; }
-    public string? Industry { get; set; }
-    public string? Website { get; set; }
+    [NotMapped] public string? UniversityName { get => StudentJson?.UniversityName; set { if (value != null || StudentJson != null) (StudentJson ??= new()).UniversityName = value; } }
+    [NotMapped] public string? Major { get => StudentJson?.Major; set { if (value != null || StudentJson != null) (StudentJson ??= new()).Major = value; } }
+    [NotMapped] public string? StudentCode { get => StudentJson?.StudentCode; set { if (value != null || StudentJson != null) (StudentJson ??= new()).StudentCode = value; } }
+    [NotMapped] public PartnerType? PartnerType { get => PartnerJson?.PartnerType; set { if (value != null || PartnerJson != null) (PartnerJson ??= new()).PartnerType = value; } }
+    [NotMapped] public string? Industry { get => PartnerJson?.Industry; set { if (value != null || PartnerJson != null) (PartnerJson ??= new()).Industry = value; } }
+    [NotMapped] public string? Website { get => PartnerJson?.Website; set { if (value != null || PartnerJson != null) (PartnerJson ??= new()).Website = value; } }
     public string? ContactEmail { get; set; }
     public string? Phone { get; set; }
     public string? Address { get; set; }

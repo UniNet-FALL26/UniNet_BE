@@ -33,6 +33,42 @@ namespace UniNet.Tests;
 
 public sealed class NotificationsHttpTests
 {
+    [Fact]
+    public async Task AssessorProfileHttpCreatesReadsUpdatesAndClearsOwnedProfessionalDetails()
+    {
+        await using var api = await Api.StartAsync();
+        var assessor = new Account { Email = "profile-http@assessor.test", Role = AccountRole.Assessor, Profile = new() { FullName = "Expert", Nickname = "expert" } };
+        await using (var scope = api.App.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>(); db.Add(assessor); await db.SaveChangesAsync();
+        }
+        using var owner = api.Client(assessor, "2"); using var student = api.Client(api.Student);
+        var input = new AssessorProfileRequest("Expert Updated", "expert", null, null, "Biography", "profile-http@assessor.test", "0968110347", "HCMC",
+            new("Engineer", "Company", 5, ["Backend", "Cloud"], "Master", "University", "https://www.linkedin.com/in/expert", "https://github.com/expert", "https://expert.test"));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await api.Http.PutAsJsonAsync("/api/profile/assessor", input)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await student.PutAsJsonAsync("/api/profile/assessor", input)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await student.DeleteAsync("/api/profile/assessor")).StatusCode);
+        (await owner.PutAsJsonAsync("/api/profile/assessor", input)).EnsureSuccessStatusCode();
+        using (var response = await owner.GetFromJsonAsync<JsonDocument>("/api/profile/me"))
+        {
+            var profile = response!.RootElement.GetProperty("profile");
+            Assert.Equal("Expert Updated", profile.GetProperty("fullName").GetString());
+            var details = profile.GetProperty("assessorJson");
+            Assert.Equal(9, details.EnumerateObject().Count()); Assert.Equal("Engineer", details.GetProperty("jobTitle").GetString());
+            Assert.Equal("https://github.com/expert", details.GetProperty("gitHubUrl").GetString());
+            Assert.Equal(5, details.GetProperty("yearsOfExperience").GetInt32()); Assert.Equal(2, details.GetProperty("expertise").GetArrayLength());
+        }
+        (await owner.PutAsJsonAsync("/api/profile/assessor", input with { AssessorJson = input.AssessorJson! with { JobTitle = "Senior Engineer" } })).EnsureSuccessStatusCode();
+        using (var response = await owner.GetFromJsonAsync<JsonDocument>("/api/profile/me"))
+            Assert.Equal("Senior Engineer", response!.RootElement.GetProperty("profile").GetProperty("assessorJson").GetProperty("jobTitle").GetString());
+        (await owner.DeleteAsync("/api/profile/assessor")).EnsureSuccessStatusCode();
+        using (var response = await owner.GetFromJsonAsync<JsonDocument>("/api/profile/me"))
+        {
+            Assert.Equal(JsonValueKind.Null, response!.RootElement.GetProperty("profile").GetProperty("assessorJson").ValueKind);
+            Assert.Equal("Biography", response.RootElement.GetProperty("profile").GetProperty("bio").GetString());
+        }
+    }
+
     [Theory]
     [InlineData("Assessor")]
     [InlineData("2")]
@@ -399,6 +435,7 @@ public sealed class NotificationsHttpTests
             builder.Services.AddScoped<NotificationService>(); builder.Services.AddScoped<NotificationTargets>();
             builder.Services.AddScoped<AdminUsersService>(); builder.Services.AddScoped<AdminPermissionService>();
             builder.Services.AddScoped<AdminSkillsService>(); builder.Services.AddScoped<FinanceService>();
+            builder.Services.AddScoped<ProfileService>(); builder.Services.AddScoped<AuthService>(); builder.Services.AddScoped<PortfolioService>();
             builder.Services.AddSingleton<ICloudImageStorage>(new SkillIconCloud());
             builder.Services.AddSingleton<OnnxPortraitProcessor>();
             if (withWorker)

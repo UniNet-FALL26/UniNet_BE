@@ -102,13 +102,16 @@ public sealed class StudentVerificationService(UniNetDbContext db)
             // Publish exactly the identity the admin reviewed, even if the editable profile changed while pending.
             await db.UserProfiles.Where(x => x.Id == row.UserId).ExecuteUpdateAsync(set => set
                 .SetProperty(x => x.IsVerified, true).SetProperty(x => x.FullName, snapshot.FullName)
-                .SetProperty(x => x.UniversityName, snapshot.SchoolName).SetProperty(x => x.StudentCode, snapshot.StudentCode)
                 .SetProperty(x => x.UpdatedAt, now), ct);
+            // EF8 cannot ExecuteUpdate individual members of an owned JSON document.
+            // The existing transaction/account lock still protects the reviewed snapshot.
+            await db.Entry(row.User).ReloadAsync(ct);
+            row.User.UniversityName = snapshot.SchoolName; row.User.StudentCode = snapshot.StudentCode;
         }
         else
             await db.UserProfiles.Where(x => x.Id == row.UserId).ExecuteUpdateAsync(set => set
                 .SetProperty(x => x.IsVerified, false).SetProperty(x => x.UpdatedAt, now), ct);
-        await db.Entry(row.User).ReloadAsync(ct);
+        if (!approve) await db.Entry(row.User).ReloadAsync(ct);
         var action = approve ? "approved" : "rejected";
         await NotificationService.EnqueueAsync(db, [ownerId],
             new($"verification.student.{action}", "Verification", approve ? "Xác minh tài khoản thành công" : "Yêu cầu xác minh bị từ chối",
