@@ -6,6 +6,8 @@ public sealed class Job
     public Guid PartnerId { get; set; }
     public string Title { get; set; } = "";
     public short WorkType { get; set; }
+    public short EmploymentType { get; set; }
+    public string JobField { get; set; } = "";
     public decimal? MinSalaryVnd { get; set; }
     public decimal? MaxSalaryVnd { get; set; }
     public string? Location { get; set; }
@@ -13,6 +15,7 @@ public sealed class Job
     public string? RequiredJson { get; set; }
     public string? BenefitsJson { get; set; }
     public short Status { get; set; }
+    public int ViewCount { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? StartAt { get; set; }
     public DateTimeOffset? Deadline { get; set; }

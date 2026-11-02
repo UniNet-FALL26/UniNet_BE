@@ -985,6 +985,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(255).IsRequired();
             e.Property(x => x.WorkType).HasColumnType("smallint");
+            e.Property(x => x.EmploymentType).HasColumnType("smallint");
+            e.Property(x => x.JobField).HasMaxLength(150).IsRequired();
             e.Property(x => x.MinSalaryVnd).HasPrecision(14, 0);
             e.Property(x => x.MaxSalaryVnd).HasPrecision(14, 0);
             e.Property(x => x.Location).HasMaxLength(255);
@@ -992,6 +994,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.RequiredJson).HasColumnType("jsonb");
             e.Property(x => x.BenefitsJson).HasColumnType("jsonb");
             e.Property(x => x.Status).HasColumnType("smallint");
+            e.Property(x => x.ViewCount).HasDefaultValue(0);
             e.HasOne(x => x.Partner).WithMany(x => x.PostedJobs).HasForeignKey(x => x.PartnerId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => x.PartnerId);
             e.HasIndex(x => new { x.Status, x.Deadline });
