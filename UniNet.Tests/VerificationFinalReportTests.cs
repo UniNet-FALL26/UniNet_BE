@@ -51,16 +51,52 @@ public sealed partial class ProjectVerificationTests
     }
 
     [Fact]
-    public async Task UnfinishedMeetingAndUnassignedStaffCannotSubmitReport()
+    public async Task OngoingMeetingAllowsReportSubmission()
     {
         await using var f = await Fixture.CreateAsync(); var data = await PrepareFinalReportAsync(f);
         (await f.Db.ProjectVerifications.SingleAsync()).MeetingEndAt = null; await f.Db.SaveChangesAsync();
+        var result = await new ReportService(f.Db).SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment));
+        f.Db.ChangeTracker.Clear();
+        var verification = await f.Db.ProjectVerifications.SingleAsync();
+        Assert.Equal(result.Id, (await f.Db.VerificationReports.SingleAsync()).Id);
+        Assert.Equal(ProjectVerificationStatus.Verified, verification.Status);
+        Assert.NotNull(verification.FinalizedAt);
+        Assert.Null(verification.MeetingEndAt);
+        Assert.Equal(VerificationAssignmentStatus.Completed, (await f.Db.VerificationAssignments.SingleAsync()).Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnstartedMeetingAndUnassignedStaffCannotSubmitReport(bool futureStart)
+    {
+        await using var f = await Fixture.CreateAsync(); var data = await PrepareFinalReportAsync(f);
+        var verification = await f.Db.ProjectVerifications.SingleAsync();
+        verification.MeetingStartAt = futureStart ? DateTimeOffset.UtcNow.AddHours(1) : null;
+        verification.MeetingEndAt = null; await f.Db.SaveChangesAsync();
         var error = await Assert.ThrowsAsync<ReportException>(() => new ReportService(f.Db).SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment)));
-        Assert.Equal("MEETING_NOT_COMPLETED", error.Code);
+        Assert.Equal("MEETING_NOT_STARTED", error.Code);
         var stranger = Fixture.Account("Stranger", AccountRole.Assessor); f.Db.Accounts.Add(stranger); await f.Db.SaveChangesAsync();
         error = await Assert.ThrowsAsync<ReportException>(() => new ReportService(f.Db).SubmitAsync(stranger.Id, FinalReport(data.Assignment)));
         Assert.Equal("ASSIGNMENT_NOT_FOUND", error.Code);
         Assert.Empty(await f.Db.ReportAuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task SuitableReplacementStaffCanBeListedDuringMeeting()
+    {
+        await using var f = await Fixture.CreateAsync(); var data = await PrepareFinalReportAsync(f);
+        var next = Fixture.Account("Replacement candidate", AccountRole.Assessor);
+        f.Db.Accounts.Add(next);
+        (await f.Db.ProjectVerifications.SingleAsync()).MeetingEndAt = null;
+        await f.Db.SaveChangesAsync();
+        var service = new AssignmentService(f.Db, f.Configuration);
+        var candidates = await service.GetSuitableVerificatorsAsync(data.Case, f.Other.Id, data.Assignment);
+        Assert.Contains(candidates, p => p.UserId == next.Profile!.Id);
+        Assert.DoesNotContain(candidates, p => p.UserId == data.Staff.Id);
+        var error = await Assert.ThrowsAsync<AssignmentException>(() =>
+            service.GetSuitableVerificatorsAsync(data.Case, f.Other.Id, Guid.NewGuid()));
+        Assert.Equal("ASSIGNMENT_NOT_FOUND", error.Code);
     }
 
     [Fact]
