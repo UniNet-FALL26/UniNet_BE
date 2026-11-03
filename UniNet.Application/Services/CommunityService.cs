@@ -74,6 +74,7 @@ public class CommunityService : ICommunityService
             AuthorUserId = p.AuthorUserId,
             AuthorName = p.AuthorUser.FullName ?? "Ẩn danh",
             AuthorAvatar = p.AuthorUser.AvatarUrl,
+            AuthorNickname = p.AuthorUser.Nickname ?? "Ẩn danh",
             AuthorActorType = p.AuthorActorType,
             Description = p.Description,
             MediaUrls = p.Media.OrderBy(m => m.DisplayOrder).Select(m => m.FileUrl).ToList(),
@@ -239,6 +240,7 @@ public class CommunityService : ICommunityService
             AuthorUserId = root.AuthorUserId,
             AuthorName = root.AuthorUser?.FullName ?? "Ẩn danh",
             AuthorAvatarUrl = root.AuthorUser?.AvatarUrl,
+            AuthorNickname = root.AuthorUser?.Nickname ?? "Ẩn danh",
             ParentCommentId = root.ParentCommentId,
             Content = root.Content,
             CreatedAt = root.CreatedAt,
@@ -251,9 +253,11 @@ public class CommunityService : ICommunityService
                     AuthorUserId = reply.AuthorUserId,
                     AuthorName = reply.AuthorUser?.FullName ?? "Ẩn danh",
                     AuthorAvatarUrl = reply.AuthorUser?.AvatarUrl,
+                    AuthorNickname = reply.AuthorUser?.Nickname ?? "Ẩn danh",
                     ParentCommentId = reply.ParentCommentId,
                     ReplyToUserId = reply.ReplyToUserId,
                     ReplyToUserName = reply.ReplyToUser?.FullName,
+                    ReplyToNickname = reply.ReplyToUser?.Nickname,
                     Content = reply.Content,
                     CreatedAt = reply.CreatedAt
                 }).ToList()
