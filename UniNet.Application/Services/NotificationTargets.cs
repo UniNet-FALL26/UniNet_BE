@@ -45,7 +45,7 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
                 var application = await db.JobApplications.Include(a => a.Job).AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct);
                 if (application == null) break;
                 if (application.StudentUserId == profileId) url = $"/opportunities?tab=applications&jobId={application.JobId}";
-                else if (application.Job.PartnerId == profileId) url = $"/(company)/applicants?jobId={application.JobId}";
+                else if (application.Job.PartnerId == profileId) url = $"/(company)/job-detail?jobId={application.JobId}";
                 break;
             case "JobPosting":
                 var job = await db.Jobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
