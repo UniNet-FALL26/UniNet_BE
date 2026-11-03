@@ -14,8 +14,9 @@ Ngày: 18/10/2026. Giữ nguyên tên các bảng lịch sử, ngừng sử dụ
   nằm ở các assignment, người phân công của assignment mới và ReplacedById/ReplacedAt/ReplacementReason.
 - Assignment mới vẫn kiểm tra lịch Confirmed, payment cùng reservation chưa refund, cấp 1 hiện hành,
   người nhận không thuộc project và không trùng lịch. Case có report không thể được phân công lại.
-- `POST /api/reports` chỉ nhận assignment đang hiệu lực, chưa có report và meeting đã bắt đầu/kết thúc
-  hợp lệ (MeetingEndAt >= MeetingStartAt và không ở tương lai). Không bỏ điều kiện meeting.
+- `POST /api/reports` chỉ nhận assignment đang hiệu lực, chưa có report và meeting đã bắt đầu
+  (`MeetingStartAt` không ở tương lai). Có thể gửi trong lúc họp hoặc sau khi họp kết thúc;
+  nếu chưa bắt đầu, trả `MEETING_NOT_STARTED`. Gửi report vẫn chốt case và hoàn tất assignment.
 - Submit hợp lệ lưu summary/findings/recommendations/outcome/người nộp/thời gian, hoàn tất assignment,
   chốt case Verified/Failed và tạo một sự kiện ReportAuditLogs trong cùng transaction Serializable.
   Không cần Admin duyệt. Báo cáo Failed không tự hoàn tiền.

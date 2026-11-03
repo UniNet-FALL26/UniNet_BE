@@ -50,6 +50,6 @@ public sealed class AssignmentController(IAssignmentService assignments) : Contr
 
     [HttpGet("availability"), Authorize(Roles = "Admin")]
     public Task<List<SuitableVerificatorResponse>> GetAvailability([FromQuery] Guid projectVerificationId,
-        CancellationToken ct)
-        => assignments.GetSuitableVerificatorsAsync(projectVerificationId, AccountId, ct);
+        CancellationToken ct, [FromQuery] Guid? replaceAssignmentId = null)
+        => assignments.GetSuitableVerificatorsAsync(projectVerificationId, AccountId, replaceAssignmentId, ct);
 }
