@@ -294,7 +294,7 @@ public sealed class ProjectModerationService(
             .Select(m => m.Value.TrimEnd('.', ',', ';', ')', ']')).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
         return new(project.Title, project.Description, project.ProjectField,
             project.ProjectSkills.Select(s => s.Skill.Name).OrderBy(s => s, StringComparer.Ordinal).ToList(),
-            project.MemberTarget, project.ExpectedOutput?.ToString("O"), roles, links);
+            project.MemberTarget.GetValueOrDefault(), project.ExpectedOutput?.ToString("O"), roles, links);
     }
 
     private static ModerationCheckResult MapCheckResult(string? result) => result?.Trim().ToLowerInvariant() switch

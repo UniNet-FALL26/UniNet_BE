@@ -10,7 +10,8 @@ public sealed record ImageUploadResult(
     string PublicId,
     string Format,
     string ResourceType = "image",
-    string? FileName = null);
+    string? FileName = null,
+    Guid? FileId = null);
 
 public interface ICloudImageStorage
 {

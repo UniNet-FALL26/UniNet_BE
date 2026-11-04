@@ -551,7 +551,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             isMember,
             members,
             project.Invitations.Select(ProjectInvitationMapping.ToResponse).ToList(),
-            project.JoinRequests.Select(ProjectJoinRequestMapping.ToResponse).ToList()
+            project.JoinRequests.Select(ProjectJoinRequestMapping.ToResponse).ToList(),
+            project.Origin, ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project)
         );
     }
 
@@ -571,7 +572,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList()
+            project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList(),
+            project.Origin, ProjectIdentityMapping.Leader(project)
         );
     }
 

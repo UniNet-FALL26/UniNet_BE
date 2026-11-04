@@ -125,7 +125,7 @@ public sealed class ProjectMemberService(
             project.Creator.FullName,
             project.Creator.Nickname,
             project.Creator.AvatarUrl,
-            "Creator",
+            project.Origin == ProjectOrigin.Internal ? "Creator" : project.SubmitterRole ?? "Submitter",
             ProjectMemberStatus.Active,
             project.CreatedAt
         ));
