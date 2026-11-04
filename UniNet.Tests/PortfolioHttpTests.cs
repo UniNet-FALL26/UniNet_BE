@@ -93,6 +93,15 @@ public sealed class PortfolioHttpTests
             Assert.True(publicIds.Add(result.PublicId)); Assert.EndsWith($"/{result.PublicId}.png", result.ImageUrl);
             Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
             Assert.Equal("image", result.ResourceType);
+            Assert.NotNull(result.FileId);
+            await using var uploadScope = server.Scope();
+            var stored = await uploadScope.ServiceProvider.GetRequiredService<UniNetDbContext>()
+                .UploadedFiles.SingleAsync(x => x.Id == result.FileId);
+            Assert.Equal(id, stored.OwnerAccountId);
+            Assert.Equal(result.PublicId, stored.PublicId);
+            Assert.Equal(result.ImageUrl, stored.Url);
+            Assert.Equal(result.FileName, stored.FileName);
+            Assert.Equal(PortraitFixture.Png.LongLength, stored.SizeBytes);
         }
         Assert.Equal(3, server.Uploads);
         Assert.Null((await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!.Profile.AvatarUrl);
@@ -121,6 +130,14 @@ public sealed class PortfolioHttpTests
             Assert.Equal("task-report.pdf", result.FileName);
             Assert.Matches($"^uninet/evidence/{server.OwnerId:N}/[a-f0-9]{{32}}\\.pdf$", result.PublicId);
             Assert.StartsWith("https://res.cloudinary.com/fixture/raw/upload/", result.ImageUrl);
+            Assert.NotNull(result.FileId);
+            await using var scope = server.Scope();
+            var stored = await scope.ServiceProvider.GetRequiredService<UniNetDbContext>()
+                .UploadedFiles.SingleAsync(x => x.Id == result.FileId);
+            Assert.Equal(server.OwnerId, stored.OwnerAccountId);
+            Assert.Equal("raw", stored.ResourceType);
+            Assert.Equal("pdf", stored.Format);
+            Assert.Equal(pdf.LongLength, stored.SizeBytes);
         }
 
         using (var body = new MultipartFormDataContent())

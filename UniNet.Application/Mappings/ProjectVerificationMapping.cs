@@ -29,7 +29,8 @@ public static class ProjectVerificationMapping
     public static ProjectVerificationDetailResponse ToDetailResponse(ProjectVerification verification) => new(
         ToResponse(verification), new(verification.ProjectId, verification.Project.Title,
             verification.Project.ProjectField, verification.Project.Description, verification.Project.Status,
-            verification.Project.CreatorId), verification.PackageId,
+            ProjectIdentityMapping.LeaderId(verification.Project), verification.Project.Origin, verification.Project.CreatorId,
+            ProjectIdentityMapping.Leader(verification.Project), ProjectIdentityMapping.ExternalDetails(verification.Project)), verification.PackageId,
         verification.EvidenceModeration == null ? null : EvidenceModerationMapping.ToResponse(verification.EvidenceModeration), verification.MeetingStartAt, verification.MeetingEndAt,
         verification.Assignments.OrderBy(a => a.AssignedAt).ThenBy(a => a.Id)
             .Select(a => new VerificationAssignmentResponse(a.Id, a.AssignedToUserId, a.Status, a.AssignedAt,

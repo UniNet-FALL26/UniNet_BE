@@ -79,6 +79,52 @@ public sealed class EvidenceModerationChecks(IEvidenceContentReviewer content, I
                 results.Add(new(task.ProjectTaskId, report.TaskReportId, file.TaskEvidenceId, "FileContent", file.FileUrl,
                     EvidenceCheckStatus.NotChecked, "Out of scope: file content is not downloaded, read or inspected.", "None", DateTimeOffset.UtcNow));
         }
+        if (source.ProjectEvidence != null)
+            results.AddRange(await CheckProjectEvidence(source.ProjectEvidence, policy, ct));
+        return results;
+    }
+
+    private async Task<List<EvidenceCheckResult>> CheckProjectEvidence(ProjectEvidenceSnapshot source, EvidencePolicySnapshot policy, CancellationToken ct)
+    {
+        var results = new List<EvidenceCheckResult>();
+        EvidenceCheckResult Result(Guid? documentId, string kind, string? url, EvidenceCheckStatus status,
+            string reason, string provider, string? proof = null, string? code = null, bool transient = false) =>
+            new(null, null, null, kind, url, status, reason, provider, DateTimeOffset.UtcNow, proof, code, transient, documentId);
+        var text = Normalize(source.Content, policy);
+        var terms = policy.ForbiddenTerms.Where(term => Matches(text, Normalize(term, policy), policy)).ToArray();
+        if (terms.Length > 0)
+            results.Add(Result(null, "ProjectText", null, EvidenceCheckStatus.Rejected, "Forbidden term matched under configured policy.", "ConfiguredTerms", System.Text.Json.JsonSerializer.Serialize(terms)));
+        else if (string.IsNullOrWhiteSpace(source.Content))
+            results.Add(Result(null, "ProjectText", null, EvidenceCheckStatus.NotChecked, "Project text is empty.", "None"));
+        else
+        {
+            try
+            {
+                var verdict = await content.ReviewContentAsync(source.Content, policy, ct);
+                if (string.IsNullOrWhiteSpace(verdict.Reason) || string.IsNullOrWhiteSpace(verdict.Proof))
+                    throw new VerificationAiException("Incomplete content verdict.", true, "AI_INVALID_RESPONSE");
+                results.Add(Result(null, "ProjectText", null, verdict.Passed ? EvidenceCheckStatus.Passed : EvidenceCheckStatus.Rejected, verdict.Reason, "Gemini:" + policy.GeminiModel, verdict.Proof));
+            }
+            catch (VerificationAiException ex) { results.Add(Result(null, "ProjectText", null, EvidenceCheckStatus.Error, ex.Message, "Gemini", code: ex.Code, transient: ex.Transient)); }
+        }
+        var links = Links.Matches(source.Content).Select(m => TrimLink(m.Value))
+            .Concat(MarkdownLinks.Matches(source.Content).Select(m => m.Groups[1].Value).Where(u => !Links.IsMatch(u)));
+        var targets = links.Select(u => (Id: (Guid?)null, Url: u))
+            .Concat(source.Documents.Select(d => (Id: (Guid?)d.Id, Url: d.FileUrl))).Distinct().OrderBy(t => t.Id).ThenBy(t => t.Url, StringComparer.Ordinal);
+        foreach (var target in targets)
+        {
+            try
+            {
+                var verdict = await urls.CheckAsync(target.Url, policy, ct);
+                if (string.IsNullOrWhiteSpace(verdict.Reason) || string.IsNullOrWhiteSpace(verdict.Proof))
+                    throw new VerificationAiException("Incomplete URL verdict.", true, "URL_INVALID_RESPONSE");
+                results.Add(Result(target.Id, "Url", target.Url, verdict.Passed ? EvidenceCheckStatus.Passed : EvidenceCheckStatus.Rejected, verdict.Reason, "GoogleSafeBrowsing:v4", verdict.Proof));
+            }
+            catch (VerificationAiException ex) { results.Add(Result(target.Id, "Url", target.Url, EvidenceCheckStatus.Error, ex.Message, "GoogleSafeBrowsing:v4", code: ex.Code, transient: ex.Transient)); }
+        }
+        foreach (var document in source.Documents)
+            results.Add(Result(document.Id, "FileContent", document.FileUrl, EvidenceCheckStatus.NotChecked,
+                "Out of scope: file content is not downloaded, read or inspected by level-1 moderation.", "None"));
         return results;
     }
 

@@ -167,9 +167,9 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
 
     private async Task<Project> GetOwnedProjectAsync(Guid projectId, Guid profileId, CancellationToken ct)
     {
-        var project = await db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct)
+        var project = await db.Projects.Include(p => p.Creator).FirstOrDefaultAsync(p => p.Id == projectId, ct)
             ?? throw new ProjectVerificationException("PROJECT_NOT_FOUND", "Project not found.", 404);
-        Require(project.CreatorId == profileId, "FORBIDDEN", "Only the project leader can access its verifications.", 403);
+        Require(project.CreatorId == profileId, "FORBIDDEN", "Only the project record owner can access its verifications.", 403);
         return project;
     }
 
@@ -177,7 +177,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         bool tracked, CancellationToken ct)
     {
         var profile = await GetActiveProfileAsync(accountId, ct);
-        IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project)
+        IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project).ThenInclude(p => p.Creator)
             .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts).Include(v => v.Assignments).ThenInclude(a => a.Report)
 
             .Include(v => v.VerificationTransactions).ThenInclude(v => v.Transaction)
@@ -185,7 +185,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         if (!tracked) query = query.AsNoTracking();
         var verification = await query.FirstOrDefaultAsync(v => v.Id == verificationId, ct)
             ?? throw new ProjectVerificationException("VERIFICATION_NOT_FOUND", "Verification request not found.", 404);
-        Require(verification.Project.CreatorId == profile.Id, "FORBIDDEN", "Only the project leader can access this verification.", 403);
+        Require(verification.Project.CreatorId == profile.Id, "FORBIDDEN", "Only the project record owner can access this verification.", 403);
         return verification;
     }
 

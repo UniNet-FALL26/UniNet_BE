@@ -81,7 +81,8 @@ public sealed class ProjectRecruitmentTests
         {
             base.Customize(modelBuilder, context);
             modelBuilder.Entity<Project>().Property(p => p.RecruitmentDeadline)
-                .HasConversion(value => value.UtcTicks, value => new DateTimeOffset(value, TimeSpan.Zero));
+                .HasConversion(value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? (DateTimeOffset?)new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
         }
     }
 }

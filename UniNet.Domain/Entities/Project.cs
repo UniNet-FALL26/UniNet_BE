@@ -11,13 +11,23 @@ namespace UniNet.Domain.Entities
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid CreatorId { get; set; }
+        // Creator manages the platform record. An external project's real leader may be someone else.
+        public ProjectOrigin Origin { get; set; }
+        public bool SubmitterIsLeader { get; set; }
+        public string? ExternalLeaderName { get; set; }
+        public string? ImplementationStartDate { get; set; }
+        public string? ImplementationEndDate { get; set; }
+        public string? SubmitterRole { get; set; }
+        public string? SubmitterContribution { get; set; }
+        public string? ExternalDetailsJson { get; set; }
+        public DateTimeOffset? SharingRightsConfirmedAt { get; set; }
         public string Title { get; set; } = null!;
         public string ProjectField { get; set; } = null!;
         public string Description { get; set; } = null!;
-        public int MemberTarget { get; set; }
+        public int? MemberTarget { get; set; }
         // Legacy projects may have a single creator; creation requests require at least two.
-        public int MinimumQuantity { get; set; } = 1;
-        public DateTimeOffset RecruitmentDeadline { get; set; } =DateTimeOffset.UtcNow;
+        public int? MinimumQuantity { get; set; } = 1;
+        public DateTimeOffset? RecruitmentDeadline { get; set; } =DateTimeOffset.UtcNow;
         public DateTimeOffset? ExpectedOutput { get; set; } = DateTimeOffset.UtcNow;
         public ProjectVisibility Visibility { get; set; }
         public ProjectStatus Status { get; set; } 
@@ -41,5 +51,6 @@ namespace UniNet.Domain.Entities
         public List<ProjectVerification> Verifications { get; set; } = [];
         public List<WorkspaceChannel> WorkspaceChannels { get; set; } = [];
         public ContributionCycle? ContributionCycle { get; set; }
+        public List<ProjectEvidenceDocument> EvidenceDocuments { get; set; } = [];
     }
 }

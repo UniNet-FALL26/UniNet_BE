@@ -9,16 +9,22 @@ public sealed record EvidenceReportSnapshot(Guid TaskReportId, int Version, Guid
     Guid? ReportGroupId = null, Guid? ParentReportId = null, bool IsDeleted = false,
     DateTimeOffset? DeletedAt = null, Guid? DeletedById = null);
 public sealed record EvidenceTaskSnapshot(Guid ProjectTaskId, ProjectTaskStatus Status, List<EvidenceReportSnapshot> Reports);
-public sealed record EvidenceSourceSnapshot(Guid ProjectId, List<EvidenceTaskSnapshot> Tasks);
+public sealed record ProjectEvidenceDocumentSnapshot(Guid Id, Guid UploadedFileId, string FileUrl, string PublicId,
+    string ResourceType, string FileName, string Format, long SizeBytes);
+public sealed record ProjectEvidenceSnapshot(string Content, List<ProjectEvidenceDocumentSnapshot> Documents);
+public sealed record EvidenceSourceSnapshot(Guid ProjectId, List<EvidenceTaskSnapshot> Tasks,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    ProjectEvidenceSnapshot? ProjectEvidence = null);
 
 // The frozen policy deliberately excludes API keys. Missing settings fail in the worker, not completion.
 public sealed record EvidencePolicySnapshot(string? Version, string? ContentInstructions, string[] ForbiddenTerms,
     string? TermMatchMode, string? TextNormalization, bool? CaseSensitive, string? GeminiModel,
     string[] ThreatTypes, string[] PlatformTypes, string Scope = "ReportTextAndUrls");
 
-public sealed record EvidenceCheckResult(Guid ProjectTaskId, Guid TaskReportId, Guid? TaskEvidenceId,
+public sealed record EvidenceCheckResult(Guid? ProjectTaskId, Guid? TaskReportId, Guid? TaskEvidenceId,
     string Kind, string? Url, EvidenceCheckStatus Status, string Reason, string Provider,
-    DateTimeOffset CheckedAt, string? Proof = null, string? ErrorCode = null, bool Transient = false);
+    DateTimeOffset CheckedAt, string? Proof = null, string? ErrorCode = null, bool Transient = false,
+    Guid? ProjectEvidenceDocumentId = null);
 
 public sealed record EvidenceModerationResponse(Guid Id, Guid ProjectId, int Version, string SourceHash,
     string PolicyHash, EvidenceModerationStatus Status, bool IsCurrent, DateTimeOffset CreatedAt,
