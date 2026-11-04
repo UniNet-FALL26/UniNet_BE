@@ -14,8 +14,18 @@ public static class AssignmentMapping
     public static AssignmentDetailResponse ToDetailResponse(VerificationAssignment a) => new(ToResponse(a),
         new(a.ProjectVerification.Project.Id, a.ProjectVerification.Project.Title,
             a.ProjectVerification.Project.ProjectField, a.ProjectVerification.Project.Description,
-            a.ProjectVerification.Project.Status, a.ProjectVerification.Project.CreatorId),
+            a.ProjectVerification.Project.Status, a.ProjectVerification.Project.CreatorId,
+            a.ProjectVerification.Project.ProjectSkills.OrderBy(s => s.Skill.Name).ThenBy(s => s.SkillId)
+                .Select(s => new ProjectSkillInfo(s.SkillId, s.Skill.Name,
+                    s.Skill.Category?.ToString() ?? string.Empty, s.Skill.IconUrl, null)).ToList(),
+            a.ProjectVerification.Project.Members.OrderBy(m => m.JoinedAt).ThenBy(m => m.UserId)
+                .Select(m => new ProjectMemberInfo(m.UserId, m.User.FullName, m.User.Nickname,
+                    m.User.AvatarUrl, m.Role, m.Status, m.JoinedAt)).ToList(),
+            new(a.ProjectVerification.Project.CreatorId, a.ProjectVerification.Project.Creator.FullName,
+                a.ProjectVerification.Project.Creator.Nickname, a.ProjectVerification.Project.Creator.AvatarUrl,
+                "Creator", Domain.Enums.ProjectMemberStatus.Active, a.ProjectVerification.Project.CreatedAt)),
         a.ProjectVerification.EvidenceModeration == null ? null : EvidenceModerationMapping.ToResponse(a.ProjectVerification.EvidenceModeration),
         a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report),
-        Services.ProjectAssessmentPolicy.ReadRubric(a.ProjectVerification.AssessmentRubricJson));
+        Services.ProjectAssessmentPolicy.ReadRubric(a.ProjectVerification.AssessmentRubricJson),
+        new(a.AssignedToUserId, a.AssignedToUser.FullName, a.AssignedToUser.AvatarUrl, a.AssignedToUser.Nickname));
 }
