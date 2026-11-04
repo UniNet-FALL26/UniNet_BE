@@ -21,7 +21,13 @@ public static class AuthMapping
             var websites = PartnerWebsiteLinks.ParseStored(p.Website);
             profile = new(p.Id, p.FullName, p.Nickname, p.OrganizationName, p.AvatarUrl, p.CoverUrl, p.Bio,
                 p.UniversityName, p.Major, p.StudentCode, p.PartnerType, p.Industry, websites.FirstOrDefault(),
-                p.ContactEmail, p.Phone, p.Address, p.IsVerified) { Websites = websites, AssessorJson = ToAssessorResponse(p.AssessorJson) };
+                p.ContactEmail, p.Phone, p.Address, p.IsVerified)
+            {
+                Websites = websites, AssessorJson = ToAssessorResponse(p.AssessorJson),
+                Introduction = p.PartnerJson is { } partner
+                    ? new(partner.IntroductionImageUrl, partner.FoundedOn, partner.EmployeeRange, (partner.Branches ?? []).ToArray(), (partner.GalleryUrls ?? []).ToArray())
+                    : null,
+            };
         }
         return new(account.Id, account.Email, account.Role, account.Status, account.EmailVerified,
             profile, ProfileComplete(account)) { CreatedAt = account.CreatedAt };
