@@ -17,7 +17,12 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
     {
         var user = await GetActorAsync(accountId, null, ct);
         var assignment = await AssignmentQuery().AsNoTracking()
+            .Include(a => a.AssignedToUser)
+            .Include(a => a.ProjectVerification).ThenInclude(v => v.Project).ThenInclude(p => p.Creator)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
+                .ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+            .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
+                .ThenInclude(p => p.Members).ThenInclude(m => m.User)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
             .Include(a => a.Report).AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == assignmentId &&
