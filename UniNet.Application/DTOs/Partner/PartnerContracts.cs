@@ -145,7 +145,10 @@ public sealed record PublicPartnerProfileResponse(
     string? ContactEmail,
     string? Phone,
     IReadOnlyList<string> Websites,
-    IReadOnlyList<PublicPartnerJobResponse> OpenJobs);
+    IReadOnlyList<PublicPartnerJobResponse> OpenJobs)
+{
+    public PartnerIntroductionDetails? Introduction { get; init; }
+}
 
 public sealed record StudentSubmittedApplicationResponse(
     Guid Id,

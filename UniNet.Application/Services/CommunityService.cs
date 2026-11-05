@@ -26,7 +26,7 @@ public class CommunityService : ICommunityService
         _imageStorage = imageStorage;
     }
 
-    public async Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize)
+    public async Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize, Guid? authorUserId = null)
     {
         // 1. Ánh xạ từ AccountId (currentUserId) sang UserProfile.Id (actualUserId)
         Guid actualUserId = Guid.Empty;
@@ -45,7 +45,8 @@ public class CommunityService : ICommunityService
         var postsQuery = _context.CommunityPosts
             .Include(p => p.AuthorUser)
             .Include(p => p.Media)
-            .Where(p => !p.IsDeleted && p.Status == (short)CommunityContentStatus.Published)
+            .Where(p => !p.IsDeleted && p.Status == (short)CommunityContentStatus.Published &&
+                (authorUserId == null || p.AuthorUserId == authorUserId))
             .OrderByDescending(p => p.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize);
