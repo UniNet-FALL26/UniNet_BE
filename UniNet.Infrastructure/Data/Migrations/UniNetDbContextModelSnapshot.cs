@@ -230,8 +230,11 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("MediaUrl")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("PackageId")
+                    b.Property<Guid?>("PackageId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
@@ -3296,8 +3299,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasOne("UniNet.Domain.Entities.Package", "Package")
                         .WithMany()
                         .HasForeignKey("PackageId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CompanyUser");
 

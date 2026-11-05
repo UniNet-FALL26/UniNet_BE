@@ -5,7 +5,7 @@ namespace UniNet.Application;
 public record TransactionResponse(
     Guid Id,
     Guid VerificationId,
-    Guid PackageId,
+    Guid? PackageId,
     decimal AmountVnd,
     string Currency,
     PaymentStatus Status,

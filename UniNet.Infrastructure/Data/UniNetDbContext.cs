@@ -1431,12 +1431,16 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .HasForeignKey(e => e.ReporterUserId)
                   .OnDelete(DeleteBehavior.Restrict);
         });
-        // 1. AdvertisementCampaign
+
+        // 1. Cấu hình AdvertisementCampaign
         model.Entity<AdvertisementCampaign>(entity =>
         {
             entity.ToTable("AdvertisementCampaigns");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.BudgetCap).HasColumnType("numeric(18,2)");
+
+            // Cột PackageId có thể null nên khóa ngoại này là tùy chọn (Optional)
+            entity.Property(e => e.PackageId).IsRequired(false);
 
             entity.HasOne(e => e.CompanyUser)
                   .WithMany()
@@ -1446,10 +1450,11 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             entity.HasOne(e => e.Package)
                   .WithMany()
                   .HasForeignKey(e => e.PackageId)
+                  .IsRequired(false)
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // 2. AdvertisementTransaction (Mapping 1-1 v?i Transaction)
+        // 2. Cấu hình AdvertisementTransaction (Quan hệ 1-1 với Transaction)
         model.Entity<AdvertisementTransaction>(entity =>
         {
             entity.ToTable("AdvertisementTransactions");
@@ -1465,5 +1470,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .HasForeignKey(e => e.CampaignId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
+
     }
 }
