@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,13 +19,20 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
         ? id : throw new AdvertisementException("UNAUTHORIZED", "Invalid login session.", 401);
 
-    // --- DOANH NGHIỆP (PARTNER) ---
+    // --- PARTNER ---
+    // 1. API POST tạo campaign (Status = Draft, PackageId = null)
     [HttpPost("campaigns"), Authorize(Roles = "Partner")]
-    public async Task<ActionResult<CampaignResponse>> CreateCampaign([FromBody] CreateCampaignRequest request, CancellationToken ct)
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<CampaignResponse>> CreateCampaign([FromForm] CreateCampaignRequest request, CancellationToken ct)
     {
         var campaign = await adService.CreateCampaignAsync(AccountId, request, ct);
         return CreatedAtAction(nameof(GetCampaignById), new { campaignId = campaign.Id }, campaign);
     }
+
+    // 2. API PUT/PATCH gán Package cho Campaign Draft
+    [HttpPatch("campaigns/{campaignId:guid}/package"), Authorize(Roles = "Partner")]
+    public Task<CampaignResponse> AssignPackage(Guid campaignId, [FromBody] AssignPackageRequest request, CancellationToken ct)
+        => adService.AssignPackageAsync(AccountId, campaignId, request, ct);
 
     [HttpPut("campaigns/{campaignId:guid}"), Authorize(Roles = "Partner")]
     public Task<CampaignResponse> UpdateCampaign(Guid campaignId, [FromBody] UpdateCampaignRequest request, CancellationToken ct)
@@ -59,13 +68,17 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
     public async Task<IActionResult> TrackImpression(Guid campaignId, CancellationToken ct)
     {
         await adService.TrackImpressionAsync(campaignId, ct);
-        return NoContent(); // Trả về HTTP 204 No Content (khớp với dòng 189 ở Frontend)
+        return NoContent();
     }
 
     [HttpPost("campaigns/{campaignId:guid}/click"), AllowAnonymous]
     public async Task<IActionResult> TrackClick(Guid campaignId, CancellationToken ct)
     {
         await adService.TrackClickAsync(campaignId, ct);
-        return NoContent(); // Trả về HTTP 204 No Content
+        return NoContent();
     }
+    [HttpPost("campaigns/{campaignId:guid}/submit"), Authorize(Roles = "Partner")]
+    public Task<CampaignResponse> SubmitCampaign(Guid campaignId, CancellationToken ct)
+    => adService.SubmitCampaignAsync(AccountId, campaignId, ct);
+
 }

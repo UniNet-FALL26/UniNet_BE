@@ -12,5 +12,6 @@ namespace UniNet.Application.Interfaces
         Task<AiModerationResult> AnalyzeProjectAsync(
         ProjectModerationInput input,
         CancellationToken cancellationToken = default);
+        Task<bool> ReviewContentAsync(string title, string content, CancellationToken ct = default);
     }
 }

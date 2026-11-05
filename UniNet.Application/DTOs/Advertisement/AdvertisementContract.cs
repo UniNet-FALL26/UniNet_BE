@@ -1,16 +1,17 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Http;
+using System;
 using System.Collections.Generic;
 using UniNet.Domain.Enums;
 
 namespace UniNet.Application.DTOs.Advertisement;
 
 public sealed record CreateCampaignRequest(
-    Guid PackageId,
     string Title,
     string Content,
     string DestinationUrl,
-    string? MediaUrl);
-
+    IFormFile? MediaFile);
+public sealed record AssignPackageRequest(
+    Guid PackageId);
 public sealed record UpdateCampaignRequest(
     string Title,
     string Content,
@@ -21,14 +22,15 @@ public sealed record CampaignResponse(
     Guid Id,
     Guid CompanyUserId,
     string CompanyName,
-    Guid PackageId,
-    string PackageName,
+    Guid? PackageId,
+    string? PackageName,
     string Title,
     string Content,
     string DestinationUrl,
     string? MediaUrl,
     AdCampaignStatus Status,
     decimal BudgetCap,
+    string? RejectionReason,
     long ImpressionCount,
     long ClickCount,
     DateTimeOffset? StartedAt,
