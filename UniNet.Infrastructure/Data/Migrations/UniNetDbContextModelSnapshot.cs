@@ -856,6 +856,556 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.GitActivity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActivityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("GitHubProviderObjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubProviderObjectId", "ActivityType")
+                        .IsUnique();
+
+                    b.HasIndex("OccurredAt", "Id");
+
+                    b.ToTable("GitActivities", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitActivityActor", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("ExternalAccountId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("GitActivityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Login")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitActivityId", "ActorKey")
+                        .IsUnique();
+
+                    b.ToTable("GitActivityActors", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitCommitBranchReference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BranchName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTimeOffset>("FirstObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GitHubProviderObjectId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubProviderObjectId", "BranchName")
+                        .IsUnique();
+
+                    b.ToTable("GitCommitBranchReferences", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubOAuthAuthorizationFlow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PendingAccessTokenEncrypted")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("PendingAccessTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PendingAvatarUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("PendingDisplayName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("PendingGrantedScopes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("PendingLogin")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("PendingProviderAccountId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PendingRefreshTokenEncrypted")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("PendingRefreshTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReturnTarget")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("StateHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StateHash")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "Status", "ExpiresAt");
+
+                    b.ToTable("GitHubOAuthAuthorizationFlows", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GitHubOAuthAuthorizationFlows_PendingTokens", "(\"Status\" <> 2) OR (\"PendingAccessTokenEncrypted\" IS NOT NULL AND \"PendingProviderAccountId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_GitHubOAuthAuthorizationFlows_Status", "\"Status\" BETWEEN 0 AND 6");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubOAuthConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccessTokenEncrypted")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("AccessTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTimeOffset>("ConnectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("GrantedScopes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("RefreshTokenEncrypted")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("RefreshTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("AccountId", "ProviderAccountId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 0");
+
+                    b.ToTable("GitHubOAuthConnections", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GitHubOAuthConnections_RevokedAt", "(\"Status\" = 2 AND \"RevokedAt\" IS NOT NULL) OR (\"Status\" <> 2 AND \"RevokedAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_GitHubOAuthConnections_Status", "\"Status\" BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubProviderObject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ExternalObjectId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTimeOffset>("FirstObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GitHubRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("LastObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("RetrievalMetadataJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubRepositoryId", "OccurredAt");
+
+                    b.HasIndex("GitHubRepositoryId", "Category", "ExternalObjectId")
+                        .IsUnique();
+
+                    b.ToTable("GitHubProviderObjects", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubRepository", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DefaultBranch")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(511)
+                        .HasColumnType("character varying(511)");
+
+                    b.Property<string>("HtmlUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPrivate")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("LastVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("OwnerLogin")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<long>("ProviderOwnerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ProviderRepositoryId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FullName");
+
+                    b.HasIndex("ProviderRepositoryId")
+                        .IsUnique();
+
+                    b.ToTable("GitHubRepositories", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GitHubRepositories_ProviderIds", "\"ProviderRepositoryId\" > 0 AND \"ProviderOwnerId\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubWebhookDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DeliveryId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("EnqueuedJobCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EventName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsSupportedEvent")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("ProviderRepositoryId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeliveryId")
+                        .IsUnique();
+
+                    b.HasIndex("ProviderRepositoryId", "ReceivedAt");
+
+                    b.ToTable("GitHubWebhookDeliveries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GitHubWebhookDeliveries_EnqueuedJobCount", "\"EnqueuedJobCount\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitSyncCheckpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Cursor")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<long>("ItemsProcessed")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("LastProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ScopeKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("SyncJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SyncJobId", "Category", "ScopeKey")
+                        .IsUnique();
+
+                    b.ToTable("GitSyncCheckpoints", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GitSyncCheckpoints_ItemsProcessed", "\"ItemsProcessed\" >= 0");
+
+                            t.HasCheckConstraint("CK_GitSyncCheckpoints_Status", "\"Status\" BETWEEN 0 AND 3");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitSyncJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("GitHubRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTimeOffset?>("LastHeartbeatAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OAuthConnectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectGitRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RequestedByProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("SyncType")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubRepositoryId");
+
+                    b.HasIndex("OAuthConnectionId");
+
+                    b.HasIndex("RequestedByProfileId");
+
+                    b.HasIndex("ProjectGitRepositoryId", "CreatedAt");
+
+                    b.HasIndex("ProjectGitRepositoryId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("ProjectGitRepositoryId", "Status")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN (0, 1, 4, 6)");
+
+                    b.HasIndex("Status", "NextAttemptAt", "LeaseExpiresAt", "CreatedAt");
+
+                    b.ToTable("GitSyncJobs", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GitSyncJobs_CompletedAt", "(\"Status\" IN (2, 3, 5) AND \"CompletedAt\" IS NOT NULL) OR (\"Status\" NOT IN (2, 3, 5) AND \"CompletedAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_GitSyncJobs_Lease", "(\"LeaseId\" IS NULL) = (\"LeaseExpiresAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_GitSyncJobs_RetryCount", "\"RetryCount\" >= 0");
+
+                            t.HasCheckConstraint("CK_GitSyncJobs_Status", "\"Status\" BETWEEN 0 AND 6");
+
+                            t.HasCheckConstraint("CK_GitSyncJobs_Type", "\"SyncType\" BETWEEN 0 AND 4");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1269,6 +1819,365 @@ namespace UniNet.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_Projects_Status", "\"Status\" BETWEEN 0 AND 3");
 
                             t.HasCheckConstraint("CK_Projects_Visibility", "\"Visibility\" BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitActivityGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GitHubProviderObjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProjectGitRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubProviderObjectId");
+
+                    b.HasIndex("ProjectGitRepositoryId", "GitHubProviderObjectId")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectGitRepositoryId", "ObservedAt");
+
+                    b.ToTable("ProjectGitActivityGrants", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitActivityVisibility", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GitActivityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProjectGitRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitActivityId");
+
+                    b.HasIndex("ProjectGitRepositoryId", "GitActivityId")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectGitRepositoryId", "ObservedAt");
+
+                    b.ToTable("ProjectGitActivityVisibilities", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitManagerGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("GrantedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GrantedByProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RevokedByProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GrantedByProfileId");
+
+                    b.HasIndex("RevokedByProfileId");
+
+                    b.HasIndex("UserProfileId");
+
+                    b.HasIndex("ProjectId", "UserProfileId")
+                        .IsUnique()
+                        .HasFilter("\"IsActive\"");
+
+                    b.HasIndex("ProjectId", "UserProfileId", "IsActive");
+
+                    b.ToTable("ProjectGitManagerGrants", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProjectGitManagerGrants_ActiveRevocation", "(\"IsActive\" AND \"RevokedAt\" IS NULL AND \"RevokedByProfileId\" IS NULL) OR (NOT \"IsActive\" AND \"RevokedAt\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProjectGitManagerGrants_DifferentProfiles", "\"UserProfileId\" <> \"GrantedByProfileId\"");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitMemberIdentity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("ExternalAccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ExternalUsername")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTimeOffset>("LastActivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LinkedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset?>("UnlinkedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VerifiedByConnectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserProfileId");
+
+                    b.HasIndex("VerifiedByConnectionId");
+
+                    b.HasIndex("ProjectId", "Provider", "ExternalAccountId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 0");
+
+                    b.HasIndex("ProjectId", "UserProfileId", "Status");
+
+                    b.ToTable("ProjectGitMemberIdentities", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProjectGitMemberIdentities_ExternalAccountId", "\"ExternalAccountId\" > 0");
+
+                            t.HasCheckConstraint("CK_ProjectGitMemberIdentities_Status", "\"Status\" BETWEEN 0 AND 1");
+
+                            t.HasCheckConstraint("CK_ProjectGitMemberIdentities_UnlinkedAt", "(\"Status\" = 0 AND \"UnlinkedAt\" IS NULL) OR (\"Status\" = 1 AND \"UnlinkedAt\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitMemberIdentityHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Action")
+                        .HasColumnType("smallint");
+
+                    b.Property<long>("ExternalAccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ExternalUsername")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("IdentityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short?>("NewStatus")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PerformedByProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PreviousExternalUsername")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<short?>("PreviousStatus")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VerifiedByConnectionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformedByProfileId");
+
+                    b.HasIndex("UserProfileId");
+
+                    b.HasIndex("VerifiedByConnectionId");
+
+                    b.HasIndex("IdentityId", "OccurredAt");
+
+                    b.HasIndex("ProjectId", "OccurredAt");
+
+                    b.ToTable("ProjectGitMemberIdentityHistory", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProjectGitMemberIdentityHistory_Action", "\"Action\" BETWEEN 0 AND 5");
+
+                            t.HasCheckConstraint("CK_ProjectGitMemberIdentityHistory_ExternalAccountId", "\"ExternalAccountId\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitRepository", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("AccessStatus")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GitHubRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LastAccessCheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LinkedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("LinkedByProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OAuthConnectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SyncIntervalHours")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(6);
+
+                    b.Property<bool>("SyncPaused")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("UnlinkedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkedByProfileId");
+
+                    b.HasIndex("OAuthConnectionId");
+
+                    b.HasIndex("ProjectId", "GitHubRepositoryId")
+                        .IsUnique()
+                        .HasFilter("\"UnlinkedAt\" IS NULL");
+
+                    b.HasIndex("GitHubRepositoryId", "AccessStatus", "UnlinkedAt");
+
+                    b.ToTable("ProjectGitRepositories", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProjectGitRepositories_AccessStatus", "\"AccessStatus\" BETWEEN 0 AND 2");
+
+                            t.HasCheckConstraint("CK_ProjectGitRepositories_SyncIntervalHours", "\"SyncIntervalHours\" > 0");
+
+                            t.HasCheckConstraint("CK_ProjectGitRepositories_UnlinkedAt", "(\"UnlinkedAt\" IS NULL) OR (\"UnlinkedAt\" >= \"LinkedAt\")");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitRepositoryHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Action")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("ActorProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid?>("NewOAuthConnectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PreviousOAuthConnectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectGitRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorProfileId");
+
+                    b.HasIndex("NewOAuthConnectionId");
+
+                    b.HasIndex("PreviousOAuthConnectionId");
+
+                    b.HasIndex("ProjectGitRepositoryId", "CreatedAt");
+
+                    b.ToTable("ProjectGitRepositoryHistory", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProjectGitRepositoryHistory_Action", "\"Action\" BETWEEN 0 AND 6");
                         });
                 });
 
@@ -3425,6 +4334,95 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.GitActivity", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitHubProviderObject", null)
+                        .WithMany()
+                        .HasForeignKey("GitHubProviderObjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitActivityActor", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitActivity", null)
+                        .WithMany()
+                        .HasForeignKey("GitActivityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitCommitBranchReference", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitHubProviderObject", null)
+                        .WithMany()
+                        .HasForeignKey("GitHubProviderObjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubOAuthAuthorizationFlow", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubOAuthConnection", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitHubProviderObject", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitHubRepository", null)
+                        .WithMany()
+                        .HasForeignKey("GitHubRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitSyncCheckpoint", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitSyncJob", null)
+                        .WithMany()
+                        .HasForeignKey("SyncJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.GitSyncJob", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitHubRepository", null)
+                        .WithMany()
+                        .HasForeignKey("GitHubRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitHubOAuthConnection", null)
+                        .WithMany()
+                        .HasForeignKey("OAuthConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitRepository", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectGitRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("RequestedByProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "Partner")
@@ -3525,6 +4523,166 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Creator");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitActivityGrant", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitHubProviderObject", null)
+                        .WithMany()
+                        .HasForeignKey("GitHubProviderObjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitRepository", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectGitRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitActivityVisibility", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitActivity", null)
+                        .WithMany()
+                        .HasForeignKey("GitActivityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitRepository", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectGitRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitManagerGrant", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("GrantedByProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("RevokedByProfileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitMemberIdentity", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitHubOAuthConnection", null)
+                        .WithMany()
+                        .HasForeignKey("VerifiedByConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitMemberIdentityHistory", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitMemberIdentity", null)
+                        .WithMany()
+                        .HasForeignKey("IdentityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("PerformedByProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitHubOAuthConnection", null)
+                        .WithMany()
+                        .HasForeignKey("VerifiedByConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitRepository", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitHubRepository", null)
+                        .WithMany()
+                        .HasForeignKey("GitHubRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("LinkedByProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitHubOAuthConnection", null)
+                        .WithMany()
+                        .HasForeignKey("OAuthConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitRepositoryHistory", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ActorProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitHubOAuthConnection", null)
+                        .WithMany()
+                        .HasForeignKey("NewOAuthConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.GitHubOAuthConnection", null)
+                        .WithMany()
+                        .HasForeignKey("PreviousOAuthConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitRepository", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectGitRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectInvitation", b =>

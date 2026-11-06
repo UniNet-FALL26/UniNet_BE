@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -10,6 +11,25 @@ using UniNet.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
+var phase3E2EEnvironment = builder.Environment.IsEnvironment("E2E");
+var disableUnrelatedWorkers = phase3E2EEnvironment &&
+    builder.Configuration.GetValue("GitHubE2E:DisableUnrelatedWorkers", false);
+builder.Services.Configure<GitHubIntegrationOptions>(
+    builder.Configuration.GetSection(GitHubIntegrationOptions.SectionName));
+builder.Services.Configure<GitSyncOptions>(
+    builder.Configuration.GetSection(GitSyncOptions.SectionName));
+builder.Services.Configure<GitHubWebhookOptions>(
+    builder.Configuration.GetSection(GitHubWebhookOptions.SectionName));
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName("UniNet.GitHubIntegration");
+var gitHubKeyRingPath = builder.Configuration[$"{GitHubIntegrationOptions.SectionName}:KeyRingPath"];
+if (!string.IsNullOrWhiteSpace(gitHubKeyRingPath))
+{
+    var resolvedKeyRingPath = Path.IsPathRooted(gitHubKeyRingPath)
+        ? gitHubKeyRingPath
+        : Path.Combine(builder.Environment.ContentRootPath, gitHubKeyRingPath);
+    builder.Configuration[$"{GitHubIntegrationOptions.SectionName}:KeyRingPath"] = resolvedKeyRingPath;
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(resolvedKeyRingPath));
+}
 // Browser SignalR bearer tokens use a query parameter; the default Hosting request logs include query strings.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting", Microsoft.Extensions.Logging.LogLevel.Warning);
 _ = UniNet.API.Services.UploadFileReader.GetMaxVideoBytes(builder.Configuration);
@@ -29,7 +49,8 @@ builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<NotificationTargets>();
 builder.Services.AddScoped<NotificationBroadcastService>();
-builder.Services.AddHostedService<UniNet.API.Services.NotificationBackgroundWorker>();
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService<UniNet.API.Services.NotificationBackgroundWorker>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.IUserIdProvider, UniNet.API.Hubs.AccountUserIdProvider>();
 builder.Services.AddScoped<VerificationDeadlineTasks>();
 builder.Services.AddScoped<ProjectRecruitmentTasks>();
@@ -45,7 +66,8 @@ builder.Services.AddHttpClient<GeminiVerificationAiReviewer>(client => client.Ti
 builder.Services.AddTransient<IEvidenceContentReviewer>(s => s.GetRequiredService<GeminiVerificationAiReviewer>());
 builder.Services.AddHttpClient<IEvidenceUrlChecker, GoogleSafeBrowsingUrlChecker>(client => client.Timeout = TimeSpan.FromSeconds(35))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
 builder.Services.AddScoped<VerificatorAvailabilityService>();
 builder.Services.AddScoped<ProfileService>();
@@ -58,6 +80,18 @@ builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, C
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();
+builder.Services.AddScoped<IGitHubOAuthService, GitHubOAuthService>();
+builder.Services.AddScoped<IProjectGitManagerService, ProjectGitManagerService>();
+builder.Services.AddScoped<IProjectGitRepositoryService, ProjectGitRepositoryService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectGitIdentityService,
+    UniNet.Application.Services.ProjectGitIdentityService>();
+builder.Services.AddScoped<IGitSyncJobService, GitSyncJobService>();
+builder.Services.AddScoped<IGitSyncJobProcessor, GitHubSyncJobProcessor>();
+builder.Services.AddScoped<IProjectGitActivityService, ProjectGitActivityService>();
+builder.Services.AddScoped<IGitHubWebhookService, GitHubWebhookService>();
+builder.Services.AddScoped<GitHubCredentialService>();
+builder.Services.AddScoped<GitHubOAuthFlowCleanupService>();
+builder.Services.AddSingleton<IGitHubTokenProtector, UniNet.API.Services.GitHubTokenProtector>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IStudentOpportunityService, UniNet.Application.Services.StudentOpportunityService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
@@ -79,10 +113,17 @@ builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddScoped<ICommunityService,CommunityService>();
 builder.Services.AddScoped<IAdvertisementService, AdvertisementService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
-builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
+builder.Services.AddHostedService<UniNet.API.Services.GitHubOAuthFlowCleanupWorker>();
+builder.Services.AddHostedService<UniNet.API.Services.GitSyncWorker>();
 builder.Services.AddControllers();
+builder.Services.AddHttpClient<IGitHubProviderClient, UniNet.API.Services.GitHubProviderClient>(client =>
+    client.Timeout = TimeSpan.FromSeconds(30))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<UniNet.API.Services.AccountSessionConnections>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<UniNet.API.Services.AccountSessionConnections>());
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<UniNet.API.Services.AccountSessionConnections>());
 builder.Services.AddSignalR(options => options.AddFilter<UniNet.API.Services.AccountSessionConnections>());
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
 builder.Services.AddHttpClient<UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromSeconds(30))
@@ -97,13 +138,16 @@ builder.Services.AddHttpClient<UniNet.Application.Interfaces.ICloudImageStorage,
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>();
 builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
-builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
-var figmaOrigins = new[]
-{
-    "http://localhost:3000",
-    "https://ta-01m551rnn4dyqsyrf74mnkz5vv-1380-2pwdyx71k1tz10bigm5fnvcgc.makeproxy-m.figma.site"
-};
+var figmaOrigins = phase3E2EEnvironment
+    ? Array.Empty<string>()
+    : new[]
+    {
+        "http://localhost:3000",
+        "https://ta-01m551rnn4dyqsyrf74mnkz5vv-1380-2pwdyx71k1tz10bigm5fnvcgc.makeproxy-m.figma.site"
+    };
 
 var allowedOrigins = origins
     .Concat(figmaOrigins)
@@ -299,10 +343,16 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         await context.Response.WriteAsJsonAsync(new { code = projectError.Code, message = projectError.Message });
         return;
     }
+    if (error is UniNet.Application.Common.GitHubIntegrationException gitHubError)
+    {
+        context.Response.StatusCode = gitHubError.Status;
+        await context.Response.WriteAsJsonAsync(new { code = gitHubError.Code, message = gitHubError.Message });
+        return;
+    }
     context.Response.StatusCode = 500;
     await context.Response.WriteAsJsonAsync(new { code = "INTERNAL_ERROR", message = "Có lỗi xảy ra. Vui lòng thử lại." });
 }));
-if (!app.Environment.IsDevelopment())
+if (!app.Environment.IsDevelopment() && !phase3E2EEnvironment)
 {
     app.UseHttpsRedirection();
 }

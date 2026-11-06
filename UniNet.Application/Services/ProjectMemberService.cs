@@ -143,7 +143,7 @@ public sealed class ProjectMemberService(
             Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project creator can kick members.", 403);
             Require(userId != project.CreatorId, "CANNOT_KICK_CREATOR", "The project creator cannot be kicked.", 403);
             var member = await GetMemberAsync(projectId, userId, ct);
-            await RemoveAsync(member, project, ProjectMemberStatus.Kicked, ct);
+            await RemoveAsync(member, project, ProjectMemberStatus.Kicked, actor.Id, ct);
             return member;
         }, ct);
         if (workspaceMemberRevoker is not null)
@@ -162,7 +162,7 @@ public sealed class ProjectMemberService(
             var project = await GetProjectAsync(projectId, ct);
             Require(project.CreatorId != actor.Id, "CREATOR_CANNOT_LEAVE", "The project creator cannot leave the project.", 403);
             var member = await GetMemberAsync(projectId, actor.Id, ct);
-            await RemoveAsync(member, project, ProjectMemberStatus.Left, ct);
+            await RemoveAsync(member, project, ProjectMemberStatus.Left, actor.Id, ct);
             return member;
         }, ct);
         if (workspaceMemberRevoker is not null)
@@ -170,7 +170,8 @@ public sealed class ProjectMemberService(
         return response;
     }
 
-    private async Task RemoveAsync(ProjectMember member, Project project, ProjectMemberStatus status, CancellationToken ct)
+    private async Task RemoveAsync(ProjectMember member, Project project, ProjectMemberStatus status,
+        Guid actorProfileId, CancellationToken ct)
     {
         Require(project.Status == ProjectStatus.Active,
             "INVALID_PROJECT_STATE", "Only Active projects allow members to leave or be kicked.", 409);
@@ -181,7 +182,40 @@ public sealed class ProjectMemberService(
         member.LeftAt = now;
         member.UpdatedAt = now;
         project.UpdatedAt = now;
-
+        var activeIdentities = await db.ProjectGitMemberIdentities
+            .Where(x => x.ProjectId == project.Id && x.UserProfileId == member.UserId &&
+                x.Status == ProjectGitMemberIdentityStatus.Active)
+            .ToListAsync(ct);
+        foreach (var identity in activeIdentities)
+        {
+            identity.Status = ProjectGitMemberIdentityStatus.Inactive;
+            identity.UnlinkedAt = now;
+            identity.UpdatedAt = now;
+            identity.Version = Guid.NewGuid();
+            db.ProjectGitMemberIdentityHistory.Add(new ProjectGitMemberIdentityHistory
+            {
+                IdentityId = identity.Id,
+                ProjectId = identity.ProjectId,
+                UserProfileId = identity.UserProfileId,
+                Provider = identity.Provider,
+                ExternalAccountId = identity.ExternalAccountId,
+                ExternalUsername = identity.ExternalUsername,
+                Action = status == ProjectMemberStatus.Left
+                    ? ProjectGitMemberIdentityHistoryAction.DeactivatedByDeparture
+                    : ProjectGitMemberIdentityHistoryAction.DeactivatedByRemoval,
+                PreviousStatus = ProjectGitMemberIdentityStatus.Active,
+                NewStatus = ProjectGitMemberIdentityStatus.Inactive,
+                PerformedByProfileId = actorProfileId,
+                VerifiedByConnectionId = identity.VerifiedByConnectionId,
+                OccurredAt = now
+            });
+        }
+        await db.ProjectGitManagerGrants
+            .Where(x => x.ProjectId == project.Id && x.UserProfileId == member.UserId && x.IsActive)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsActive, false)
+                .SetProperty(x => x.RevokedAt, now)
+                .SetProperty(x => x.RevokedByProfileId, actorProfileId), ct);
         // A departure frees a recruitment slot; preserve explicitly closed or expired recruitment.
         if (project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Full &&
             project.RecruitmentDeadline > now)

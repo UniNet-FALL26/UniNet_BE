@@ -20,6 +20,25 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
         if (ChangeTracker.Entries<AccountStatusChange>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Account status history cannot be changed or deleted.");
+        if (ChangeTracker.Entries<ProjectGitRepositoryHistory>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Repository integration history cannot be changed or deleted.");
+        if (ChangeTracker.Entries<ProjectGitMemberIdentityHistory>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Project Git identity history cannot be changed or deleted.");
+        foreach (var entry in ChangeTracker.Entries<ProjectGitMemberIdentity>())
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Project Git identities cannot be deleted.");
+            if (entry.State == EntityState.Modified && new[]
+                {
+                    nameof(ProjectGitMemberIdentity.ProjectId),
+                    nameof(ProjectGitMemberIdentity.UserProfileId),
+                    nameof(ProjectGitMemberIdentity.Provider),
+                    nameof(ProjectGitMemberIdentity.ExternalAccountId),
+                    nameof(ProjectGitMemberIdentity.LinkedAt),
+                    nameof(ProjectGitMemberIdentity.CreatedAt)
+                }.Any(property => entry.Property(property).IsModified))
+                throw new InvalidOperationException("Project Git identity ownership cannot be rewritten.");
+        }
         foreach (var entry in ChangeTracker.Entries<VerificationNotification>().Where(e => e.State == EntityState.Added).ToList())
         {
             if (!Set<NotificationDelivery>().Local.Any(x => x.NotificationId == entry.Entity.Id && x.Reason == "created"))
@@ -90,6 +109,23 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectRoleRequirement> ProjectRoleRequirements => Set<ProjectRoleRequirement>();
     public DbSet<ProjectSkill> ProjectSkills => Set<ProjectSkill>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<GitHubOAuthConnection> GitHubOAuthConnections => Set<GitHubOAuthConnection>();
+    public DbSet<GitHubOAuthAuthorizationFlow> GitHubOAuthAuthorizationFlows => Set<GitHubOAuthAuthorizationFlow>();
+    public DbSet<GitHubRepository> GitHubRepositories => Set<GitHubRepository>();
+    public DbSet<ProjectGitManagerGrant> ProjectGitManagerGrants => Set<ProjectGitManagerGrant>();
+    public DbSet<ProjectGitRepository> ProjectGitRepositories => Set<ProjectGitRepository>();
+    public DbSet<ProjectGitRepositoryHistory> ProjectGitRepositoryHistory => Set<ProjectGitRepositoryHistory>();
+    public DbSet<ProjectGitMemberIdentity> ProjectGitMemberIdentities => Set<ProjectGitMemberIdentity>();
+    public DbSet<ProjectGitMemberIdentityHistory> ProjectGitMemberIdentityHistory => Set<ProjectGitMemberIdentityHistory>();
+    public DbSet<GitSyncJob> GitSyncJobs => Set<GitSyncJob>();
+    public DbSet<GitSyncCheckpoint> GitSyncCheckpoints => Set<GitSyncCheckpoint>();
+    public DbSet<GitHubProviderObject> GitHubProviderObjects => Set<GitHubProviderObject>();
+    public DbSet<GitActivity> GitActivities => Set<GitActivity>();
+    public DbSet<GitActivityActor> GitActivityActors => Set<GitActivityActor>();
+    public DbSet<ProjectGitActivityGrant> ProjectGitActivityGrants => Set<ProjectGitActivityGrant>();
+    public DbSet<GitCommitBranchReference> GitCommitBranchReferences => Set<GitCommitBranchReference>();
+    public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
+    public DbSet<ProjectGitActivityVisibility> ProjectGitActivityVisibilities => Set<ProjectGitActivityVisibility>();
     public DbSet<WorkspaceChannel> WorkspaceChannels => Set<WorkspaceChannel>();
     public DbSet<WorkspaceMessage> WorkspaceMessages => Set<WorkspaceMessage>();
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
@@ -139,6 +175,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         NotificationConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
+        GitHubIntegrationConfiguration.Configure(model);
+        ProjectGitMemberIdentityConfiguration.Configure(model);
+        GitSyncConfiguration.Configure(model);
+        GitActivityConfiguration.Configure(model);
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);
