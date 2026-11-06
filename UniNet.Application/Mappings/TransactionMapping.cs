@@ -9,12 +9,12 @@ public static class TransactionMapping
     public const string BookingPaymentReview = "BOOKING_PAYMENT_REVIEW_REQUIRED";
     public const string DuplicatePaymentReview = "DUPLICATE_PAYMENT_REVIEW_REQUIRED";
 
-    public static TransactionResponse ToResponse(Transaction transaction, Guid verificationId) => new(
+    public static TransactionResponse ToResponse(Transaction transaction, Guid verificationId, string? checkoutUrl = null) => new(
         transaction.Id, verificationId, transaction.PackageId, transaction.Amount, "VND",
         transaction.Status, transaction.PaymentMethod, transaction.ProviderOrderCode,
-        transaction.ProviderPaymentLinkId, transaction.PaymentUrl, transaction.PaidAt,
+        transaction.ProviderPaymentLinkId, checkoutUrl, transaction.PaidAt,
         transaction.ExpiredAt, transaction.CreatedAt, transaction.UpdatedAt,
         transaction.Status == PaymentStatus.Pending &&
-            (string.IsNullOrEmpty(transaction.PaymentUrl) || transaction.FailureReason != null),
+            ((transaction.VerificationId.HasValue && string.IsNullOrWhiteSpace(transaction.PaymentQrCode)) || transaction.FailureReason != null),
         transaction.FailureReason is DuplicatePaymentReview or LatePaymentReview or BookingPaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", transaction.FailureReason, transaction.PaymentQrCode);
 }

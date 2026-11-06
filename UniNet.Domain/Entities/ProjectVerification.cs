@@ -52,6 +52,6 @@ namespace UniNet.Domain.Entities
         public string AiAdditionalEvidenceJson { get; set; } = "[]";
         public List<ProjectVerificationEvidence> EvidenceSubmissions { get; set; } = [];
         public List<VerificationAssignment> Assignments { get; set; } = [];
-        public List<VerificationTransaction> VerificationTransactions { get; set; } = [];
+        public List<Transaction> Transactions { get; set; } = [];
     }
 }

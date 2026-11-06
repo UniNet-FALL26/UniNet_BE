@@ -2369,10 +2369,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<string>("PaymentUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
                     b.Property<string>("ProviderOrderCode")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -2390,6 +2386,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("VerificationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VerificationReservationId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PackageId");
@@ -2397,6 +2399,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("ProviderOrderCode");
 
                     b.HasIndex("ProviderPaymentLinkId");
+
+                    b.HasIndex("VerificationId");
 
                     b.HasIndex("PaymentMethod", "ProviderOrderCode")
                         .IsUnique()
@@ -2739,30 +2743,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_VerificationReports_Case", "\"ProjectVerificationId\" IS NOT NULL OR \"LegacyOriginalJson\" IS NOT NULL");
                         });
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
-                {
-                    b.Property<Guid>("TransactionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ReservationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("VerificationId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("TransactionId");
-
-                    b.HasIndex("VerificationId");
-
-                    b.ToTable("VerificationTransactions", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
@@ -4142,9 +4122,16 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", "Verification")
+                        .WithMany("Transactions")
+                        .HasForeignKey("VerificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Package");
 
                     b.Navigation("User");
+
+                    b.Navigation("Verification");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UploadedFile", b =>
@@ -4269,25 +4256,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("VerificationAssignment");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.Transaction", "Transaction")
-                        .WithOne("VerificationTransaction")
-                        .HasForeignKey("UniNet.Domain.Entities.VerificationTransaction", "TransactionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", "Verification")
-                        .WithMany("VerificationTransactions")
-                        .HasForeignKey("VerificationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Transaction");
-
-                    b.Navigation("Verification");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
@@ -4663,7 +4631,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Navigation("EvidenceSubmissions");
 
-                    b.Navigation("VerificationTransactions");
+                    b.Navigation("Transactions");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.TaskReport", b =>
@@ -4680,8 +4648,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("AdvertisementTransaction");
 
                     b.Navigation("RefundTransactions");
-
-                    b.Navigation("VerificationTransaction");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UploadedFile", b =>

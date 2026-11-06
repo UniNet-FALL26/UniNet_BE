@@ -275,12 +275,11 @@ public sealed class AdvertisementService(
         // Map kết quả trả về từ ProviderPaymentResult
         // Lưu ý: Thay đổi "Id" và "CheckoutUrl" thành đúng tên thuộc tính trong record ProviderPaymentResult của bạn
         transaction.ProviderPaymentLinkId = result.PaymentLinkId;
-        transaction.PaymentUrl = result.CheckoutUrl;
-        transaction.PaymentQrCode = result.QrCode;
+        campaign.Status = AdCampaignStatus.PendingPayment;
 
         await db.SaveChangesAsync(ct);
 
-        return TransactionMapping.ToResponse(transaction, campaignId);
+        return TransactionMapping.ToResponse(transaction, campaignId, result.CheckoutUrl);
     }
 
     // BƯỚC 5: Confirm Payment & Publish Ad (Khi Webhook PayOS gọi về)
