@@ -103,18 +103,39 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
         return new(page, pageSize, total, (int)(((long)total + pageSize - 1) / pageSize), items.Select(ProjectVerificationMapping.ToResponse).ToList());
     }
 
-    private async Task<ProjectVerification> LoadAsync(Guid id, CancellationToken ct) =>
-        await db.ProjectVerifications.AsNoTracking().Include(v => v.Project).ThenInclude(p => p.Creator).Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
-        .Include(v => v.Assignments).ThenInclude(a => a.Report)
-        .Include(v => v.Transactions).ThenInclude(t => t.RefundTransactions)
-        .AsSplitQuery().FirstOrDefaultAsync(v => v.Id == id, ct)
-        ?? throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
+    private async Task<ProjectVerification> LoadAsync(Guid id, CancellationToken ct, bool includeProjectTeam = false)
+    {
+        var query = db.ProjectVerifications.AsNoTracking()
+            .Include(v => v.Project).ThenInclude(p => p.Creator)
+            .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
+            .Include(v => v.Assignments).ThenInclude(a => a.Report)
+            .Include(v => v.Transactions).ThenInclude(t => t.RefundTransactions)
+            .AsSplitQuery();
+        if (includeProjectTeam)
+            query = query
+                .Include(v => v.Project).ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+                .Include(v => v.Project).ThenInclude(p => p.Members.Where(m => m.Status == ProjectMemberStatus.Active))
+                .ThenInclude(m => m.User);
+
+        return await query.FirstOrDefaultAsync(v => v.Id == id, ct)
+            ?? throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
+    }
 
     public async Task<AdminVerificationDetailResponse> GetDetailAsync(Guid id, Guid accountId, CancellationToken ct = default)
     {
         await AuthorizeAsync(accountId, ct);
-        var detail = ProjectVerificationMapping.ToDetailResponse(await LoadAsync(id, ct));
-        return new(detail);
+        var verification = await LoadAsync(id, ct, includeProjectTeam: true);
+        var detail = ProjectVerificationMapping.ToDetailResponse(verification);
+        var project = detail.Project with
+        {
+            Skills = verification.Project.ProjectSkills.OrderBy(s => s.Skill.Name).ThenBy(s => s.SkillId)
+                .Select(s => new ProjectSkillInfo(s.SkillId, s.Skill.Name,
+                    s.Skill.Category?.ToString() ?? string.Empty, s.Skill.IconUrl, null)).ToList(),
+            Members = verification.Project.Members.OrderBy(m => m.JoinedAt).ThenBy(m => m.UserId)
+                .Select(m => new ProjectMemberInfo(m.UserId, m.User.FullName, m.User.Nickname,
+                    m.User.AvatarUrl, m.Role, m.Status, m.JoinedAt)).ToList()
+        };
+        return new(detail with { Project = project });
     }
 
     public async Task<List<VerificationReportResponse>> GetReportsAsync(Guid id, Guid accountId, CancellationToken ct = default)
