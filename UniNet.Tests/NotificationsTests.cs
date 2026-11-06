@@ -14,6 +14,22 @@ namespace UniNet.Tests;
 public sealed class NotificationsTests
 {
     [Fact]
+    public async Task ReadOnlyFilterRunsBeforePaginationAndKeepsGlobalUnreadCount()
+    {
+        await using var f = await Fixture.Create();
+        for (var i = 0; i < 24; i++) await f.Service.SendToUsersAsync([f.Student.Id], Content($"read-filter-{i}"), default);
+        var all = await f.Service.GetMineAsync(f.Student.Id, pageSize: 100);
+        var readIds = all.Items.TakeLast(3).Select(n => n.Id).ToArray();
+        foreach (var id in readIds) await f.Service.ReadAsync(f.Student.Id, id);
+        var first = await f.Service.GetMineAsync(f.Student.Id, pageSize: 2, readOnly: true);
+        var second = await f.Service.GetMineAsync(f.Student.Id, page: 2, pageSize: 2, readOnly: true);
+        Assert.Equal(3, first.Total); Assert.Equal(21, first.UnreadCount);
+        Assert.Equal(2, first.Items.Count); Assert.Single(second.Items);
+        Assert.All(first.Items.Concat(second.Items), n => Assert.NotNull(n.ReadAt));
+        Assert.Equal(readIds.OrderBy(id => id), first.Items.Concat(second.Items).Select(n => n.Id).OrderBy(id => id));
+    }
+
+    [Fact]
     public async Task AccountIdsOwnershipExpiryFilteringAndReadIsolation()
     {
         await using var f = await Fixture.Create();
@@ -125,6 +141,52 @@ public sealed class NotificationsTests
         f.Db.Set<NotificationPermissionOverride>().Add(new() { AccountId = f.Admin.Id, Permission = NotificationPermissionPolicy.Manage, IsGranted = false });
         await f.Db.SaveChangesAsync();
         await Assert.ThrowsAsync<ProjectVerificationException>(() => service.ListAsync(f.Admin.Id, default));
+    }
+
+    [Theory]
+    [InlineData("All", null)]
+    [InlineData("Staff", null)]
+    [InlineData("Role", "Student")]
+    [InlineData("Role", "Partner")]
+    [InlineData("Role", "Assessor")]
+    public async Task BroadcastAudiencePreviewAndDeliveryUseOnlyIntendedRoles(string audience, string? role)
+    {
+        await using var f = await Fixture.Create();
+        foreach (var missing in new[] { AccountRole.Assessor, AccountRole.Verifier, AccountRole.Accountant })
+            f.Db.Accounts.Add(new Account { Email = $"audience-{missing}@example.test", Role = missing });
+        f.Db.Accounts.Add(new Account { Email = "inactive-audience@example.test", Role = AccountRole.Student, Status = AccountStatus.Suspended });
+        f.Db.Accounts.Add(new Account { Email = "inactive-staff@example.test", Role = AccountRole.Moderator, Status = AccountStatus.Suspended });
+        await f.Db.SaveChangesAsync();
+        var userRoles = new[] { AccountRole.Student, AccountRole.Partner, AccountRole.Assessor };
+        var expected = (await f.Db.Accounts.Where(a => a.Status == AccountStatus.Active).ToListAsync())
+            .Where(a => audience == "All" ? userRoles.Contains(a.Role) : audience == "Staff" ? !userRoles.Contains(a.Role) : a.Role.ToString() == role)
+            .Select(a => a.Id).OrderBy(id => id).ToArray();
+        var service = new NotificationBroadcastService(f.Db);
+        var draft = await service.CreateAsync(f.Admin.Id, new("Audience", "Message", audience, role), default);
+        Assert.Equal(expected.Length, await service.PreviewAsync(f.Admin.Id, draft.Id, default));
+        Assert.Equal(expected.Length, (await service.PublishAsync(f.Admin.Id, draft.Id, default)).RecipientCount);
+        Assert.True(await service.ProcessNextBatchAsync(default));
+        var delivered = await f.Db.Set<VerificationNotification>().Where(n => n.BroadcastId == draft.Id).Select(n => n.RecipientUserId).ToListAsync();
+        Assert.Equal(expected, delivered.OrderBy(id => id).ToArray());
+    }
+
+    [Theory]
+    [InlineData("Admin")][InlineData("Verifier")][InlineData("Moderator")][InlineData("Accountant")]
+    [InlineData("0")][InlineData("6")][InlineData("Unknown")][InlineData(null)]
+    public async Task BroadcastRoleAudienceRejectsNonUserRoles(string? role)
+    {
+        await using var f = await Fixture.Create();
+        var service = new NotificationBroadcastService(f.Db);
+        await Assert.ThrowsAsync<ProjectVerificationException>(() => service.CreateAsync(f.Admin.Id, new("Title", "Message", "Role", role), default));
+    }
+
+    [Fact]
+    public async Task HistoricalStaffRoleAndUnknownAudienceDoNotFallBackToAllAccounts()
+    {
+        await using var f = await Fixture.Create();
+        var service = new NotificationBroadcastService(f.Db);
+        Assert.Empty(await service.Eligible(new() { Audience = "Role", Role = "Admin" }).ToListAsync());
+        Assert.Empty(await service.Eligible(new() { Audience = "Unknown" }).ToListAsync());
     }
 
     [Fact]
