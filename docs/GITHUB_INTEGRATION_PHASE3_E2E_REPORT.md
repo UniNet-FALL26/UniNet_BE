@@ -4,6 +4,30 @@
 **Result:** **BLOCKED — local setup is prepared, but real E2E has not started.**
 **Phase 3 status:** Not complete. No real E2E pass is claimed.
 
+## Real webhook redelivery deduplication
+
+- **PASS — sequential redelivery:** user reports GitHub redelivery of `1b35888c-d9a5-11f1-8da8-8bb14c640680` returned HTTP 202, `duplicate=true`, `supportedEvent=true` and `enqueuedJobCount=0`. The response is user-reported; the local ngrok capture was unavailable for independent inspection.
+- PostgreSQL `uninet_e2e` contains exactly one row for the delivery ID. The project-repository still has exactly three jobs (initial, manual and the original webhook job), matching the prior recorded state; no additional job was observed. It still has 14 visibility rows for 14 distinct activities, matching the pre-redelivery baseline.
+- Student A logged in through the API; Activity API returned HTTP 200 with 14 results, including exactly one `commit.created` for SHA `d72270306add827a239b9bf335a222b3ec2954aa` in the test repository. No manual or initial sync was requested for this verification.
+- This confirms the observed sequential redelivery scenario; concurrent duplicate delivery remains **NOT TESTED**. Other outstanding Phase 3 scenarios remain open and `SECRET_ROTATION_DEFERRED` remains recorded.
+
+## Real webhook → worker → activity E2E
+
+- **PASS:** GitHub `push` delivery `1b35888c-d9a5-11f1-8da8-8bb14c640680` reached the E2E endpoint through ngrok with a SHA-256 signature header and received HTTP 202. The delivery ID matches the PostgreSQL record for provider repository 1446877283; it is marked supported with one job enqueued. Acceptance by the handler confirms the configured signature verification passed for this delivery.
+- **PASS:** Webhook job `d2b0037e-5c6f-4b78-9256-6a52273c66cc` was created at 05:53:55 UTC, started at 05:53:59 UTC and completed at 05:54:05 UTC on 2026-11-06, status Completed, zero retries and no error code. All 10 persisted checkpoints have status Completed; the `main` commits checkpoint processed five items.
+- **PASS:** The push `after` SHA extracted locally from the captured real request was `d72270306add827a239b9bf335a222b3ec2954aa`. PostgreSQL recorded the corresponding `commit.created` activity and project visibility while the webhook job was running. Student A's Activity API returned HTTP 200, total 14, and exactly one matching commit for `trangtanduoc/uninet-github-e2e`.
+- **PASS, bounded:** 14 visibility rows reference 14 distinct activities; no duplicate `(category, external object ID, activity type)` exists in this project's visible data. **NOT TESTED:** redelivery of the same webhook and concurrent deduplication. No Manual or Initial Sync was started for this verification.
+- The webhook → sync job → worker → Git Activity path passed for this real push. This does not complete the remaining Phase 3 E2E scenarios; `SECRET_ROTATION_DEFERRED` remains open.
+
+## Existing Student A E2E continuation
+
+- **PASS:** Student A authenticated through the real login API using the existing local DPAPI credential. Existing OAuth connection `4bd2e5dd-5b00-4fa6-bd13-ff2770ef57fa` resolves to GitHub account `trangtanduoc` (provider account ID 156803598). No OAuth flow, repository discovery/linking or initial sync was repeated.
+- **PASS:** Initial and manual sync jobs completed with zero retries and 10 checkpoints each. PostgreSQL contains 13 distinct project visibility rows: 4 commits, 2 branch observations, 2 issue comments, 1 issue opened, 1 issue closed, 1 PR opened, 1 PR merged and 1 release. The associated repository is private and belongs to the specified project. Observed activity timestamps span 2026-11-05 10:52:24 UTC to 2026-11-06 05:00:41.786553 UTC.
+- **FAIL then fixed:** Real PostgreSQL Activity API returned HTTP 500 because EF could not translate `Distinct` and ordering over a constructor projection. The service now projects a translatable anonymous shape, counts distinct rows and materializes the page before constructing response records. The PostgreSQL regression and focused GitHub service suite passed **27 tests**. After E2E backend restart, `GET .../git/activities?page=1&pageSize=50` returned HTTP 200 and 13 activities. SQLite/fake tests alone would not have reproduced this issue.
+- **PASS:** Student A, the eligible project creator, linked the existing OAuth identity through the real identity API; active mapping `78bb4d8d-0e2a-4a67-9482-e7da804b4500` matches the GitHub account and Student A profile in PostgreSQL. Student B membership-dependent authorization remains **BLOCKED**. Historical contribution attribution belongs to Phase 4 and was **NOT TESTED**.
+- **BLOCKED:** ngrok reports the HTTPS origin forwarding to localhost:5239, but webhook configuration and a real GitHub delivery have not been verified. PostgreSQL had zero deliveries for the repository at inspection. HMAC, webhook enqueue, duplicate delivery and activity persistence after a real webhook remain unverified; a test repository event or real delivery redelivery is needed.
+- **PARTIAL:** Prior jobs prove claim/completion, checkpoint persistence and repeated sync without duplicate visibility rows. Retry behavior, interrupted lease recovery and a newly observed incremental event were **NOT TESTED**. `SECRET_ROTATION_DEFERRED` remains open. Phase 3 remains incomplete.
+
 ## Minimal real GitHub linking E2E
 
 - Source inspection: repository discovery/linking requires the project creator or an active Git Manager; it does not require an Active project. The local test project remains Pending and was not modified.

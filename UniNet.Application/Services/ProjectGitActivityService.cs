@@ -73,12 +73,16 @@ public sealed class ProjectGitActivityService(UniNetDbContext db) : IProjectGitA
                 .Where(x => (x.UnlinkedAt == null || x.ObservedAt <= x.UnlinkedAt) &&
                     (x.AccessStatus == UniNet.Domain.Enums.ProjectGitRepositoryAccessStatus.Active ||
                      x.LastAccessCheckedAt != null && x.ObservedAt <= x.LastAccessCheckedAt))
-                .Select(x => new ActivityRow(
+                .Select(x => new
+                {
                     x.Id, x.ActivityType, x.OccurredAt, x.RepositoryFullName,
-                    x.SourceCategory, x.ExternalObjectId));
+                    x.SourceCategory, x.ExternalObjectId
+                }).Distinct();
             total = await query.CountAsync(ct);
-            rows = await query.Distinct().OrderByDescending(x => x.OccurredAt).ThenByDescending(x => x.Id)
+            var pageRows = await query.OrderByDescending(x => x.OccurredAt).ThenByDescending(x => x.Id)
                 .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+            rows = pageRows.Select(x => new ActivityRow(x.Id, x.ActivityType, x.OccurredAt,
+                x.RepositoryFullName, x.SourceCategory, x.ExternalObjectId)).ToList();
         }
 
         var activityIds = rows.Select(x => x.Id).ToArray();
