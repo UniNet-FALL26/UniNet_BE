@@ -100,7 +100,13 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         return new PublicPartnerProfileResponse(partner.Id, partner.OrganizationName ?? partner.FullName,
             partner.PartnerType, partner.AvatarUrl, partner.CoverUrl, partner.IsVerified, partner.Industry,
             partner.Bio, partner.Address, partner.ContactEmail, partner.Phone,
-            PartnerWebsiteLinks.ParseStored(partner.Website), openJobs);
+            PartnerWebsiteLinks.ParseStored(partner.Website), openJobs)
+        {
+            Introduction = partner.PartnerJson is { } details
+                ? new(details.IntroductionImageUrl, details.FoundedOn, details.EmployeeRange,
+                    (details.Branches ?? []).ToArray(), (details.GalleryUrls ?? []).ToArray())
+                : null,
+        };
     }
     public async Task<IReadOnlyList<StudentSubmittedApplicationResponse>> GetOwnApplicationsAsync(Guid accountId, Guid jobId, CancellationToken ct)
     {

@@ -123,7 +123,127 @@ public sealed class GeminiModerationService : IAIModerationService
 
         return result ?? CreateErrorResult("Failed to get response from Gemini API");
     }
+    private static readonly string[] ProhibitedKeywords = ["cờ bạc", "phản động", "lừa đảo", "lô đề", "18+"];
 
+    public async Task<bool> ReviewContentAsync(string title, string content, CancellationToken ct = default)
+    {
+        var apiKey = _configuration["Gemini:ApiKey"];
+        var model = _configuration["Gemini:Model"];
+        if (string.IsNullOrWhiteSpace(model))
+            model = "gemini-3.1-flash-lite";
+
+        // Nếu không có API Key, fallback về kiểm tra từ khóa tĩnh
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return IsSuitableFallback(title, content);
+        }
+
+        var prompt = $$"""
+    Bạn là hệ thống kiểm duyệt nội dung tự động. 
+    Hãy đánh giá tiêu đề và nội dung dưới đây xem có vi phạm tiêu chuẩn hay không.
+
+    Tiêu chí vi phạm: cờ bạc, phản động, lừa đảo, lô đề, nội dung 18+/đồi trụy, vi phạm pháp luật.
+
+    Tiêu đề: {{title}}
+    Nội dung: {{content}}
+
+    Trả về duy nhất JSON dạng: {"isSuitable": true} hoặc {"isSuitable": false}
+    """;
+
+        var requestUrl = $"{BaseUrl}/{Uri.EscapeDataString(model)}:generateContent";
+        var request = new GeminiRequest(
+            Contents: new List<GeminiContent>
+            {
+            new(Parts: new List<GeminiPart> { new(Text: prompt) })
+            }
+        );
+
+        var json = JsonSerializer.Serialize(request);
+
+        for (int attempt = 0; attempt < MaxRetries; attempt++)
+        {
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
+
+                using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUrl);
+                httpRequest.Headers.Add("x-goog-api-key", apiKey);
+                httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.SendAsync(httpRequest, cts.Token);
+                var responseJson = await response.Content.ReadAsStringAsync(cts.Token);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return ParseIsSuitableResponse(responseJson);
+                }
+
+                if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
+                {
+                    if (attempt < MaxRetries - 1)
+                    {
+                        await Task.Delay(1000 * (attempt + 1), ct);
+                        continue;
+                    }
+                }
+
+                break;
+            }
+            catch (OperationCanceledException)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (attempt < MaxRetries - 1)
+                {
+                    await Task.Delay(1000 * (attempt + 1), ct);
+                    continue;
+                }
+            }
+            catch (HttpRequestException)
+            {
+                if (attempt < MaxRetries - 1)
+                {
+                    await Task.Delay(1000 * (attempt + 1), ct);
+                    continue;
+                }
+            }
+        }
+
+        // Nếu Gemini API thất bại sau các lần retry, dùng fallback từ khóa tĩnh
+        return IsSuitableFallback(title, content);
+    }
+
+    private static bool IsSuitableFallback(string title, string content)
+    {
+        var text = $"{title} {content}".ToLowerInvariant();
+        return !ProhibitedKeywords.Any(kw => text.Contains(kw));
+    }
+
+    private static bool ParseIsSuitableResponse(string jsonResponse)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonResponse);
+            var text = doc.RootElement
+                .GetProperty("candidates")[0]
+                .GetProperty("content")
+                .GetProperty("parts")[0]
+                .GetProperty("text")
+                .GetString();
+
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            // Trích xuất JSON từ response text của Gemini
+            var cleanJson = text.Replace("```json", "").Replace("```", "").Trim();
+            using var resultDoc = JsonDocument.Parse(cleanJson);
+
+            return resultDoc.RootElement.GetProperty("isSuitable").GetBoolean();
+        }
+        catch
+        {
+            return false;
+        }
+    }
     private static string BuildSafePrompt(ProjectModerationInput input)
     {
         var sb = new StringBuilder();

@@ -11,7 +11,8 @@ public record LoginRequest(string Email, string Password, bool RememberMe = fals
 public record GoogleLoginRequest(string IdToken, AccountRole Role = AccountRole.Student, PartnerType? PartnerType = null);
 public record RefreshRequest(string RefreshToken);
 public record StudentProfileRequest(string FullName, string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, string? StudentCode, string? Nickname = null);
-public record PartnerProfileRequest(string OrganizationName, PartnerType? PartnerType, string? AvatarUrl, string? CoverUrl, string? Bio, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address, IReadOnlyList<string>? Websites = null);
+public sealed record PartnerIntroductionDetails(string? ImageUrl, string? FoundedOn, string? EmployeeRange, string[]? Branches, string[]? GalleryUrls);
+public record PartnerProfileRequest(string OrganizationName, PartnerType? PartnerType, string? AvatarUrl, string? CoverUrl, string? Bio, string? Industry, string? Website, string? ContactEmail, string? Phone, string? Address, IReadOnlyList<string>? Websites = null, PartnerIntroductionDetails? Introduction = null);
 public sealed record AssessorProfileDetails(string? JobTitle, string? CompanyName, int YearsOfExperience, string[]? Expertise,
     string? Education, string? University, string? LinkedInUrl, string? GitHubUrl, string? PortfolioUrl);
 public sealed record AssessorProfileRequest(string FullName, string? Nickname, string? AvatarUrl, string? CoverUrl, string? Bio,
@@ -21,6 +22,7 @@ public record ProfileResponse(Guid Id, string FullName, string Nickname, string?
     public string DisplayName => Nickname;
     public IReadOnlyList<string> Websites { get; init; } = Array.Empty<string>();
     public AssessorProfileDetails? AssessorJson { get; init; }
+    public PartnerIntroductionDetails? Introduction { get; init; }
 }
 public record AccountResponse(Guid Id, string Email, AccountRole Role, AccountStatus Status, bool EmailVerified, ProfileResponse? Profile, bool ProfileComplete)
 {

@@ -26,8 +26,8 @@ public sealed class NotificationBroadcastService(UniNetDbContext db)
     {
         await RequireAsync(sender, ct);
         NotificationService.Validate(new("SystemAnnouncement", "system", request.Title, request.Message, TargetUrl: request.TargetUrl));
-        if (request.Audience is not ("All" or "Role" or "Selected") ||
-            request.Audience == "Role" && (!Enum.TryParse<AccountRole>(request.Role, out var parsed) || !Enum.IsDefined(parsed)) ||
+        if (request.Audience is not ("All" or "Role" or "Staff" or "Selected") ||
+            request.Audience == "Role" && request.Role is not ("Student" or "Partner" or "Assessor") ||
             request.ExpiresAt <= DateTimeOffset.UtcNow)
             throw Invalid();
         var recipients = (request.RecipientAccountIds ?? []).Distinct().ToArray();
@@ -91,9 +91,13 @@ public sealed class NotificationBroadcastService(UniNetDbContext db)
     {
         var query = db.Accounts.Where(a => a.Status == AccountStatus.Active);
         if (job.PublishedAt != null) query = query.Where(a => a.CreatedAt <= job.PublishedAt);
-        if (job.Audience == "Role") { var role = Enum.Parse<AccountRole>(job.Role!); query = query.Where(a => a.Role == role); }
-        if (job.Audience == "Selected") query = query.Where(a => db.Set<NotificationBroadcastRecipient>().Any(r => r.BroadcastId == job.Id && r.AccountId == a.Id));
-        return query;
+        return job.Audience switch {
+            "All" => query.Where(a => a.Role == AccountRole.Student || a.Role == AccountRole.Partner || a.Role == AccountRole.Assessor),
+            "Role" when job.Role is "Student" or "Partner" or "Assessor" => query.Where(a => a.Role == Enum.Parse<AccountRole>(job.Role)),
+            "Staff" => query.Where(a => a.Role == AccountRole.Verifier || a.Role == AccountRole.Moderator || a.Role == AccountRole.Accountant || a.Role == AccountRole.Admin),
+            "Selected" => query.Where(a => db.Set<NotificationBroadcastRecipient>().Any(r => r.BroadcastId == job.Id && r.AccountId == a.Id)),
+            _ => query.Where(a => false),
+        };
     }
     private async Task<NotificationBroadcast> JobAsync(Guid id, CancellationToken ct) => await db.Set<NotificationBroadcast>().Include(j => j.Recipients).SingleOrDefaultAsync(j => j.Id == id, ct)
         ?? throw new ProjectVerificationException("NOT_FOUND", "Không tìm thấy đợt gửi.", 404);

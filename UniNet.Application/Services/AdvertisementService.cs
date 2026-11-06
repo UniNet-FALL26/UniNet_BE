@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
@@ -20,40 +21,143 @@ namespace UniNet.Application.Services;
 public sealed class AdvertisementService(
     UniNetDbContext db,
     IPaymentProvider provider,
+    IAIModerationService aiModeration,
+    ICloudImageStorage imageStorage,
     IConfiguration configuration) : IAdvertisementService
 {
+    // BƯỚC 1: Partner tạo & gửi Quảng cáo + Tự động AI Review
     public async Task<CampaignResponse> CreateCampaignAsync(Guid accountId, CreateCampaignRequest request, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
         ValidateCreateRequest(request);
-
-        var package = await db.Packages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == request.PackageId, ct);
-        Require(package != null && package.IsActive && package.Type == PackageType.Advertisement && package.Role == TargetRole.Company,
-            "INVALID_AD_PACKAGE", "An active Partner advertisement package is required.", 400);
 
         var now = DateTimeOffset.UtcNow;
         var campaign = new AdvertisementCampaign
         {
             Id = Guid.NewGuid(),
             CompanyUserId = partnerProfile.Id,
-            PackageId = package.Id,
+            PackageId = null, // Chưa có gói lúc tạo nháp
             Title = request.Title.Trim(),
             Content = request.Content.Trim(),
             DestinationUrl = request.DestinationUrl.Trim(),
-            MediaUrl = request.MediaUrl?.Trim(),
-            BudgetCap = package.Price,
-            Status = AdCampaignStatus.PendingPayment,
+            BudgetCap = 0,
+            Status = AdCampaignStatus.Draft,
             CreatedAt = now,
             UpdatedAt = now
         };
 
+        // Xử lý upload ảnh duy nhất (Single Image Upload)
+        if (request.MediaFile != null)
+        {
+            // Kiểm tra an toàn nếu FormFileCollection lỡ nhận nhiều hơn 1 file (phòng hờ trường hợp dùng IFormFileCollection)
+            // Nếu dùng IFormFile đơn lẻ thì cú pháp trên là đủ, nhưng nếu Controller nhận List<IFormFile> thì cần check:
+            // if (request.MediaFiles?.Count > 1) throw new AdvertisementException("TOO_MANY_IMAGES", "Chỉ được phép upload tối đa 1 ảnh cho mỗi chiến dịch.", 400);
+
+            if (request.MediaFile.Length > 0)
+            {
+                var extension = Path.GetExtension(request.MediaFile.FileName).ToLowerInvariant().TrimStart('.');
+                if (extension is not ("png" or "jpg" or "jpeg" or "webp"))
+                {
+                    throw new AdvertisementException("INVALID_IMAGE_FORMAT", $"Định dạng ảnh .{extension} không hợp lệ.", 400);
+                }
+
+                using var memoryStream = new MemoryStream();
+                await request.MediaFile.CopyToAsync(memoryStream, ct);
+
+                var publicId = $"advertisements/campaigns/{campaign.Id}/{Guid.NewGuid():N}";
+                var format = extension == "jpeg" ? "jpg" : extension;
+
+                var uploadResult = await imageStorage.Upload(
+                    new ImageUploadRequest(memoryStream.ToArray(), publicId, format, "image"),
+                    ct
+                );
+
+                campaign.MediaUrl = uploadResult.ImageUrl;
+            }
+        }
+
         db.AdvertisementCampaigns.Add(campaign);
+        await db.SaveChangesAsync(ct);
+
+        return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", null);
+    }
+    public async Task<CampaignResponse> AssignPackageAsync(Guid accountId, Guid campaignId, AssignPackageRequest request, CancellationToken ct = default)
+    {
+        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
+
+        var campaign = await db.AdvertisementCampaigns
+            .Include(c => c.Package)
+            .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
+            ?? throw NotFound();
+
+        // Chỉ cho phép gán gói khi chiến dịch đang là Draft
+        Require(campaign.Status == AdCampaignStatus.Draft,
+            "INVALID_CAMPAIGN_STATE", "Only campaigns in Draft status can be assigned a package.", 409);
+
+        var package = await db.Packages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == request.PackageId, ct);
+        Require(package != null && package.IsActive && package.Type == PackageType.Advertisement && package.Role == TargetRole.Company,
+            "INVALID_AD_PACKAGE", "An active Partner advertisement package is required.", 400);
+
+        // 1. Chạy AI Review kiểm tra nội dung Title và Content khi Partner chọn gói gán vào chiến dịch
+        bool isSuitable = await aiModeration.ReviewContentAsync(campaign.Title, campaign.Content, ct);
+
+        // 2. Cập nhật thông tin gói và tự động chuyển đổi Status theo kết quả AI
+        campaign.PackageId = package.Id;
+        campaign.BudgetCap = package.Price;
+
+        if (isSuitable)
+        {
+            // Nội dung chuẩn -> Chuyển sang chờ thanh toán
+            campaign.Status = AdCampaignStatus.PendingPayment;
+            campaign.RejectionReason = null;
+        }
+        else
+        {
+            // Nội dung có từ khóa nhạy cảm -> Chuyển sang chờ Admin duyệt thủ công
+            campaign.Status = AdCampaignStatus.PendingModeration;
+            campaign.RejectionReason = "AI phát hiện nội dung có chứa từ khóa nhạy cảm, chuyển sang bộ phận kiểm duyệt.";
+        }
+
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+
         await db.SaveChangesAsync(ct);
 
         return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", package.Name);
     }
+    // BƯỚC 3: Admin Review (khi AI cho kết quả Không phù hợp)
+    public async Task<CampaignResponse> ModerateCampaignAsync(Guid accountId, Guid campaignId, ModerateCampaignRequest request, CancellationToken ct = default)
+    {
+        await EnsureAdminAsync(accountId, ct);
 
-    public async Task<CampaignResponse> UpdateCampaignAsync(Guid accountId, Guid campaignId, UpdateCampaignRequest request, CancellationToken ct = default)
+        var campaign = await db.AdvertisementCampaigns
+            .Include(c => c.Package)
+            .Include(c => c.CompanyUser)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct)
+            ?? throw NotFound();
+
+        Require(campaign.Status == AdCampaignStatus.PendingModeration,
+            "INVALID_STATUS", "Only campaigns in PendingModeration state can be reviewed by Admin.", 409);
+
+        var now = DateTimeOffset.UtcNow;
+        if (request.IsApproved)
+        {
+            // Admin duyệt -> Chuyển sang chờ Partner thanh toán
+            campaign.Status = AdCampaignStatus.PendingPayment;
+            campaign.RejectionReason = null;
+        }
+        else
+        {
+            // Admin từ chối -> Thông báo Rejection
+            campaign.Status = AdCampaignStatus.Rejected;
+            campaign.RejectionReason = request.Reason ?? "Nội dung quảng cáo không phù hợp với tiêu chuẩn.";
+        }
+
+        campaign.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+
+        return MapToResponse(campaign, campaign.CompanyUser.FullName ?? "Doanh nghiệp", campaign.Package.Name);
+    }
+    public async Task<CampaignResponse> SubmitCampaignAsync(Guid accountId, Guid campaignId, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
         var campaign = await db.AdvertisementCampaigns
@@ -61,51 +165,19 @@ public sealed class AdvertisementService(
             .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
             ?? throw NotFound();
 
-        Require(campaign.Status is AdCampaignStatus.Draft or AdCampaignStatus.PendingPayment or AdCampaignStatus.Rejected,
-            "INVALID_CAMPAIGN_STATE", "Only campaigns in Draft, PendingPayment or Rejected status can be updated.", 409);
+        Require(campaign.Status is AdCampaignStatus.Draft or AdCampaignStatus.Rejected,
+            "INVALID_CAMPAIGN_STATE", "Only Draft or Rejected campaigns can be submitted.", 409);
 
-        Require(!string.IsNullOrWhiteSpace(request.Title) && request.Title.Trim().Length <= 255, "INVALID_TITLE", "Title is required.");
-        Require(!string.IsNullOrWhiteSpace(request.Content), "INVALID_CONTENT", "Content is required.");
-        Require(!string.IsNullOrWhiteSpace(request.DestinationUrl), "INVALID_URL", "Destination URL is required.");
-
-        campaign.Title = request.Title.Trim();
-        campaign.Content = request.Content.Trim();
-        campaign.DestinationUrl = request.DestinationUrl.Trim();
-        campaign.MediaUrl = request.MediaUrl?.Trim();
+        // Kích hoạt AI Review khi bấm Submit từ Nháp
+        bool isSuitable = await aiModeration.ReviewContentAsync(campaign.Title, campaign.Content, ct);
+        campaign.Status = isSuitable ? AdCampaignStatus.PendingPayment : AdCampaignStatus.PendingModeration;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
         await db.SaveChangesAsync(ct);
         return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", campaign.Package.Name);
     }
 
-    public async Task<CampaignsResponse> GetMyCampaignsAsync(Guid accountId, int page = 1, int pageSize = 20, CancellationToken ct = default)
-    {
-        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
-        var query = db.AdvertisementCampaigns.AsNoTracking()
-            .Include(c => c.Package)
-            .Where(c => c.CompanyUserId == partnerProfile.Id);
-
-        var total = await query.CountAsync(ct);
-        var items = await query.OrderByDescending(c => c.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct);
-
-        var responses = items.Select(c => MapToResponse(c, partnerProfile.FullName ?? "Doanh nghiệp", c.Package.Name)).ToList();
-        return new(page, pageSize, total, (int)Math.Ceiling((double)total / pageSize), responses);
-    }
-
-    public async Task<CampaignResponse> GetCampaignByIdAsync(Guid accountId, Guid campaignId, CancellationToken ct = default)
-    {
-        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
-        var campaign = await db.AdvertisementCampaigns.AsNoTracking()
-            .Include(c => c.Package)
-            .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
-            ?? throw NotFound();
-
-        return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", campaign.Package.Name);
-    }
-
+    // BƯỚC 4: Partner thực hiện Thanh toán (Pay for Advertisement)
     public async Task<TransactionResponse> CreateCampaignPaymentAsync(Guid accountId, Guid campaignId, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
@@ -116,26 +188,44 @@ public sealed class AdvertisementService(
             .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
             ?? throw NotFound();
 
-        Require(campaign.Status is AdCampaignStatus.PendingPayment or AdCampaignStatus.Draft,
-            "INVALID_CAMPAIGN_STATE", "Campaign is not eligible for payment.", 409);
+        Require(campaign.Status == AdCampaignStatus.PendingPayment,
+            "INVALID_CAMPAIGN_STATE", "Campaign is not eligible for payment. It must be approved first.", 409);
 
-        // Kiểm tra xem đã có giao dịch Pending nào chưa
         var existingTransaction = await db.Transactions.AsNoTracking()
-            .Include(t => t.AdvertisementTransaction)
-            .Where(t => t.AdvertisementTransaction != null && t.AdvertisementTransaction.CampaignId == campaignId)
-            .OrderByDescending(t => t.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+    .Include(t => t.AdvertisementTransaction)
+    .Where(t => t.AdvertisementTransaction != null && t.AdvertisementTransaction.CampaignId == campaignId)
+    .OrderByDescending(t => t.CreatedAt)
+    .FirstOrDefaultAsync(ct);
 
         if (existingTransaction is { Status: PaymentStatus.Success })
             throw new AdvertisementException("CAMPAIGN_ALREADY_PAID", "This campaign is already paid.", 409);
 
+        // NẾU CÓ GIAO DỊCH PENDING:
         if (existingTransaction is { Status: PaymentStatus.Pending })
         {
-            return TransactionMapping.ToResponse(existingTransaction, campaignId);
+            // Kiểm tra xem đã quá hạn (ExpiredAt) hay chưa
+            if (existingTransaction.ExpiredAt > DateTimeOffset.UtcNow)
+            {
+                // Nếu chưa quá hạn và vẫn còn link -> Trả về link cũ bình thường
+                return TransactionMapping.ToResponse(existingTransaction, campaignId);
+            }
+            else
+            {
+                // Nếu đã quá hạn (hoặc user đã bấm hủy làm link chết), 
+                // ta cập nhật transaction cũ thành Failed (hoặc bỏ qua nó) để tạo transaction mới bên dưới
+                var oldTx = await db.Transactions.FirstOrDefaultAsync(t => t.Id == existingTransaction.Id, ct);
+                if (oldTx != null)
+                {
+                    oldTx.Status = PaymentStatus.Failed;
+                    oldTx.UpdatedAt = DateTimeOffset.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                }
+            }
         }
 
+        // --- TIẾP TỤC CODE TẠO GIAO DỊCH VÀ LINK PAYOS MỚI Ở DƯỚI ---
         options.RequireCheckoutConfiguration();
-        provider.EnsureConfigured();
+        // provider.EnsureConfigured(); // Đã được gọi ngầm trong phương thức CreatePaymentAsync của Provider, bạn có thể bỏ dòng này đi
 
         var now = DateTimeOffset.UtcNow;
         var orderCode = ((BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8)) & ((1UL << 52) - 1)) + 1).ToString(CultureInfo.InvariantCulture);
@@ -144,10 +234,10 @@ public sealed class AdvertisementService(
         {
             Id = Guid.NewGuid(),
             UserId = partnerProfile.Id,
-            PackageId = campaign.PackageId,
+            PackageId = campaign.PackageId ?? throw new AdvertisementException("PACKAGE_REQUIRED", "Campaign must have a package before payment.", 400),
             Amount = campaign.BudgetCap,
             Status = PaymentStatus.Pending,
-            PaymentMethod = provider.Name,
+            PaymentMethod = "PayOS", // Sửa thành string cứng nếu biến provider.Name không public
             ProviderOrderCode = orderCode,
             ExpiredAt = now.AddMinutes(options.LinkExpirationMinutes),
             CreatedAt = now,
@@ -168,16 +258,22 @@ public sealed class AdvertisementService(
 
         await db.SaveChangesAsync(ct);
 
-        // Gọi PayOS tạo link checkout
-        var result = await provider.CreatePaymentAsync(new(
-            transaction.ProviderOrderCode,
-            (long)transaction.Amount,
-            $"Quang cao UniNet - {campaign.Title}",
-            options.ReturnUrl!,
-            options.CancelUrl!,
-            transaction.ExpiredAt.Value
+        // Xử lý an toàn cho Description (PayOS giới hạn tối đa 25 ký tự)
+        string rawDescription = $"QC {orderCode}";
+        string safeDescription = rawDescription.Length > 25 ? rawDescription.Substring(0, 25) : rawDescription;
+
+        // Truyền dữ liệu vào record CreateProviderPaymentRequest chuẩn của bạn
+        var result = await provider.CreatePaymentAsync(new CreateProviderPaymentRequest(
+            OrderCode: transaction.ProviderOrderCode,
+            AmountVnd: (long)transaction.Amount,
+            Description: safeDescription,
+            ReturnUrl: options.ReturnUrl!,
+            CancelUrl: options.CancelUrl!,
+            ExpiresAt: transaction.ExpiredAt.Value
         ), ct);
 
+        // Map kết quả trả về từ ProviderPaymentResult
+        // Lưu ý: Thay đổi "Id" và "CheckoutUrl" thành đúng tên thuộc tính trong record ProviderPaymentResult của bạn
         transaction.ProviderPaymentLinkId = result.PaymentLinkId;
         campaign.Status = AdCampaignStatus.PendingPayment;
 
@@ -186,22 +282,27 @@ public sealed class AdvertisementService(
         return TransactionMapping.ToResponse(transaction, campaignId, result.CheckoutUrl);
     }
 
-    public async Task<CampaignResponse> ModerateCampaignAsync(Guid accountId, Guid campaignId, ModerateCampaignRequest request, CancellationToken ct = default)
+    // BƯỚC 5: Confirm Payment & Publish Ad (Khi Webhook PayOS gọi về)
+    public async Task ProcessPaymentCallbackAsync(string providerOrderCode, bool isSuccess, CancellationToken ct = default)
     {
-        await EnsureAdminAsync(accountId, ct);
+        var transaction = await db.Transactions
+            .Include(t => t.AdvertisementTransaction)
+            .FirstOrDefaultAsync(t => t.ProviderOrderCode == providerOrderCode, ct);
+
+        if (transaction == null || transaction.AdvertisementTransaction == null) return;
 
         var campaign = await db.AdvertisementCampaigns
             .Include(c => c.Package)
-            .Include(c => c.CompanyUser)
-            .FirstOrDefaultAsync(c => c.Id == campaignId, ct)
-            ?? throw NotFound();
+            .FirstOrDefaultAsync(c => c.Id == transaction.AdvertisementTransaction.CampaignId, ct);
 
-        Require(campaign.Status == AdCampaignStatus.PendingModeration,
-            "INVALID_STATUS", "Only campaigns in PendingModeration state can be moderated.", 409);
+        if (campaign == null) return;
 
         var now = DateTimeOffset.UtcNow;
-        if (request.IsApproved)
+        if (isSuccess)
         {
+            transaction.Status = PaymentStatus.Success;
+
+            // XÁC NHẬN THANH TOÁN THÀNH CÔNG -> PUBLISH AD
             campaign.Status = AdCampaignStatus.Active;
             campaign.StartedAt = now;
             if (campaign.Package.DurationInDays.HasValue)
@@ -211,13 +312,67 @@ public sealed class AdvertisementService(
         }
         else
         {
-            campaign.Status = AdCampaignStatus.Rejected;
+            transaction.Status = PaymentStatus.Failed;
+            // Thanh toán thất bại -> Vẫn giữ trạng thái PendingPayment để Partner thử lại
         }
 
+        transaction.UpdatedAt = now;
         campaign.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
+    }
 
-        return MapToResponse(campaign, campaign.CompanyUser.FullName ?? "Doanh nghiệp", campaign.Package.Name);
+    public async Task<CampaignResponse> UpdateCampaignAsync(Guid accountId, Guid campaignId, UpdateCampaignRequest request, CancellationToken ct = default)
+    {
+        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
+        var campaign = await db.AdvertisementCampaigns
+            .Include(c => c.Package)
+            .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
+            ?? throw NotFound();
+
+        Require(campaign.Status is AdCampaignStatus.Draft or AdCampaignStatus.Rejected,
+            "INVALID_CAMPAIGN_STATE", "Only Draft or Rejected campaigns can be updated.", 409);
+
+        campaign.Title = request.Title.Trim();
+        campaign.Content = request.Content.Trim();
+        campaign.DestinationUrl = request.DestinationUrl.Trim();
+        campaign.MediaUrl = request.MediaUrl?.Trim();
+        campaign.Status = AdCampaignStatus.PendingModeration; // Chuyển lại về duyệt
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+        return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", campaign.Package.Name);
+    }
+
+    public async Task<CampaignsResponse> GetMyCampaignsAsync(Guid accountId, int page = 1, int pageSize = 20, CancellationToken ct = default)
+    {
+        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
+        var query = db.AdvertisementCampaigns.AsNoTracking()
+            .Include(c => c.Package)
+            .Where(c => c.CompanyUserId == partnerProfile.Id);
+
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(c => c.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        var responses = items.Select(c => MapToResponse(
+    c,
+    partnerProfile.FullName ?? "Doanh nghiệp",
+    c.Package != null ? c.Package.Name : null // Hoặc c.Package?.Name
+)).ToList();
+        return new(page, pageSize, total, (int)Math.Ceiling((double)total / pageSize), responses);
+    }
+
+    public async Task<CampaignResponse> GetCampaignByIdAsync(Guid accountId, Guid campaignId, CancellationToken ct = default)
+    {
+        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
+        var campaign = await db.AdvertisementCampaigns.AsNoTracking()
+            .Include(c => c.Package)
+            .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
+            ?? throw NotFound();
+
+        return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", campaign.Package.Name);
     }
 
     public async Task<CampaignsResponse> ListAllCampaignsAsync(Guid accountId, int page = 1, int pageSize = 20, CancellationToken ct = default)
@@ -245,7 +400,7 @@ public sealed class AdvertisementService(
             .Include(c => c.Package)
             .Include(c => c.CompanyUser)
             .Where(c => c.Status == AdCampaignStatus.Active && (c.ExpiredAt == null || c.ExpiredAt > now))
-            .OrderBy(c => Guid.NewGuid()) // Hiển thị ngẫu nhiên
+            .OrderBy(c => Guid.NewGuid())
             .Take(5)
             .ToListAsync(ct);
 
@@ -295,11 +450,25 @@ public sealed class AdvertisementService(
         Require(!string.IsNullOrWhiteSpace(request.DestinationUrl), "INVALID_URL", "Destination URL is required.");
     }
 
-    private static CampaignResponse MapToResponse(AdvertisementCampaign c, string companyName, string packageName) => new(
-        c.Id, c.CompanyUserId, companyName, c.PackageId, packageName,
-        c.Title, c.Content, c.DestinationUrl, c.MediaUrl,
-        c.Status, c.BudgetCap, c.ImpressionCount, c.ClickCount,
-        c.StartedAt, c.ExpiredAt, c.CreatedAt, c.UpdatedAt);
+    private static CampaignResponse MapToResponse(AdvertisementCampaign c, string companyName, string? packageName) => new(
+        c.Id,
+        c.CompanyUserId,
+        companyName,
+        c.PackageId,
+        packageName, // Cho phép truyền null nếu chưa chọn gói
+        c.Title,
+        c.Content,
+        c.DestinationUrl,
+        c.MediaUrl,
+        c.Status,
+        c.BudgetCap,
+        c.RejectionReason,
+        c.ImpressionCount,
+        c.ClickCount,
+        c.StartedAt,
+        c.ExpiredAt,
+        c.CreatedAt,
+        c.UpdatedAt);
 
     private static AdvertisementException NotFound() => new("CAMPAIGN_NOT_FOUND", "Advertisement campaign was not found.", 404);
 

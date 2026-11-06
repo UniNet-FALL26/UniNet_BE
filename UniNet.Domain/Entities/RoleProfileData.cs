@@ -9,6 +9,11 @@ public sealed class StudentProfileData
 
 public sealed class PartnerProfileData
 {
+    public string? IntroductionImageUrl { get; set; }
+    public string? FoundedOn { get; set; }
+    public string? EmployeeRange { get; set; }
+    public string[] Branches { get; set; } = [];
+    public string[] GalleryUrls { get; set; } = [];
     public string? OrganizationName { get; set; }
     public PartnerType? PartnerType { get; set; }
     public string? Industry { get; set; }
