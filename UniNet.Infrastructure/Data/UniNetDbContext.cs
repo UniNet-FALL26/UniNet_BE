@@ -82,6 +82,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectEvidenceDocument> ProjectEvidenceDocuments => Set<ProjectEvidenceDocument>();
     public DbSet<ExternalProjectDraft> ExternalProjectDrafts => Set<ExternalProjectDraft>();
     public DbSet<ExternalProjectDraftFile> ExternalProjectDraftFiles => Set<ExternalProjectDraftFile>();
+    public DbSet<AssessorOnboarding> AssessorOnboardings => Set<AssessorOnboarding>();
+    public DbSet<AssessorOnboardingEmail> AssessorOnboardingEmails => Set<AssessorOnboardingEmail>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -136,6 +138,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftFileConfiguration());

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.SignalR;
@@ -19,6 +20,12 @@ var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationExceptio
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AssessorOnboardingService>();
+builder.Services.AddSingleton(TimeProvider.System);
+var onboardingProtection = builder.Services.AddDataProtection();
+var onboardingKeyRing = builder.Configuration["AssessorOnboarding:KeyRingPath"];
+if (!string.IsNullOrWhiteSpace(onboardingKeyRing))
+    onboardingProtection.PersistKeysToFileSystem(new DirectoryInfo(onboardingKeyRing)).SetApplicationName("UniNet");
 builder.Services.AddScoped<AdminUsersService>();
 builder.Services.AddScoped<AdminSkillsService>();
 builder.Services.AddScoped<AdminPermissionService>();
@@ -320,6 +327,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.UseStaticFiles();
 app.MapControllers();
 app.MapHub<UniNet.API.Hubs.WorkspaceChatHub>(
     "/hubs/workspace",
