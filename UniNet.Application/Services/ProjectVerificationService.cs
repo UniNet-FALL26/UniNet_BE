@@ -108,7 +108,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         var zone = policy.RequireMeetingPolicy();
         var now = DateTimeOffset.UtcNow;
         var holdMinutes = policy.RequireReservationMinutes();
-        Require(!verification.VerificationTransactions.Any(t => t.Transaction.Status == PaymentStatus.Pending),
+        Require(!verification.Transactions.Any(t => t.Status == PaymentStatus.Pending),
             "PAYMENT_PENDING", "Reconcile the existing checkout before changing or renewing a reservation.", 409);
         Require(policy.GenerateSlots(start, end, now, zone).Any(s => s.Start == start && s.End == end),
             "INVALID_MEETING_SLOT", "The interval does not match an available slot in the meeting policy.");
@@ -180,7 +180,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project).ThenInclude(p => p.Creator)
             .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts).Include(v => v.Assignments).ThenInclude(a => a.Report)
 
-            .Include(v => v.VerificationTransactions).ThenInclude(v => v.Transaction)
+            .Include(v => v.Transactions)
                 .ThenInclude(t => t.RefundTransactions).AsSplitQuery();
         if (!tracked) query = query.AsNoTracking();
         var verification = await query.FirstOrDefaultAsync(v => v.Id == verificationId, ct)
@@ -207,7 +207,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         Require(verification.BookingStatus != VerificationBookingStatus.Legacy, "LEGACY_BOOKING_REVIEW_REQUIRED",
             "Review the historical booking before changing its schedule.", 409);
         Require(verification.BookingStatus != VerificationBookingStatus.Confirmed &&
-            !verification.VerificationTransactions.Any(v => v.Transaction.Status == PaymentStatus.Success),
+            !verification.Transactions.Any(v => v.Status == PaymentStatus.Success),
             "BOOKING_ALREADY_PAID", "The schedule cannot be changed after payment.", 409);
     }
 

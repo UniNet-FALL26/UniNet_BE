@@ -24,15 +24,15 @@ public sealed partial class TransactionTests
         f.Provider.OnCreate = async request =>
         {
             await using var observer = new UniNetDbContext(f.Options);
-            var stored = await observer.Transactions.AsNoTracking().Include(t => t.VerificationTransaction).SingleAsync();
+            var stored = await observer.Transactions.AsNoTracking().SingleAsync();
             Assert.Equal(PaymentStatus.Pending, stored.Status);
-            Assert.Equal(f.Verification.Id, stored.VerificationTransaction!.VerificationId);
+            Assert.Equal(f.Verification.Id, stored.VerificationId);
             Assert.Equal(37000, request.AmountVnd);
             return FakeProvider.Result(request.OrderCode, request.AmountVnd) with { QrCode = "000201-test-payload" };
         };
         var result = await f.CheckoutAsync();
         Assert.Equal(37000, result.AmountVnd);
-        Assert.Equal("https://pay.payos.vn/web/test", result.CheckoutUrl);
+        Assert.Null(result.CheckoutUrl);
         Assert.Equal("000201-test-payload", result.QrCode);
         Assert.False(result.ReconciliationRequired);
         f.Package.Price = 42000;
@@ -273,7 +273,7 @@ public sealed partial class TransactionTests
         {
             Id = Guid.NewGuid(), UserId = f.Owner.Profile!.Id, PackageId = f.Package.Id, Amount = 37000,
             PaymentMethod = "PayOS", ProviderOrderCode = "second", CreatedAt = DateTimeOffset.UtcNow,
-            VerificationTransaction = new() { VerificationId = f.Verification.Id }
+            VerificationId = f.Verification.Id
         };
         f.Db.Transactions.Add(second);
         await f.Db.SaveChangesAsync();

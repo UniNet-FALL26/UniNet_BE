@@ -68,7 +68,7 @@ public sealed partial class TransactionTests
         };
         var checkout = await f.CheckoutAsync();
         Assert.Equal(f.Verification.ReservedUntil, checkout.ExpiredAt);
-        Assert.Equal(f.Verification.ReservationId, (await f.Db.VerificationTransactions.SingleAsync()).ReservationId);
+        Assert.Equal(f.Verification.ReservationId, (await f.Db.Transactions.SingleAsync()).VerificationReservationId);
     }
 
     [Fact]

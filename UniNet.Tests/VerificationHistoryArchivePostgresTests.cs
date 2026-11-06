@@ -91,11 +91,16 @@ UPDATE "VerificationReports" SET "Summary" = 'revision-3', "Findings" = 'final f
         {
             var transaction = new Transaction { Id = Guid.NewGuid(), UserId = owner.Profile.Id, PackageId = package.Id, Amount = 100,
                 Status = PaymentStatus.Success, CreatedAt = time, UpdatedAt = time };
-            var refund = new RefundTransaction { Id = Guid.NewGuid(), Transaction = transaction, Amount = 100, Status = PaymentStatus.Pending,
+            var refund = new RefundTransaction { Id = Guid.NewGuid(), TransactionId = transaction.Id, Amount = 100, Status = PaymentStatus.Pending,
                 RequestSource = source, RequestedByUserId = source == RefundRequestSource.Admin ? admin.Profile.Id : null,
                 RequestedAt = source == RefundRequestSource.LegacyUnknown ? null : time.AddHours(5), PaymentProvider = "Manual",
                 Reason = "legacy refund", CreatedAt = time.AddHours(5), UpdatedAt = time.AddHours(5) };
-            db.VerificationTransactions.Add(new() { Transaction = transaction, VerificationId = verification.Id, CreatedAt = time, UpdatedAt = time });
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+INSERT INTO "Transactions" ("Id","UserId","PackageId","Amount","Status","CreatedAt","UpdatedAt")
+VALUES ({transaction.Id},{transaction.UserId},{transaction.PackageId},{transaction.Amount},{(short)transaction.Status},{time},{time});
+INSERT INTO "VerificationTransactions" ("TransactionId","VerificationId","CreatedAt","UpdatedAt")
+VALUES ({transaction.Id},{verification.Id},{time},{time});
+""");
             db.RefundTransactions.Add(refund); refunds.Add(refund);
         }
         await db.SaveChangesAsync();

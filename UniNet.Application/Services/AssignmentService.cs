@@ -190,12 +190,12 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             (replacement || verification.ScheduledStartAt > DateTimeOffset.UtcNow),
             "INVALID_VERIFICATION_SCHEDULE", "A valid future meeting schedule is required.", 409);
         await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
-        Require(await db.VerificationTransactions.AnyAsync(v => v.VerificationId == id &&
-            v.Transaction.Status == PaymentStatus.Success && v.Transaction.PackageId == verification.PackageId &&
-            v.Transaction.UserId == verification.RequestByUserId &&
-            v.Transaction.FailureReason == null &&
-            v.ReservationId == verification.ReservationId &&
-            !v.Transaction.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct),
+        Require(await db.Transactions.AnyAsync(v => v.VerificationId == id &&
+            v.Status == PaymentStatus.Success && v.PackageId == verification.PackageId &&
+            v.UserId == verification.RequestByUserId &&
+            v.FailureReason == null &&
+            v.VerificationReservationId == verification.ReservationId &&
+            !v.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct),
             "PAYMENT_REQUIRED", "A valid payment is required before assignment.", 409);
         return verification;
     }

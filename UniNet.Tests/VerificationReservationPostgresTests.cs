@@ -27,7 +27,7 @@ public sealed partial class VerificationReservationPostgresTests
         {
             var sql = command.CommandText;
             var match = payment
-                ? sql.Contains("\"Transactions\"") && sql.Contains("\"VerificationTransactions\"") && sql.Contains("\"ProjectVerifications\"") && sql.Contains("LIMIT 1")
+                ? sql.Contains("\"Transactions\"") && sql.Contains("\"ProjectVerifications\"") && sql.Contains("LIMIT 1")
                 : sql.Contains("\"ProjectVerifications\"") && sql.Contains("\"BookingStatus\"") && sql.Contains("<>") && !sql.Contains("\"AiSummary\"");
             if (match && Interlocked.Increment(ref arrivals) <= 2)
             {

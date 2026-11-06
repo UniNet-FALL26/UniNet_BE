@@ -460,7 +460,7 @@ public sealed partial class ProjectVerificationTests
             {
                 Id = Guid.NewGuid(), UserId = owner.Profile!.Id, PackageId = Package.Id, Amount = Package.Price,
                 Status = status, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-                VerificationTransaction = new() { VerificationId = id, ReservationId = verification.ReservationId, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow }
+                VerificationId = id, VerificationReservationId = verification.ReservationId
             });
             await Db.SaveChangesAsync();
         }

@@ -25,8 +25,8 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Exte
                      (old.ReplacedBy.Status == VerificationAssignmentStatus.Assigned || old.ReplacedBy.Status == VerificationAssignmentStatus.Overdue) && old.ReplacedBy.Report == null))) ||
             (v.Status == ProjectVerificationStatus.Cancelled &&
                 (v.CancellationReason == AssignmentTimeout || v.CancellationReason == ReplacementTimeout) &&
-                v.VerificationTransactions.Any(p => p.Transaction.Status == PaymentStatus.Success &&
-                    !p.Transaction.RefundTransactions.Any())))
+                v.Transactions.Any(p => p.Status == PaymentStatus.Success &&
+                    !p.RefundTransactions.Any())))
             .OrderBy(v => v.UpdatedAt).Select(v => v.Id).Take(100).ToListAsync(ct);
         foreach (var id in ids) await RefundTimeoutAsync(id, now, ct);
     }
@@ -37,9 +37,9 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Exte
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var v = await db.ProjectVerifications.Include(v => v.Assignments).ThenInclude(a => a.Report)
             .Include(v => v.Assignments).ThenInclude(a => a.ReplacedBy)
-            .Include(v => v.VerificationTransactions).ThenInclude(p => p.Transaction).ThenInclude(p => p.RefundTransactions)
+            .Include(v => v.Transactions).ThenInclude(p => p.RefundTransactions)
             .AsSplitQuery().SingleAsync(v => v.Id == id, ct);
-        var payments = v.VerificationTransactions.Select(p => p.Transaction).Where(p => p.Status == PaymentStatus.Success).ToList();
+        var payments = v.Transactions.Where(p => p.Status == PaymentStatus.Success).ToList();
         var reason = v.CancellationReason;
         var alreadyTimedOut = v.Status == ProjectVerificationStatus.Cancelled && reason is AssignmentTimeout or ReplacementTimeout;
         if (!alreadyTimedOut)
@@ -124,11 +124,11 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Exte
             var eligible = true;
             try { await new VerificationEligibility(db, configuration).RequireCaseAsync(v, ct); }
             catch (UniNet.Application.ProjectVerificationException) { eligible = false; }
-            eligible = eligible && await db.VerificationTransactions.AnyAsync(t => t.VerificationId == v.Id &&
-                t.Transaction.Status == PaymentStatus.Success && t.Transaction.PackageId == v.PackageId &&
-                t.Transaction.UserId == v.RequestByUserId && t.Transaction.FailureReason == null &&
-                t.ReservationId == v.ReservationId && v.BookingStatus == VerificationBookingStatus.Confirmed &&
-                !t.Transaction.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct);
+            eligible = eligible && await db.Transactions.AnyAsync(t => t.VerificationId == v.Id &&
+                t.Status == PaymentStatus.Success && t.PackageId == v.PackageId &&
+                t.UserId == v.RequestByUserId && t.FailureReason == null &&
+                t.VerificationReservationId == v.ReservationId && v.BookingStatus == VerificationBookingStatus.Confirmed &&
+                !t.RefundTransactions.Any(r => r.Status == PaymentStatus.Pending || r.Status == PaymentStatus.Success), ct);
             if (eligible && admin != null && replacement != null)
             {
                 var next = new VerificationAssignment { Id = Guid.NewGuid(), ProjectVerificationId = v.Id, ProjectVerification = v,

@@ -179,12 +179,11 @@ public sealed class AdvertisementService(
         ), ct);
 
         transaction.ProviderPaymentLinkId = result.PaymentLinkId;
-        transaction.PaymentUrl = result.CheckoutUrl;
         campaign.Status = AdCampaignStatus.PendingPayment;
 
         await db.SaveChangesAsync(ct);
 
-        return TransactionMapping.ToResponse(transaction, campaignId);
+        return TransactionMapping.ToResponse(transaction, campaignId, result.CheckoutUrl);
     }
 
     public async Task<CampaignResponse> ModerateCampaignAsync(Guid accountId, Guid campaignId, ModerateCampaignRequest request, CancellationToken ct = default)
