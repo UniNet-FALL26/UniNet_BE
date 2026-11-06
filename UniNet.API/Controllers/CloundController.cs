@@ -6,6 +6,7 @@ using UniNet.API.Services;
 using UniNet.Application;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
+using UniNet.Domain.Entities;
 using UniNet.Infrastructure.Data;
 
 namespace UniNet.API.Controllers;
@@ -36,6 +37,18 @@ public sealed class CloundController(
         Response.Headers.CacheControl = "no-store";
         var result = await images.Upload(
             new(upload.Bytes, publicId, upload.Format, upload.ResourceType), ct);
-        return Ok(result with { FileName = upload.FileName });
+        var uploadedFile = new UploadedFile
+        {
+            OwnerAccountId = owner,
+            PublicId = result.PublicId,
+            Url = result.ImageUrl,
+            FileName = upload.FileName,
+            Format = result.Format,
+            ResourceType = result.ResourceType,
+            SizeBytes = upload.Bytes.LongLength
+        };
+        db.UploadedFiles.Add(uploadedFile);
+        await db.SaveChangesAsync(ct);
+        return Ok(result with { FileName = uploadedFile.FileName, FileId = uploadedFile.Id });
     }
 }

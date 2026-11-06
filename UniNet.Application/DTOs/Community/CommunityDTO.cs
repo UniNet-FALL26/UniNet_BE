@@ -58,6 +58,7 @@ public class PostResponse
     public Guid AuthorUserId { get; set; }
     public string AuthorName { get; set; } = null!;
     public string? AuthorAvatar { get; set; }
+    public string AuthorNickname { get; set; } = null!;
     public short AuthorActorType { get; set; }
     public string? Description { get; set; }
     public List<string> MediaUrls { get; set; } = new();
@@ -76,9 +77,11 @@ public class CommentResponse
     public Guid AuthorUserId { get; set; }
     public string AuthorName { get; set; } = null!;
     public string? AuthorAvatarUrl { get; set; } // <--- Bổ sung Avatar
+    public string AuthorNickname { get; set; }
     public Guid? ParentCommentId { get; set; }
     public Guid? ReplyToUserId { get; set; }
     public string? ReplyToUserName { get; set; }
+    public string? ReplyToNickname { get; set; }
     public string Content { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; } // Định dạng ISO 8601 mặc định
     public List<CommentResponse> Replies { get; set; } = new();

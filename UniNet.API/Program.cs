@@ -59,6 +59,14 @@ builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<EvidenceModerationTasks>();
 builder.Services.AddScoped<EvidenceModerationService>();
 builder.Services.AddScoped<EvidenceModerationChecks>();
+builder.Services.AddSingleton<IProjectDocumentTextReader, ProjectDocumentTextReader>();
+builder.Services.AddHttpClient<IUploadedDocumentContentReader, UploadedDocumentContentReader>(client => client.Timeout = TimeSpan.FromSeconds(35))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<IProjectInformationExtractor, GeminiProjectInformationExtractor>(client => client.Timeout = TimeSpan.FromSeconds(65))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddScoped<ExternalProjectDraftExtractionService>();
+builder.Services.AddScoped<ExternalProjectDraftService>();
+builder.Services.AddScoped<ExternalProjectDraftTasks>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
 builder.Services.AddHttpClient<GeminiVerificationAiReviewer>(client => client.Timeout = TimeSpan.FromSeconds(35))

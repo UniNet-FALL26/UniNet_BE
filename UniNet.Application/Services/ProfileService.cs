@@ -71,6 +71,7 @@ public sealed partial class ProfileService(UniNetDbContext db)
     }
     public async Task<AccountResponse> Partner(Guid accountId, PartnerProfileRequest request, CancellationToken ct)
     {
+        var introduction = request.Introduction is null ? null : ValidateIntroduction(request.Introduction);
         ValidateName(request.OrganizationName);
         if (request.PartnerType is not { } partnerType || !Enum.IsDefined(partnerType)) throw new AuthException("INVALID_PARTNER_TYPE", "Loại đối tác không hợp lệ.");
         Max(request.Industry, 150, "Lĩnh vực"); Max(request.ContactEmail, 255, "Email liên hệ"); Max(request.Phone, 30, "Số điện thoại");
@@ -115,6 +116,12 @@ public sealed partial class ProfileService(UniNetDbContext db)
         p.AvatarUrl = Optional(request.AvatarUrl); p.CoverUrl = Optional(request.CoverUrl); p.Bio = Optional(request.Bio);
         p.PartnerType = request.PartnerType; p.Industry = Optional(request.Industry); p.Website = storedWebsite;
         p.ContactEmail = Optional(request.ContactEmail); p.Phone = Optional(request.Phone); p.Address = Optional(request.Address);
+        if (introduction is not null)
+        {
+            var data = p.PartnerJson!;
+            data.IntroductionImageUrl = introduction.ImageUrl; data.FoundedOn = introduction.FoundedOn;
+            data.EmployeeRange = introduction.EmployeeRange; data.Branches = introduction.Branches!; data.GalleryUrls = introduction.GalleryUrls!;
+        }
         p.UniversityName = null; p.Major = null; p.StudentCode = null;
         p.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);

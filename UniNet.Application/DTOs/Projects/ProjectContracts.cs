@@ -41,10 +41,10 @@ public record ProjectDetailResponse(
     string Title,
     string ProjectField,
     string Description,
-    int MemberTarget,
-    int MinimumQuantity,
+    int? MemberTarget,
+    int? MinimumQuantity,
     int CurrentMemberCount,
-    DateTimeOffset RecruitmentDeadline,
+    DateTimeOffset? RecruitmentDeadline,
     DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
     ProjectStatus Status,
@@ -58,7 +58,10 @@ public record ProjectDetailResponse(
     bool IsMember,
     List<ProjectMemberInfo>? Members = null,
     List<ProjectInvitationResponse>? Invitations = null,
-    List<ProjectJoinRequestResponse>? JoinRequests = null
+    List<ProjectJoinRequestResponse>? JoinRequests = null,
+    ProjectOrigin Origin = ProjectOrigin.Internal,
+    ProjectLeaderInfo? Leader = null,
+    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null
     );
 
 public record CreatorInfo(
@@ -91,16 +94,18 @@ public record ProjectListItemResponse(
     string Title,
     string ProjectField,
     string Description,
-    int MemberTarget,
-    int MinimumQuantity,
+    int? MemberTarget,
+    int? MinimumQuantity,
     int CurrentMemberCount,
-    DateTimeOffset RecruitmentDeadline,
+    DateTimeOffset? RecruitmentDeadline,
     ProjectVisibility Visibility,
     ProjectStatus Status,
     RecruitmentStatus RecruitmentStatus,
     DateTimeOffset CreatedAt,
     CreatorInfo Creator,
-    List<ProjectSkillInfo> Skills
+    List<ProjectSkillInfo> Skills,
+    ProjectOrigin Origin = ProjectOrigin.Internal,
+    ProjectLeaderInfo? Leader = null
 );
 
 // ============ PROJECT MEMBER RESPONSE ============
@@ -127,10 +132,10 @@ public record DiscoveryProjectResponse(
     string Title,
     string ProjectField,
     string Description,
-    int MemberTarget,
-    int MinimumQuantity,
+    int? MemberTarget,
+    int? MinimumQuantity,
     int CurrentMemberCount,
-    DateTimeOffset RecruitmentDeadline,
+    DateTimeOffset? RecruitmentDeadline,
     ProjectVisibility Visibility,
     RecruitmentStatus RecruitmentStatus,
     DateTimeOffset CreatedAt,

@@ -39,7 +39,7 @@ public sealed class RecruitmentNotificationTests
         Assert.Equal(application.Id, submitted.TargetId);
         Assert.Equal("JobApplication", submitted.TargetType);
         var targets = new NotificationTargets(db, new NotificationService(db));
-        Assert.Equal($"/(company)/applicants?jobId={job.Id}", await targets.ResolveAsync(partner.Id, submitted.Id, default));
+        Assert.Equal($"/(company)/job-detail?jobId={job.Id}", await targets.ResolveAsync(partner.Id, submitted.Id, default));
         await new PartnerService(db).UpdateApplicantStatusAsync(partner.Id, job.Id, application.Id, decision, default);
         var reviewed = await db.Set<VerificationNotification>().SingleAsync(n => n.RecipientUserId == student.Id);
         Assert.Equal(application.Id, reviewed.TargetId);

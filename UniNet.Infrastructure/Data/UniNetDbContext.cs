@@ -97,6 +97,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     }
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
+    public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
+    public DbSet<ProjectEvidenceDocument> ProjectEvidenceDocuments => Set<ProjectEvidenceDocument>();
+    public DbSet<ExternalProjectDraft> ExternalProjectDrafts => Set<ExternalProjectDraft>();
+    public DbSet<ExternalProjectDraftFile> ExternalProjectDraftFiles => Set<ExternalProjectDraftFile>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -169,6 +173,16 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.ApplyConfiguration(new UploadedFileConfiguration());
+        model.ApplyConfiguration(new ExternalProjectDraftConfiguration());
+        model.ApplyConfiguration(new ExternalProjectDraftFileConfiguration());
+        model.Entity<ProjectEvidenceDocument>(e =>
+        {
+            e.ToTable("ProjectEvidenceDocuments"); e.HasKey(x => x.Id);
+            e.HasOne(x => x.Project).WithMany(x => x.EvidenceDocuments).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.UploadedFile).WithMany().HasForeignKey(x => x.UploadedFileId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.ProjectId, x.UploadedFileId }).IsUnique();
+        });
         AdminManagementConfiguration.Configure(model);
         FinanceConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
@@ -286,6 +300,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
                 t.HasCheckConstraint("CK_Projects_MinimumQuantity",
                     "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
+                t.HasCheckConstraint("CK_Projects_Origin", "\"Origin\" IN (0, 1)");
+                t.HasCheckConstraint("CK_Projects_RecruitmentApplicability",
+                    "(\"Origin\" = 0 AND \"MemberTarget\" IS NOT NULL AND \"MinimumQuantity\" IS NOT NULL AND \"RecruitmentDeadline\" IS NOT NULL) OR " +
+                    "(\"Origin\" = 1 AND \"MemberTarget\" IS NULL AND \"MinimumQuantity\" IS NULL AND \"RecruitmentDeadline\" IS NULL AND \"RecruitmentStatus\" = 2 AND \"Status\" = 2)");
 
                 t.HasCheckConstraint(
                     "CK_Projects_Status",
@@ -313,11 +331,16 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasColumnType("text")
                 .IsRequired();
 
-            e.Property(x => x.MemberTarget)
-                .IsRequired();
+            e.Property(x => x.MemberTarget).IsRequired(false);
 
-            e.Property(x => x.RecruitmentDeadline)
-                .IsRequired();
+            e.Property(x => x.RecruitmentDeadline).IsRequired(false);
+            e.Property(x => x.Origin).HasConversion<short>().HasDefaultValue(ProjectOrigin.Internal);
+            e.Property(x => x.ImplementationStartDate).HasMaxLength(10);
+            e.Property(x => x.ImplementationEndDate).HasMaxLength(10);
+            e.Property(x => x.ExternalLeaderName).HasMaxLength(255);
+            e.Property(x => x.SubmitterRole).HasMaxLength(255);
+            e.Property(x => x.SubmitterContribution).HasMaxLength(4000);
+            e.Property(x => x.ExternalDetailsJson).HasColumnType("jsonb");
 
             e.Property(x => x.ExpectedOutput);
 
@@ -1448,12 +1471,16 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .HasForeignKey(e => e.ReporterUserId)
                   .OnDelete(DeleteBehavior.Restrict);
         });
-        // 1. AdvertisementCampaign
+
+        // 1. Cấu hình AdvertisementCampaign
         model.Entity<AdvertisementCampaign>(entity =>
         {
             entity.ToTable("AdvertisementCampaigns");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.BudgetCap).HasColumnType("numeric(18,2)");
+
+            // Cột PackageId có thể null nên khóa ngoại này là tùy chọn (Optional)
+            entity.Property(e => e.PackageId).IsRequired(false);
 
             entity.HasOne(e => e.CompanyUser)
                   .WithMany()
@@ -1463,10 +1490,11 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             entity.HasOne(e => e.Package)
                   .WithMany()
                   .HasForeignKey(e => e.PackageId)
+                  .IsRequired(false)
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // 2. AdvertisementTransaction (Mapping 1-1 v?i Transaction)
+        // 2. Cấu hình AdvertisementTransaction (Quan hệ 1-1 với Transaction)
         model.Entity<AdvertisementTransaction>(entity =>
         {
             entity.ToTable("AdvertisementTransactions");
@@ -1482,5 +1510,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                   .HasForeignKey(e => e.CampaignId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
+
     }
 }

@@ -28,9 +28,8 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
         var verification = assignment.ProjectVerification;
         Require(verification.Status == ProjectVerificationStatus.Pending && verification.FinalizedAt == null,
             "VERIFICATION_LOCKED", "Only pending verifications allow initial report submission.", 409);
-        Require(verification.MeetingStartAt.HasValue && verification.MeetingEndAt.HasValue &&
-            verification.MeetingEndAt >= verification.MeetingStartAt && verification.MeetingEndAt <= DateTimeOffset.UtcNow,
-            "MEETING_NOT_COMPLETED", "The meeting must end before submitting a report.", 409);
+        Require(verification.MeetingStartAt.HasValue && verification.MeetingStartAt <= DateTimeOffset.UtcNow,
+            "MEETING_NOT_STARTED", "The meeting must start before submitting a report.", 409);
         Require(!await db.VerificationReports.AnyAsync(r => r.VerificationAssignment.ProjectVerificationId == verification.Id, ct),
             "REPORT_EXISTS", "This case already has its final report.", 409);
         Validate(request.Summary, request.Findings, request.Recommendations);

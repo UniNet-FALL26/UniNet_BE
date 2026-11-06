@@ -21,6 +21,24 @@ public sealed class EvidenceModerationSource(UniNetDbContext db, IConfiguration 
 
     public async Task<EvidenceSourceSnapshot> CaptureAsync(Guid projectId, CancellationToken ct)
     {
+        var project = await db.Projects.AsNoTracking().SingleAsync(p => p.Id == projectId, ct);
+        if (project.Origin == ProjectOrigin.External)
+        {
+            var documents = await db.ProjectEvidenceDocuments.AsNoTracking().Include(d => d.UploadedFile)
+                .Where(d => d.ProjectId == projectId).OrderBy(d => d.Id).ToListAsync(ct);
+            var details = ProjectIdentityMapping.ExternalDetails(project);
+            var content = string.Join("\n", new[] { project.Title, project.Description, project.ProjectField,
+                project.ImplementationStartDate, project.ImplementationEndDate, project.SubmitterRole, project.SubmitterContribution,
+                project.SubmitterIsLeader ? "Submitter declares leadership" : project.ExternalLeaderName,
+                details?.RepositoryUrl, details?.DemoUrl }
+                .Concat(details?.Features ?? []).Concat(details?.Members.Select(m => m.Name + ": " + m.Role) ?? []));
+            var skills = await db.ProjectSkills.AsNoTracking().Where(s => s.ProjectId == projectId)
+                .OrderBy(s => s.SkillId).Select(s => s.Skill.Name).ToListAsync(ct);
+            content += "\n" + string.Join(", ", skills);
+            return new(projectId, [], new(content, documents.Select(d => new ProjectEvidenceDocumentSnapshot(
+                d.Id, d.UploadedFileId, d.UploadedFile.Url, d.UploadedFile.PublicId, d.UploadedFile.ResourceType,
+                d.UploadedFile.FileName, d.UploadedFile.Format, d.UploadedFile.SizeBytes)).ToList()));
+        }
         // Keep every report group and state, including drafts and soft-deleted reports for audit.
         var tasks = await db.ProjectTasks.AsNoTracking().Include(t => t.Reports).ThenInclude(r => r.Evidence)
             .Where(t => t.ProjectId == projectId).AsSplitQuery().ToListAsync(ct);

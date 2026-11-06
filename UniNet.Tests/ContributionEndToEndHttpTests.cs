@@ -485,6 +485,7 @@ public sealed class ContributionEndToEndHttpTests
 
     private sealed class FakeModerationService : IAIModerationService
     {
+        public Task<bool> ReviewContentAsync(string title, string content, CancellationToken ct = default) => Task.FromResult(true);
         public Task<AiModerationResult> AnalyzeProjectAsync(
             ProjectModerationInput input, CancellationToken cancellationToken = default)
             => Task.FromResult(new AiModerationResult(

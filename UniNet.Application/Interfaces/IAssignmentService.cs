@@ -16,5 +16,5 @@ public interface IAssignmentService
     Task<AssignmentResponse> ReplaceVerificatorAsync(Guid assignmentId, Guid accountId,
         ReplaceVerificatorRequest request, CancellationToken ct = default);
     Task<List<SuitableVerificatorResponse>> GetSuitableVerificatorsAsync(Guid projectVerificationId,
-        Guid accountId, CancellationToken ct = default);
+        Guid accountId, Guid? replaceAssignmentId = null, CancellationToken ct = default);
 }

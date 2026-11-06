@@ -12,9 +12,14 @@ public record AssignmentResponse(Guid Id, Guid ProjectVerificationId, Guid Assig
     string? ReplacementReason, Guid? ReplacedById, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     DateTimeOffset? ScheduledStartAt, DateTimeOffset? ScheduledEndAt,
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt, DateTimeOffset? CompletedAt = null);
-public record AssignmentDetailResponse(AssignmentResponse Assignment, VerificationProjectResponse Project,
+public record AssignmentProjectResponse(Guid Id, string Title, string ProjectField, string Description,
+    ProjectStatus Status, Guid? LeaderId, List<ProjectSkillInfo> Skills, List<ProjectMemberInfo> Members,
+    ProjectLeaderInfo? Leader, ProjectOrigin Origin = ProjectOrigin.Internal, Guid? OwnerUserId = null,
+    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null);
+public record AssignmentAssigneeResponse(Guid UserId, string FullName, string? AvatarUrl, string Nickname);
+public record AssignmentDetailResponse(AssignmentResponse Assignment, AssignmentProjectResponse Project,
     UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration, VerificationReportResponse? Report,
-    AssessmentRubric? AssessmentRubric = null);
+    AssessmentRubric? AssessmentRubric = null, AssignmentAssigneeResponse? AssignedToUser = null);
 public record AssignmentsResponse(int Page, int PageSize, int TotalItems, int TotalPages,
     List<AssignmentResponse> Assignments);
 public record SuitableVerificatorResponse(Guid UserId, string FullName);

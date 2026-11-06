@@ -30,6 +30,11 @@ public sealed class CommunityProfilePostsTests
         Assert.Equal(old.Id, Assert.Single(await service.GetOwnPostsAsync(owner.Id, 2, 1)).Id);
         Assert.Empty(await service.GetOwnPostsAsync(owner.Id, 3, 1));
         Assert.Equal(3, (await service.GetFeedAsync(owner.Id, 1, 10)).Count);
+        var publicPosts = await service.GetFeedAsync(other.Id, 1, 10, owner.Profile.Id);
+        Assert.Equal(2, publicPosts.Count);
+        Assert.All(publicPosts, post => Assert.Equal(owner.Profile.Id, post.AuthorUserId));
+        Assert.Equal(newest.Id, Assert.Single(await service.GetFeedAsync(other.Id, 1, 1, owner.Profile.Id)).Id);
+        Assert.Equal(old.Id, Assert.Single(await service.GetFeedAsync(other.Id, 2, 1, owner.Profile.Id)).Id);
         Assert.Equal(400, (await Assert.ThrowsAsync<CommunityException>(() => service.GetOwnPostsAsync(owner.Id, 0, 10))).Status);
         Assert.Equal(400, (await Assert.ThrowsAsync<CommunityException>(() => service.GetOwnPostsAsync(owner.Id, 1, 51))).Status);
         owner.Status = AccountStatus.Suspended; await db.SaveChangesAsync();

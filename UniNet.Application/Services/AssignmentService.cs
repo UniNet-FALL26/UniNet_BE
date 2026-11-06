@@ -17,7 +17,12 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
     {
         var user = await GetActorAsync(accountId, null, ct);
         var assignment = await AssignmentQuery().AsNoTracking()
+            .Include(a => a.AssignedToUser)
+            .Include(a => a.ProjectVerification).ThenInclude(v => v.Project).ThenInclude(p => p.Creator)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
+                .ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+            .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
+                .ThenInclude(p => p.Members).ThenInclude(m => m.User)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
             .Include(a => a.Report).AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == assignmentId &&
@@ -128,11 +133,28 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
     }, ct);
 
     public async Task<List<SuitableVerificatorResponse>> GetSuitableVerificatorsAsync(Guid projectVerificationId,
-        Guid accountId, CancellationToken ct = default)
+        Guid accountId, Guid? replaceAssignmentId = null, CancellationToken ct = default)
     {
         await GetActorAsync(accountId, AccountRole.Admin, ct);
-        var verification = await GetSchedulableVerificationAsync(projectVerificationId, ct);
-        return await AvailableVerificators(verification, null).OrderBy(p => p.FullName).ThenBy(p => p.Id)
+        VerificationAssignment? replaced = null;
+        if (replaceAssignmentId.HasValue)
+        {
+            replaced = await AssignmentQuery().Include(a => a.Report)
+                .FirstOrDefaultAsync(a => a.Id == replaceAssignmentId.Value &&
+                    a.ProjectVerificationId == projectVerificationId, ct) ?? throw NotFound();
+            VerificationMeetingLifecycle.RequireActive(replaced);
+            Require(replaced.Report == null, "ASSIGNMENT_LOCKED",
+                "An assignment with a report cannot be replaced.", 409);
+        }
+        var verification = await GetSchedulableVerificationAsync(projectVerificationId, ct,
+            replacement: replaced != null);
+        var candidates = AvailableVerificators(verification, replaceAssignmentId);
+        if (replaced != null)
+        {
+            var currentUserId = replaced.AssignedToUserId;
+            candidates = candidates.Where(p => p.Id != currentUserId);
+        }
+        return await candidates.OrderBy(p => p.FullName).ThenBy(p => p.Id)
             .Select(p => new SuitableVerificatorResponse(p.Id, p.FullName)).ToListAsync(ct);
     }
 

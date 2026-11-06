@@ -6,14 +6,15 @@ namespace UniNet.Domain.Entities;
 public sealed class AdvertisementCampaign
 {
     public Guid Id { get; set; }
-    public Guid CompanyUserId { get; set; } // Foreign Key -> UserProfile (Id của Doanh nghiệp)
-    public Guid PackageId { get; set; }     // Foreign Key -> Package
+    public Guid CompanyUserId { get; set; } // FK -> UserProfile
+    public Guid? PackageId { get; set; }     // FK -> Package
     public string Title { get; set; } = null!;
     public string Content { get; set; } = null!;
     public string DestinationUrl { get; set; } = null!;
     public string? MediaUrl { get; set; }
     public AdCampaignStatus Status { get; set; } = AdCampaignStatus.Draft;
     public decimal BudgetCap { get; set; }
+    public string? RejectionReason { get; set; }
     public long ImpressionCount { get; set; } = 0;
     public long ClickCount { get; set; } = 0;
     public DateTimeOffset? StartedAt { get; set; }

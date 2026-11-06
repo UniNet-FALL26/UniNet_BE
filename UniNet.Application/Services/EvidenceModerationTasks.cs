@@ -78,7 +78,7 @@ public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration c
         }
 
         var results = new List<EvidenceCheckResult>(); VerificationAiException? problem = null;
-        var hasEvidence = source.Tasks.SelectMany(t => t.Reports).Any(r => r.Evidence.Count > 0);
+        var hasEvidence = source.Tasks.SelectMany(t => t.Reports).Any(r => r.Evidence.Count > 0) || (source.ProjectEvidence?.Documents.Count ?? 0) > 0;
         try
         {
             if (hasEvidence)
@@ -125,9 +125,9 @@ public sealed class EvidenceModerationTasks(UniNetDbContext db, IConfiguration c
                         ? ProjectModerationStatus.Rejected : ProjectModerationStatus.Passed;
                 current.Summary = current.Status switch
                 {
-                    ProjectModerationStatus.NeedsEvidence => "Missing evidence or report text; no safety verdict was granted.",
-                    ProjectModerationStatus.Rejected => "Report text or a URL violated the configured policy. File content was not inspected.",
-                    _ => "Report text and evidence/report URLs passed the configured checks. File content was not inspected."
+                    ProjectModerationStatus.NeedsEvidence => "Missing evidence or submitted text; no safety verdict was granted.",
+                    ProjectModerationStatus.Rejected => "Submitted text or a URL violated the configured policy. File content was not inspected.",
+                    _ => "Submitted text and evidence URLs passed the configured checks. File content was not inspected."
                 };
                 current.LastError = null; current.LastErrorCode = null; current.NextRetryAt = null;
                 current.CompletedAt = finished.FinishedAt;

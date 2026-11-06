@@ -15,6 +15,7 @@ public sealed partial class ProjectVerificationTests
     private sealed class ModerationProbe : IAIModerationService
     {
         public int Calls;
+        public Task<bool> ReviewContentAsync(string title, string content, CancellationToken ct = default) => Task.FromResult(true);
         public Task<AiModerationResult> AnalyzeProjectAsync(ProjectModerationInput input, CancellationToken cancellationToken = default)
         { Calls++; return Task.FromResult(new AiModerationResult("safe", "safe", false, false, false, 0.95m, "Safe", [])); }
     }
