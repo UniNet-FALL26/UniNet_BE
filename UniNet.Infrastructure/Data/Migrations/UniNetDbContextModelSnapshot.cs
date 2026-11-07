@@ -119,6 +119,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("ContractTokenHash")
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("ContractViewedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -136,6 +139,15 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("FullName")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<int>("GenerationAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("GenerationErrorCode")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("GenerationRetryAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("OtpExpiresAt")
                         .HasColumnType("timestamp with time zone");
@@ -163,6 +175,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("ProfileTokenUsedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("ReadSessionExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReadSessionHash")
+                        .HasColumnType("text");
+
                     b.Property<string>("ReviewReason")
                         .HasColumnType("text");
 
@@ -170,6 +188,10 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("ReviewedByAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("RevokedAt")
@@ -211,6 +233,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("AccountId")
                         .IsUnique();
 
+                    b.HasIndex("ContractTokenHash")
+                        .IsUnique();
+
                     b.HasIndex("CreatedByAccountId");
 
                     b.HasIndex("EmailNormalized")
@@ -221,9 +246,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("ProfileTokenHash")
                         .IsUnique();
 
+                    b.HasIndex("ReadSessionHash")
+                        .IsUnique();
+
                     b.HasIndex("ReviewedByAccountId");
 
                     b.HasIndex("Status", "AutoApproveAt");
+
+                    b.HasIndex("Status", "GenerationRetryAt");
 
                     b.ToTable("AssessorOnboardings");
                 });
@@ -237,9 +267,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CredentialHash")
+                        .HasColumnType("text");
+
                     b.Property<string>("DeduplicationKey")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -247,6 +289,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<string>("LastErrorCode")
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("LeaseUntil")
                         .HasColumnType("timestamp with time zone");
@@ -271,7 +316,7 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("NextAttemptAt")
                         .HasFilter("\"SentAt\" IS NULL");
 
-                    b.HasIndex("OnboardingId");
+                    b.HasIndex("OnboardingId", "Kind", "CreatedAt");
 
                     b.ToTable("AssessorOnboardingEmails");
                 });

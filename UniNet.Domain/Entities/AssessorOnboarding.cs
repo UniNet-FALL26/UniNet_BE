@@ -8,6 +8,13 @@ public enum AssessorOnboardingStatus : short
 
 public sealed class AssessorOnboarding
 {
+    public Guid Revision { get; set; } = Guid.NewGuid();
+    public string? ReadSessionHash { get; set; }
+    public DateTimeOffset? ReadSessionExpiresAt { get; set; }
+    public DateTimeOffset? ContractViewedAt { get; set; }
+    public int GenerationAttempts { get; set; }
+    public DateTimeOffset? GenerationRetryAt { get; set; }
+    public string? GenerationErrorCode { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public string EmailNormalized { get; set; } = "";
     public string? FullName { get; set; }
@@ -50,6 +57,11 @@ public sealed class AssessorOnboarding
 
 public sealed class AssessorOnboardingEmail
 {
+    public Guid? LeaseId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+    public string? CredentialHash { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OnboardingId { get; set; }
     public string Kind { get; set; } = "";

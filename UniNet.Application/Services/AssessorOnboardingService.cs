@@ -68,12 +68,15 @@ public sealed class AssessorOnboardingService(UniNetDbContext db, IDataProtectio
         await RequireAdmin(actor, ct);
         var now = clock.GetUtcNow();
         var updated = await db.AssessorOnboardings
-            .Where(x => x.Id == id && x.Status == AssessorOnboardingStatus.Invited)
+            .Where(x => x.Id == id && (x.Status == AssessorOnboardingStatus.Invited ||
+                x.Status == AssessorOnboardingStatus.ProfileSubmitted ||
+                x.Status == AssessorOnboardingStatus.AwaitingSignature ||
+                x.Status == AssessorOnboardingStatus.AwaitingApproval))
             .ExecuteUpdateAsync(x => x
                 .SetProperty(p => p.Status, AssessorOnboardingStatus.Revoked)
                 .SetProperty(p => p.RevokedAt, now), ct);
         if (updated == 0)
-            throw new AuthException("INVITATION_NOT_OPEN", "Lời mời không còn ở bước điền hồ sơ.", 409);
+            throw new AuthException("INVITATION_NOT_OPEN", "Hồ sơ không còn ở trạng thái có thể thu hồi.", 409);
     }
 
     public async Task<string> ReadForm(string token, CancellationToken ct)
@@ -97,6 +100,7 @@ public sealed class AssessorOnboardingService(UniNetDbContext db, IDataProtectio
         row.SubmittedAt = now;
         row.ProfileTokenUsedAt = now;
         row.Status = AssessorOnboardingStatus.ProfileSubmitted;
+        row.Revision = Guid.NewGuid();
         try
         {
             await db.SaveChangesAsync(ct);

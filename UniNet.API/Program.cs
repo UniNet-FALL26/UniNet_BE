@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.SignalR;
@@ -21,6 +23,41 @@ if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("J
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AssessorOnboardingService>();
+builder.Services.AddScoped<AssessorContractService>();
+builder.Services.AddScoped<AssessorContractTasks>();
+builder.Services.AddSingleton<AssessorContractSecrets>();
+builder.Services.AddScoped<IAssessorContractFiles, AssessorContractFiles>();
+builder.Services.AddScoped<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorSmtpSender>();
+builder.Services.AddHostedService<UniNet.API.Services.AssessorContractWorker>();
+builder.Services.AddOptions<AssessorContractOptions>()
+    .Bind(builder.Configuration.GetSection("AssessorOnboarding"))
+    .Validate(o => !o.Enabled || (
+        Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == "https" || (builder.Environment.IsDevelopment() && uri.IsLoopback && uri.Scheme == "http")) &&
+        string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment) && uri.AbsolutePath == "/" &&
+        Path.IsPathFullyQualified(o.StoragePath) && File.Exists(o.TemplatePath) && File.Exists(o.FontPath) &&
+        !string.IsNullOrWhiteSpace(o.TemplateVersion) && !string.IsNullOrWhiteSpace(o.SignatureStatement) &&
+        !string.IsNullOrWhiteSpace(builder.Configuration["AssessorOnboarding:KeyRingPath"])),
+        "Enabled assessor contracts require a public origin, private storage, template, Unicode font, template version, signature statement and persistent key ring.")
+    .Validate(o => !o.Enabled || !Path.GetFullPath(o.StoragePath).StartsWith(
+        Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "wwwroot")), StringComparison.OrdinalIgnoreCase),
+        "Assessor contracts must be stored outside wwwroot.")
+    .ValidateOnStart();
+builder.Services.AddOptions<UniNet.API.Services.AssessorSmtpOptions>()
+    .Bind(builder.Configuration.GetSection("AssessorOnboarding:Smtp"))
+    .Validate(o => !builder.Configuration.GetValue<bool>("AssessorOnboarding:Enabled") ||
+        (System.Net.Mail.MailAddress.TryCreate(o.From, out _) &&
+        ((!string.IsNullOrWhiteSpace(o.Host) && o.Port > 0 && o.Port <= 65535) ||
+         (builder.Environment.IsDevelopment() && Path.IsPathFullyQualified(o.PickupDirectory ?? "")))),
+        "Configure SMTP or a Development-only pickup directory.")
+    .ValidateOnStart();
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("AssessorContracts", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddSingleton(TimeProvider.System);
 var onboardingProtection = builder.Services.AddDataProtection();
 var onboardingKeyRing = builder.Configuration["AssessorOnboarding:KeyRingPath"];
@@ -323,6 +360,7 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseCors("Frontend");
 
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
