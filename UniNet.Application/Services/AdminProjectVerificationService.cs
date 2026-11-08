@@ -31,17 +31,15 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
         if (await db.VerificationAssignments.AnyAsync(a => a.ProjectVerificationId == id, ct) ||
             await db.VerificationReports.AnyAsync(r => r.ProjectVerificationId == id, ct))
             throw Error("BOOKING_RECOVERY_NOT_ALLOWED", "A case with assignments or reports cannot be recovered.", 409);
-        var payment = await db.Transactions.Include(t => t.VerificationTransaction).Include(t => t.RefundTransactions)
-            .SingleOrDefaultAsync(t => t.Id == request.TransactionId && t.VerificationTransaction != null &&
-                t.VerificationTransaction.VerificationId == id, ct)
+        var payment = await db.Transactions.Include(t => t.RefundTransactions)
+            .SingleOrDefaultAsync(t => t.Id == request.TransactionId && t.VerificationId == id, ct)
             ?? throw Error("PAYMENT_NOT_FOUND", "Payment does not belong to this verification.", 404);
         if (payment.Status != PaymentStatus.Success || payment.PackageId != verification.PackageId ||
             payment.UserId != verification.RequestByUserId ||
-            payment.VerificationTransaction!.ReservationId != verification.ReservationId ||
+            payment.VerificationReservationId != verification.ReservationId ||
             payment.FailureReason is not (TransactionMapping.LatePaymentReview or TransactionMapping.BookingPaymentReview) ||
             payment.RefundTransactions.Any(r => r.Status is PaymentStatus.Pending or PaymentStatus.Success) ||
-            await db.Transactions.AnyAsync(t => t.Id != payment.Id && t.VerificationTransaction != null &&
-                t.VerificationTransaction.VerificationId == id &&
+            await db.Transactions.AnyAsync(t => t.Id != payment.Id && t.VerificationId == id &&
                 (t.Status == PaymentStatus.Pending || t.Status == PaymentStatus.Success), ct))
             throw Error("PAYMENT_NOT_RECOVERABLE", "Recovery requires one successful matching payment under booking review and no pending or completed refund.", 409);
         var settings = configuration ?? new ConfigurationBuilder().Build();
@@ -105,18 +103,39 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
         return new(page, pageSize, total, (int)(((long)total + pageSize - 1) / pageSize), items.Select(ProjectVerificationMapping.ToResponse).ToList());
     }
 
-    private async Task<ProjectVerification> LoadAsync(Guid id, CancellationToken ct) =>
-        await db.ProjectVerifications.AsNoTracking().Include(v => v.Project).ThenInclude(p => p.Creator).Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
-        .Include(v => v.Assignments).ThenInclude(a => a.Report)
-        .Include(v => v.VerificationTransactions).ThenInclude(t => t.Transaction).ThenInclude(t => t.RefundTransactions)
-        .AsSplitQuery().FirstOrDefaultAsync(v => v.Id == id, ct)
-        ?? throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
+    private async Task<ProjectVerification> LoadAsync(Guid id, CancellationToken ct, bool includeProjectTeam = false)
+    {
+        var query = db.ProjectVerifications.AsNoTracking()
+            .Include(v => v.Project).ThenInclude(p => p.Creator)
+            .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
+            .Include(v => v.Assignments).ThenInclude(a => a.Report)
+            .Include(v => v.Transactions).ThenInclude(t => t.RefundTransactions)
+            .AsSplitQuery();
+        if (includeProjectTeam)
+            query = query
+                .Include(v => v.Project).ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+                .Include(v => v.Project).ThenInclude(p => p.Members.Where(m => m.Status == ProjectMemberStatus.Active))
+                .ThenInclude(m => m.User);
+
+        return await query.FirstOrDefaultAsync(v => v.Id == id, ct)
+            ?? throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
+    }
 
     public async Task<AdminVerificationDetailResponse> GetDetailAsync(Guid id, Guid accountId, CancellationToken ct = default)
     {
         await AuthorizeAsync(accountId, ct);
-        var detail = ProjectVerificationMapping.ToDetailResponse(await LoadAsync(id, ct));
-        return new(detail);
+        var verification = await LoadAsync(id, ct, includeProjectTeam: true);
+        var detail = ProjectVerificationMapping.ToDetailResponse(verification);
+        var project = detail.Project with
+        {
+            Skills = verification.Project.ProjectSkills.OrderBy(s => s.Skill.Name).ThenBy(s => s.SkillId)
+                .Select(s => new ProjectSkillInfo(s.SkillId, s.Skill.Name,
+                    s.Skill.Category?.ToString() ?? string.Empty, s.Skill.IconUrl, null)).ToList(),
+            Members = verification.Project.Members.OrderBy(m => m.JoinedAt).ThenBy(m => m.UserId)
+                .Select(m => new ProjectMemberInfo(m.UserId, m.User.FullName, m.User.Nickname,
+                    m.User.AvatarUrl, m.Role, m.Status, m.JoinedAt)).ToList()
+        };
+        return new(detail with { Project = project });
     }
 
     public async Task<List<VerificationReportResponse>> GetReportsAsync(Guid id, Guid accountId, CancellationToken ct = default)
@@ -142,7 +161,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
         ValidateReason(request.Reason);
         if (!await db.ProjectVerifications.AnyAsync(v => v.Id == id, ct)) throw Error("VERIFICATION_NOT_FOUND", "Verification not found.", 404);
         var payment = await db.Transactions.Include(t => t.RefundTransactions).SingleOrDefaultAsync(t =>
-            t.Id == request.TransactionId && t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == id, ct)
+            t.Id == request.TransactionId && t.VerificationId == id, ct)
             ?? throw Error("PAYMENT_NOT_FOUND", "Payment does not belong to this verification.", 404);
         if (payment.Status != PaymentStatus.Success) throw Error("PAYMENT_NOT_SUCCESSFUL", "Only successful payments can be refunded.", 409);
         var reserved = RefundReservations.Reserved(payment.RefundTransactions);

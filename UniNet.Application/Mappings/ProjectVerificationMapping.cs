@@ -35,14 +35,14 @@ public static class ProjectVerificationMapping
         verification.Assignments.OrderBy(a => a.AssignedAt).ThenBy(a => a.Id)
             .Select(a => new VerificationAssignmentResponse(a.Id, a.AssignedToUserId, a.Status, a.AssignedAt,
                 a.Report == null ? null : ToReportResponse(a.Report))).ToList(),
-        verification.VerificationTransactions.OrderBy(v => v.Transaction.CreatedAt).ThenBy(v => v.TransactionId)
-            .Select(v => new VerificationPaymentResponse(v.TransactionId, v.Transaction.PackageId,
-                v.Transaction.Status, v.Transaction.Amount, v.Transaction.PaidAt,
-                v.Transaction.RefundTransactions.OrderBy(r => r.CreatedAt).ThenBy(r => r.Id)
+        verification.Transactions.OrderBy(v => v.CreatedAt).ThenBy(v => v.Id)
+            .Select(v => new VerificationPaymentResponse(v.Id, v.PackageId,
+                v.Status, v.Amount, v.PaidAt,
+                v.RefundTransactions.OrderBy(r => r.CreatedAt).ThenBy(r => r.Id)
                     .Select(r => new VerificationRefundResponse(r.Id, r.Amount, r.Status, r.Reason,
                         r.Status == PaymentStatus.Success ? r.CompletedAt : null, r.RequestedByUserId, r.RequestedAt, r.RequestSource)).ToList(),
-                v.Transaction.FailureReason is TransactionMapping.LatePaymentReview or TransactionMapping.BookingPaymentReview or
-                    TransactionMapping.DuplicatePaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", v.Transaction.FailureReason)).ToList(),
+                v.FailureReason is TransactionMapping.LatePaymentReview or TransactionMapping.BookingPaymentReview or
+                    TransactionMapping.DuplicatePaymentReview or "PARTIAL_PAYMENT_REVIEW_REQUIRED", v.FailureReason)).ToList(),
         ToFinalResponse(verification), verification.CancellationReason, verification.CancelledAt,
         Services.ProjectAssessmentPolicy.ReadRubric(verification.AssessmentRubricJson));
 }

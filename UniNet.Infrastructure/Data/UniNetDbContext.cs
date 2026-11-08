@@ -82,6 +82,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectEvidenceDocument> ProjectEvidenceDocuments => Set<ProjectEvidenceDocument>();
     public DbSet<ExternalProjectDraft> ExternalProjectDrafts => Set<ExternalProjectDraft>();
     public DbSet<ExternalProjectDraftFile> ExternalProjectDraftFiles => Set<ExternalProjectDraftFile>();
+    public DbSet<AssessorOnboarding> AssessorOnboardings => Set<AssessorOnboarding>();
+    public DbSet<AssessorOnboardingEmail> AssessorOnboardingEmails => Set<AssessorOnboardingEmail>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -126,7 +128,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<RefundTransaction> RefundTransactions => Set<RefundTransaction>();
-    public DbSet<VerificationTransaction> VerificationTransactions => Set<VerificationTransaction>();
     public DbSet<CommunityPost> CommunityPosts => Set<CommunityPost>();
     public DbSet<CommunityPostMedia> CommunityPostMedia => Set<CommunityPostMedia>();
     public DbSet<CommunityPostComment> CommunityPostComments => Set<CommunityPostComment>();
@@ -137,6 +138,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftFileConfiguration());
@@ -1215,7 +1217,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
             e.Property(x => x.Amount).HasPrecision(18, 2).IsRequired();
             e.Property(x => x.PaymentRef).HasMaxLength(255);
-            e.Property(x => x.PaymentUrl).HasMaxLength(2048);
             e.Property(x => x.PaymentQrCode).HasMaxLength(4096);
             e.Property(x => x.PaymentMethod).HasMaxLength(100);
             e.Property(x => x.ProviderOrderCode).HasMaxLength(255);
@@ -1237,17 +1238,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => new { x.PaymentMethod, x.ProviderPaymentLinkId }).IsUnique()
                 .HasFilter("\"PaymentMethod\" = 'PayOS' AND \"ProviderPaymentLinkId\" IS NOT NULL");
             e.HasIndex(x => new { x.Status, x.ExpiredAt });
-        });
-        model.Entity<VerificationTransaction>(e =>
-        {
-            e.ToTable("VerificationTransactions");
-            e.HasKey(x => x.TransactionId);
-            e.Property(x => x.CreatedAt).IsRequired();
-            e.Property(x => x.UpdatedAt).IsRequired();
-
-            e.HasOne(x => x.Transaction).WithOne(x => x.VerificationTransaction)
-                .HasForeignKey<VerificationTransaction>(x => x.TransactionId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Verification).WithMany(x => x.VerificationTransactions)
+            e.HasOne(x => x.Verification).WithMany(x => x.Transactions)
                 .HasForeignKey(x => x.VerificationId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.VerificationId);
         });

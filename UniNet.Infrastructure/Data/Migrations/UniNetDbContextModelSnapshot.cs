@@ -89,6 +89,241 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.AssessorOnboarding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ActivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("AutoApprove")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("AutoApproveAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContractSha256")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ContractStorageKey")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ContractTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContractTokenHash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ContractViewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("EmailConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EmailNormalized")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("FullName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("GenerationAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("GenerationErrorCode")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("GenerationRetryAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("OtpExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OtpFailedAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OtpHash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("OtpLastSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OtpPurpose")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ProfileTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProfileTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ProfileTokenUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ReadSessionExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReadSessionHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SensitiveProfileCiphertext")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SetPasswordTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SetPasswordTokenHash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SetPasswordTokenUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SignatureStatement")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SignedName")
+                        .HasColumnType("text");
+
+                    b.Property<short>("Status")
+                        .IsConcurrencyToken()
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TemplateVersion")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId")
+                        .IsUnique();
+
+                    b.HasIndex("ContractTokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("CreatedByAccountId");
+
+                    b.HasIndex("EmailNormalized")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AssessorOnboardings_OpenEmail")
+                        .HasFilter("\"Status\" IN (0, 1, 2, 3, 4, 9)");
+
+                    b.HasIndex("ProfileTokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("ReadSessionHash")
+                        .IsUnique();
+
+                    b.HasIndex("ReviewedByAccountId");
+
+                    b.HasIndex("SetPasswordTokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "AutoApproveAt");
+
+                    b.HasIndex("Status", "GenerationRetryAt");
+
+                    b.ToTable("AssessorOnboardings");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.AssessorOnboardingEmail", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CredentialHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DeduplicationKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OnboardingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadCiphertext")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeduplicationKey")
+                        .IsUnique();
+
+                    b.HasIndex("NextAttemptAt")
+                        .HasFilter("\"SentAt\" IS NULL");
+
+                    b.HasIndex("OnboardingId", "Kind", "CreatedAt");
+
+                    b.ToTable("AssessorOnboardingEmails");
+                });
+
             modelBuilder.Entity("UniNet.Domain.CareerProfile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2369,10 +2604,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<string>("PaymentUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
                     b.Property<string>("ProviderOrderCode")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -2390,6 +2621,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("VerificationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VerificationReservationId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PackageId");
@@ -2397,6 +2634,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("ProviderOrderCode");
 
                     b.HasIndex("ProviderPaymentLinkId");
+
+                    b.HasIndex("VerificationId");
 
                     b.HasIndex("PaymentMethod", "ProviderOrderCode")
                         .IsUnique()
@@ -2739,30 +2978,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_VerificationReports_Case", "\"ProjectVerificationId\" IS NOT NULL OR \"LegacyOriginalJson\" IS NOT NULL");
                         });
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
-                {
-                    b.Property<Guid>("TransactionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ReservationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("VerificationId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("TransactionId");
-
-                    b.HasIndex("VerificationId");
-
-                    b.ToTable("VerificationTransactions", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
@@ -3260,6 +3475,34 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_UserVerifications_Type", "\"VerificationType\" BETWEEN 0 AND 1");
                         });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.AssessorOnboarding", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.AssessorOnboardingEmail", b =>
+                {
+                    b.HasOne("UniNet.Domain.AssessorOnboarding", null)
+                        .WithMany()
+                        .HasForeignKey("OnboardingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.CareerProfile", b =>
@@ -4142,9 +4385,16 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", "Verification")
+                        .WithMany("Transactions")
+                        .HasForeignKey("VerificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Package");
 
                     b.Navigation("User");
+
+                    b.Navigation("Verification");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UploadedFile", b =>
@@ -4269,25 +4519,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("VerificationAssignment");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.VerificationTransaction", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.Transaction", "Transaction")
-                        .WithOne("VerificationTransaction")
-                        .HasForeignKey("UniNet.Domain.Entities.VerificationTransaction", "TransactionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", "Verification")
-                        .WithMany("VerificationTransactions")
-                        .HasForeignKey("VerificationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Transaction");
-
-                    b.Navigation("Verification");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificatorAvailability", b =>
@@ -4471,9 +4702,26 @@ namespace UniNet.Infrastructure.Data.Migrations
                             b1.Property<Guid>("UserProfileId")
                                 .HasColumnType("uuid");
 
+                            b1.Property<string[]>("Branches")
+                                .IsRequired()
+                                .HasColumnType("text[]");
+
+                            b1.Property<string>("EmployeeRange")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("FoundedOn")
+                                .HasColumnType("text");
+
+                            b1.Property<string[]>("GalleryUrls")
+                                .IsRequired()
+                                .HasColumnType("text[]");
+
                             b1.Property<string>("Industry")
                                 .HasMaxLength(150)
                                 .HasColumnType("character varying(150)");
+
+                            b1.Property<string>("IntroductionImageUrl")
+                                .HasColumnType("text");
 
                             b1.Property<string>("OrganizationName")
                                 .HasMaxLength(255)
@@ -4663,7 +4911,7 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Navigation("EvidenceSubmissions");
 
-                    b.Navigation("VerificationTransactions");
+                    b.Navigation("Transactions");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.TaskReport", b =>
@@ -4680,8 +4928,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("AdvertisementTransaction");
 
                     b.Navigation("RefundTransactions");
-
-                    b.Navigation("VerificationTransaction");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.UploadedFile", b =>

@@ -30,7 +30,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 "Only completed projects are eligible for verification payment.", 409);
             await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
             var attempts = await db.Transactions.AsNoTracking()
-                .Where(t => t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == verificationId)
+                .Where(t => t.VerificationId == verificationId)
                 .OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id).ToListAsync(ct);
             Require(!attempts.Any(t => t.Status == PaymentStatus.Success), "VERIFICATION_ALREADY_PAID",
                 "This verification already has a successful payment.", 409);
@@ -41,8 +41,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             var pending = attempts.FirstOrDefault(t => t.Status == PaymentStatus.Pending);
             if (pending != null)
             {
-                var association = await db.VerificationTransactions.SingleAsync(t => t.TransactionId == pending.Id, ct);
-                Require(association.ReservationId == verification.ReservationId && pending.ExpiredAt > reservationNow &&
+                Require(pending.VerificationReservationId == verification.ReservationId && pending.ExpiredAt > reservationNow &&
                     pending.ExpiredAt == verification.ReservedUntil, "PAYMENT_RECONCILIATION_REQUIRED",
                     "Resolve the existing checkout before requesting another payment.", 409);
                 return (Transaction: pending, Created: false);
@@ -65,10 +64,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 ProviderOrderCode = ((BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8)) &
                     ((1UL << 52) - 1)) + 1).ToString(CultureInfo.InvariantCulture),
                 ExpiredAt = verification.ReservedUntil, CreatedAt = now, UpdatedAt = now,
-                VerificationTransaction = new()
-                {
-                    VerificationId = verificationId, ReservationId = verification.ReservationId, CreatedAt = now, UpdatedAt = now
-                }
+                VerificationId = verificationId, VerificationReservationId = verification.ReservationId
             };
             verification.UpdatedAt = now;
             db.Transactions.Add(transaction);
@@ -101,8 +97,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
         await GetOwnedVerificationAsync(verificationId, accountId, ct);
         Require(page >= 1 && pageSize is >= 1 and <= 100 && (long)(page - 1) * pageSize <= int.MaxValue,
             "INVALID_PAGINATION", "Page must be positive and pageSize must be between 1 and 100.");
-        var query = db.Transactions.AsNoTracking().Where(t => t.VerificationTransaction != null &&
-            t.VerificationTransaction.VerificationId == verificationId);
+        var query = db.Transactions.AsNoTracking().Where(t => t.VerificationId == verificationId);
         var total = await query.CountAsync(ct);
         var transactions = await query.OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
@@ -115,23 +110,23 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
     {
         await GetOwnedVerificationAsync(verificationId, accountId, ct);
         var transaction = await db.Transactions.AsNoTracking().FirstOrDefaultAsync(t => t.Id == transactionId &&
-            t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == verificationId, ct)
+            t.VerificationId == verificationId, ct)
             ?? throw NotFound();
         return TransactionMapping.ToResponse(transaction, verificationId);
     }
 
     public async Task<TransactionResponse> ReconcileAsync(Guid transactionId, Guid accountId, CancellationToken ct = default)
     {
-        var transaction = await db.Transactions.AsNoTracking().Include(t => t.VerificationTransaction)
+        var transaction = await db.Transactions.AsNoTracking()
             .FirstOrDefaultAsync(t => t.Id == transactionId, ct) ?? throw NotFound();
-        Require(transaction.VerificationTransaction != null, "TRANSACTION_NOT_FOUND", "Verification payment not found.", 404);
-        await GetOwnedVerificationAsync(transaction.VerificationTransaction.VerificationId, accountId, ct);
+        Require(transaction.VerificationId.HasValue, "TRANSACTION_NOT_FOUND", "Verification payment not found.", 404);
+        await GetOwnedVerificationAsync(transaction.VerificationId.Value, accountId, ct);
         Require(PaymentOptions.Load(configuration).AllowUserReconciliation, "RECONCILIATION_DISABLED",
             "User-triggered payment reconciliation is disabled.", 403);
         Require(transaction.PaymentMethod == provider.Name && !string.IsNullOrWhiteSpace(transaction.ProviderOrderCode),
             "UNSUPPORTED_PAYMENT_PROVIDER", "This payment provider is not supported for reconciliation.", 409);
         if (transaction.Status == PaymentStatus.Success)
-            return TransactionMapping.ToResponse(transaction, transaction.VerificationTransaction.VerificationId);
+            return TransactionMapping.ToResponse(transaction, transaction.VerificationId.Value);
         ProviderPaymentResult result;
         try { result = await provider.GetPaymentStatusAsync(transaction.ProviderOrderCode, ct); }
         catch (PaymentProviderException ex)
@@ -150,7 +145,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
         var result = provider.VerifyWebhook(payload);
         var transactionId = await db.Transactions.AsNoTracking()
             .Where(t => t.PaymentMethod == provider.Name && t.ProviderOrderCode == result.OrderCode &&
-                t.VerificationTransaction != null).Select(t => (Guid?)t.Id).SingleOrDefaultAsync(ct);
+                t.VerificationId.HasValue).Select(t => (Guid?)t.Id).SingleOrDefaultAsync(ct);
         // PayOS sends signed test data when registering a webhook. Unmatched or other-use-case
         // events are acknowledged without changing the shared advertisement ledger.
         if (!transactionId.HasValue) return new(true, false);
@@ -163,7 +158,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
     {
         var cutoff = now.AddMinutes(-5);
         var pending = await db.Transactions.AsNoTracking().Where(t => t.Status == PaymentStatus.Pending &&
-            t.VerificationTransaction != null && t.PaymentMethod == provider.Name && t.ProviderOrderCode != null &&
+            t.VerificationId.HasValue && t.PaymentMethod == provider.Name && t.ProviderOrderCode != null &&
             t.UpdatedAt <= cutoff).OrderBy(t => t.UpdatedAt).Select(t => new { t.Id, t.ProviderOrderCode }).Take(50).ToListAsync(ct);
         foreach (var payment in pending)
         {
@@ -189,7 +184,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
         AtomicAsync(async () =>
         {
             var transaction = await LoadForUpdateAsync(transactionId, ct);
-            var verification = transaction.VerificationTransaction!.Verification;
+            var verification = transaction.Verification!;
             Require(transaction.PaymentMethod == provider.Name && transaction.ProviderOrderCode == result.OrderCode &&
                 transaction.Amount == result.AmountVnd && result.Currency == "VND" &&
                 !string.IsNullOrWhiteSpace(result.PaymentLinkId) && result.PaymentLinkId.Length <= 255 &&
@@ -204,12 +199,6 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 "PayOS has not confirmed the full payment amount.", 409);
             var now = DateTimeOffset.UtcNow;
             transaction.ProviderPaymentLinkId = result.PaymentLinkId;
-            if (result.CheckoutUrl != null)
-            {
-                Require(result.CheckoutUrl.Length <= 2048 && PaymentOptions.IsWebUrl(result.CheckoutUrl),
-                    "PAYMENT_DATA_MISMATCH", "Provider checkout URL is invalid.", 409);
-                transaction.PaymentUrl = result.CheckoutUrl;
-            }
             if (!string.IsNullOrWhiteSpace(result.QrCode))
             {
                 Require(result.QrCode.Length <= 4096,
@@ -219,7 +208,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             if (result.Status == PaymentStatus.Success)
             {
                 var alreadyPaid = await db.Transactions.AnyAsync(t => t.Id != transaction.Id &&
-                    t.VerificationTransaction != null && t.VerificationTransaction.VerificationId == verification.Id &&
+                    t.VerificationId == verification.Id &&
                     t.Status == PaymentStatus.Success, ct);
                 // Preserve every real charge, but only the first successful charge is accepted.
                 transaction.Status = PaymentStatus.Success;
@@ -231,8 +220,8 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                     var validHold = verification.Status == ProjectVerificationStatus.Pending && verification.FinalizedAt == null &&
                         verification.BookingStatus == VerificationBookingStatus.Held && verification.ReservedUntil > now &&
                         verification.ScheduledStartAt > now && transaction.ExpiredAt > now &&
-                        transaction.VerificationTransaction.ReservationId != null &&
-                        transaction.VerificationTransaction.ReservationId == verification.ReservationId;
+                        transaction.VerificationReservationId != null &&
+                        transaction.VerificationReservationId == verification.ReservationId;
                     if (!validHold) transaction.FailureReason = TransactionMapping.LatePaymentReview;
                     else
                     {
@@ -264,7 +253,6 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             else if (transaction.Status == PaymentStatus.Pending)
                 transaction.FailureReason = result.AmountPaidVnd > 0 ? "PARTIAL_PAYMENT_PENDING" : null;
             transaction.UpdatedAt = now;
-            transaction.VerificationTransaction.UpdatedAt = now;
             // Touching the parent serializes simultaneous success events for different attempts.
             // Payment never finalizes verification or assigns a verificator.
             verification.UpdatedAt = now;
@@ -284,18 +272,17 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 transaction.FailureReason = problem.Code;
                 transaction.UpdatedAt = DateTimeOffset.UtcNow;
             }
-            return TransactionMapping.ToResponse(transaction, transaction.VerificationTransaction!.VerificationId);
+            return TransactionMapping.ToResponse(transaction, transaction.Verification!.Id);
         }, persistence.Token);
     }
 
     private async Task<Transaction> LoadForUpdateAsync(Guid transactionId, CancellationToken ct)
     {
-        var transaction = await db.Transactions.Include(t => t.VerificationTransaction).ThenInclude(v => v!.Verification)
-            .FirstOrDefaultAsync(t => t.Id == transactionId && t.VerificationTransaction != null, ct) ?? throw NotFound();
+        var transaction = await db.Transactions.Include(t => t.Verification)
+            .FirstOrDefaultAsync(t => t.Id == transactionId && t.VerificationId.HasValue, ct) ?? throw NotFound();
         // A provider call occurs between local transactions; discard tracked pre-call state.
         await db.Entry(transaction).ReloadAsync(ct);
-        await db.Entry(transaction.VerificationTransaction!).ReloadAsync(ct);
-        await db.Entry(transaction.VerificationTransaction!.Verification).ReloadAsync(ct);
+        await db.Entry(transaction.Verification!).ReloadAsync(ct);
         return transaction;
     }
 

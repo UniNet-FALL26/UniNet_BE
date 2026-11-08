@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Hồ sơ thẩm định viên UniNet</title>
+  <style>
+    body { font: 1rem system-ui, sans-serif; margin: 2rem auto; max-width: 34rem; padding: 0 1rem; }
+    label { display: block; margin-bottom: 1rem; }
+    input { box-sizing: border-box; width: 100%; font: inherit; padding: .5rem; }
+    button { font: inherit; padding: .5rem 1rem; }
+  </style>
+  <script src="./profile.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Hồ sơ thẩm định viên UniNet</h1>
+    <p id="message" role="status">Đang kiểm tra lời mời…</p>
+    <form id="profile" hidden>
+      <label>Email <input id="email" type="email" readonly></label>
+      <label>Họ và tên <input name="fullName" autocomplete="name" required maxlength="255"></label>
+      <label>Số CCCD <input name="citizenId" inputmode="numeric" required pattern="[0-9]{12}"></label>
+      <label>Mã số thuế <input name="taxCode" required pattern="[0-9]{10}(-?[0-9]{3})?"></label>
+      <label>Tên ngân hàng <input name="bankName" required maxlength="150"></label>
+      <label>Số tài khoản <input name="bankAccountNumber" required pattern="[A-Za-z0-9]{1,34}"></label>
+      <label>Tên chủ tài khoản <input name="bankAccountHolder" required maxlength="255"></label>
+      <button type="submit">Nộp hồ sơ</button>
+    </form>
+  </main>
+</body>
+</html>
