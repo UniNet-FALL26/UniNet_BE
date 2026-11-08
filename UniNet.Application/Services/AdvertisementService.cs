@@ -25,7 +25,7 @@ public sealed class AdvertisementService(
     ICloudImageStorage imageStorage,
     IConfiguration configuration) : IAdvertisementService
 {
-    // BƯỚC 1: Partner tạo & gửi Quảng cáo + Tự động AI Review
+
     public async Task<CampaignResponse> CreateCampaignAsync(Guid accountId, CreateCampaignRequest request, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
@@ -90,7 +90,6 @@ public sealed class AdvertisementService(
             .FirstOrDefaultAsync(c => c.Id == campaignId && c.CompanyUserId == partnerProfile.Id, ct)
             ?? throw NotFound();
 
-        // Chỉ cho phép gán gói khi chiến dịch đang là Draft
         Require(campaign.Status == AdCampaignStatus.Draft,
             "INVALID_CAMPAIGN_STATE", "Only campaigns in Draft status can be assigned a package.", 409);
 
@@ -98,33 +97,19 @@ public sealed class AdvertisementService(
         Require(package != null && package.IsActive && package.Type == PackageType.Advertisement && package.Role == TargetRole.Company,
             "INVALID_AD_PACKAGE", "An active Partner advertisement package is required.", 400);
 
-        // 1. Chạy AI Review kiểm tra nội dung Title và Content khi Partner chọn gói gán vào chiến dịch
-        bool isSuitable = await aiModeration.ReviewContentAsync(campaign.Title, campaign.Content, ct);
-
-        // 2. Cập nhật thông tin gói và tự động chuyển đổi Status theo kết quả AI
+        // LƯU Ý LUỒNG MỚI: Chỉ gán gói và chuyển thẳng sang trạng thái chờ thanh toán (Không check AI ở đây nữa)
         campaign.PackageId = package.Id;
         campaign.BudgetCap = package.Price;
-
-        if (isSuitable)
-        {
-            // Nội dung chuẩn -> Chuyển sang chờ thanh toán
-            campaign.Status = AdCampaignStatus.PendingPayment;
-            campaign.RejectionReason = null;
-        }
-        else
-        {
-            // Nội dung có từ khóa nhạy cảm -> Chuyển sang chờ Admin duyệt thủ công
-            campaign.Status = AdCampaignStatus.PendingModeration;
-            campaign.RejectionReason = "AI phát hiện nội dung có chứa từ khóa nhạy cảm, chuyển sang bộ phận kiểm duyệt.";
-        }
-
+        campaign.Status = AdCampaignStatus.PendingPayment;
+        campaign.RejectionReason = null;
         campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
         await db.SaveChangesAsync(ct);
 
         return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", package.Name);
     }
-    // BƯỚC 3: Admin Review (khi AI cho kết quả Không phù hợp)
+
+    // Admin duyệt tay (Dành cho các bài đã thanh toán nhưng rớt AI)
     public async Task<CampaignResponse> ModerateCampaignAsync(Guid accountId, Guid campaignId, ModerateCampaignRequest request, CancellationToken ct = default)
     {
         await EnsureAdminAsync(accountId, ct);
@@ -141,15 +126,20 @@ public sealed class AdvertisementService(
         var now = DateTimeOffset.UtcNow;
         if (request.IsApproved)
         {
-            // Admin duyệt -> Chuyển sang chờ Partner thanh toán
-            campaign.Status = AdCampaignStatus.PendingPayment;
+            // LUỒNG MỚI: Admin duyệt pass -> Chuyển thẳng sang Active vì ĐÃ THANH TOÁN TRƯỚC ĐÓ RỒI
+            campaign.Status = AdCampaignStatus.Active;
             campaign.RejectionReason = null;
+            campaign.StartedAt = now;
+            if (campaign.Package.DurationInDays.HasValue)
+            {
+                campaign.ExpiredAt = now.AddDays(campaign.Package.DurationInDays.Value);
+            }
         }
         else
         {
-            // Admin từ chối -> Thông báo Rejection
+            // Admin từ chối -> Rejected (Lưu ý: Tiền đã thu, tính toán logic hoàn tiền bên ngoài nếu cần)
             campaign.Status = AdCampaignStatus.Rejected;
-            campaign.RejectionReason = request.Reason ?? "Nội dung quảng cáo không phù hợp với tiêu chuẩn.";
+            campaign.RejectionReason = request.Reason ?? "Nội dung quảng cáo không phù hợp với tiêu chuẩn cộng đồng.";
         }
 
         campaign.UpdatedAt = now;
@@ -177,7 +167,6 @@ public sealed class AdvertisementService(
         return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", campaign.Package.Name);
     }
 
-    // BƯỚC 4: Partner thực hiện Thanh toán (Pay for Advertisement)
     public async Task<TransactionResponse> CreateCampaignPaymentAsync(Guid accountId, Guid campaignId, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
@@ -275,14 +264,14 @@ public sealed class AdvertisementService(
         // Map kết quả trả về từ ProviderPaymentResult
         // Lưu ý: Thay đổi "Id" và "CheckoutUrl" thành đúng tên thuộc tính trong record ProviderPaymentResult của bạn
         transaction.ProviderPaymentLinkId = result.PaymentLinkId;
-        campaign.Status = AdCampaignStatus.PendingPayment;
+        transaction.PaymentQrCode = result.QrCode;
 
         await db.SaveChangesAsync(ct);
 
-        return TransactionMapping.ToResponse(transaction, campaignId, result.CheckoutUrl);
+        return TransactionMapping.ToResponse(transaction, campaignId);
     }
 
-    // BƯỚC 5: Confirm Payment & Publish Ad (Khi Webhook PayOS gọi về)
+    // Xử lý Webhook khi thanh toán thành công (BƯỚC CHẠY AI REVIEW)
     public async Task ProcessPaymentCallbackAsync(string providerOrderCode, bool isSuccess, CancellationToken ct = default)
     {
         var transaction = await db.Transactions
@@ -302,25 +291,37 @@ public sealed class AdvertisementService(
         {
             transaction.Status = PaymentStatus.Success;
 
-            // XÁC NHẬN THANH TOÁN THÀNH CÔNG -> PUBLISH AD
-            campaign.Status = AdCampaignStatus.Active;
-            campaign.StartedAt = now;
-            if (campaign.Package.DurationInDays.HasValue)
+            // THANH TOÁN THÀNH CÔNG -> KÍCH HOẠT AI REVIEW
+            bool isSuitable = await aiModeration.ReviewContentAsync(campaign.Title, campaign.Content, ct);
+
+            if (isSuitable)
             {
-                campaign.ExpiredAt = now.AddDays(campaign.Package.DurationInDays.Value);
+                // AI Duyệt Pass -> Cho chạy quảng cáo luôn
+                campaign.Status = AdCampaignStatus.Active;
+                campaign.StartedAt = now;
+                if (campaign.Package.DurationInDays.HasValue)
+                {
+                    campaign.ExpiredAt = now.AddDays(campaign.Package.DurationInDays.Value);
+                }
+            }
+            else
+            {
+                // AI Nghi vấn -> Chuyển sang chờ Admin duyệt (Tiền đã thu)
+                campaign.Status = AdCampaignStatus.PendingModeration;
+                campaign.RejectionReason = "AI phát hiện nội dung có chứa từ khóa nhạy cảm, chuyển sang bộ phận kiểm duyệt thủ công.";
             }
         }
         else
         {
             transaction.Status = PaymentStatus.Failed;
-            // Thanh toán thất bại -> Vẫn giữ trạng thái PendingPayment để Partner thử lại
+            // Thanh toán thất bại -> Giữ nguyên PendingPayment
         }
 
         transaction.UpdatedAt = now;
         campaign.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
     }
-
+    // Xử lý khi Partner sửa bài viết (Đặc biệt là khi bài đã thu tiền nhưng bị Admin Reject)
     public async Task<CampaignResponse> UpdateCampaignAsync(Guid accountId, Guid campaignId, UpdateCampaignRequest request, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
@@ -335,14 +336,40 @@ public sealed class AdvertisementService(
         campaign.Title = request.Title.Trim();
         campaign.Content = request.Content.Trim();
         campaign.DestinationUrl = request.DestinationUrl.Trim();
-        campaign.MediaUrl = request.MediaUrl?.Trim();
-        campaign.Status = AdCampaignStatus.PendingModeration; // Chuyển lại về duyệt
-        campaign.UpdatedAt = DateTimeOffset.UtcNow;
 
+        if (request.MediaUrl != null)
+        {
+            campaign.MediaUrl = request.MediaUrl.Trim();
+        }
+
+        if (campaign.Status == AdCampaignStatus.Draft)
+        {
+            // Nếu vẫn đang nháp thì cứ cho nháp tiếp
+            campaign.Status = AdCampaignStatus.Draft;
+        }
+        else if (campaign.Status == AdCampaignStatus.Rejected)
+        {
+            // LUỒNG MỚI: Nếu bài bị từ chối (tức là đã thanh toán), sửa xong chạy AI Review lại ngay lập tức
+            bool isSuitable = await aiModeration.ReviewContentAsync(campaign.Title, campaign.Content, ct);
+            if (isSuitable)
+            {
+                campaign.Status = AdCampaignStatus.Active;
+                campaign.RejectionReason = null;
+                campaign.StartedAt = DateTimeOffset.UtcNow;
+                if (campaign.Package.DurationInDays.HasValue)
+                    campaign.ExpiredAt = DateTimeOffset.UtcNow.AddDays(campaign.Package.DurationInDays.Value);
+            }
+            else
+            {
+                campaign.Status = AdCampaignStatus.PendingModeration;
+                campaign.RejectionReason = "AI phát hiện nội dung có chứa từ khóa nhạy cảm, chuyển sang bộ phận kiểm duyệt.";
+            }
+        }
+
+        campaign.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return MapToResponse(campaign, partnerProfile.FullName ?? "Doanh nghiệp", campaign.Package.Name);
     }
-
     public async Task<CampaignsResponse> GetMyCampaignsAsync(Guid accountId, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
         var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
