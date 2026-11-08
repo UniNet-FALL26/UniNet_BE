@@ -251,6 +251,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("ReviewedByAccountId");
 
+                    b.HasIndex("SetPasswordTokenHash")
+                        .IsUnique();
+
                     b.HasIndex("Status", "AutoApproveAt");
 
                     b.HasIndex("Status", "GenerationRetryAt");

@@ -73,7 +73,11 @@ public sealed class AssessorContractTasks(
         var email = await db.AssessorOnboardingEmails.AsNoTracking().SingleAsync(x => x.Id == id, ct);
         var row = await db.AssessorOnboardings.AsNoTracking().SingleAsync(x => x.Id == email.OnboardingId, ct);
         var pending = db.AssessorOnboardingEmails.Where(x => x.Id == id && x.LeaseId == lease);
-        if (!CanSend(row, email, now))
+        var canSend = CanSend(row, email, now);
+        if (canSend && email.Kind == "SetPassword")
+            canSend = await db.Accounts.AnyAsync(x => x.Id == row.AccountId && x.Role == AccountRole.Assessor &&
+                x.Status == AccountStatus.Pending && x.PasswordHash == null && x.Email == row.EmailNormalized, ct);
+        if (!canSend)
         {
             await pending.ExecuteUpdateAsync(x => x.SetProperty(p => p.CancelledAt, now)
                 .SetProperty(p => p.PayloadCiphertext, (string?)null)
@@ -106,13 +110,16 @@ public sealed class AssessorContractTasks(
 
     private static bool CanSend(AssessorOnboarding row, AssessorOnboardingEmail email, DateTimeOffset now)
     {
-        if (email.ExpiresAt <= now || row.Status != AssessorOnboardingStatus.AwaitingSignature) return false;
+        if (email.ExpiresAt <= now) return false;
         return email.Kind switch
         {
-            "Contract" => row.ContractTokenHash == email.CredentialHash,
-            "ReadOtp" => row.OtpPurpose == "Read" && row.OtpHash != null &&
+            "SetPassword" => row.Status == AssessorOnboardingStatus.AwaitingPassword && row.SetPasswordTokenUsedAt == null &&
+                row.SetPasswordTokenExpiresAt > now && row.SetPasswordTokenHash == email.CredentialHash,
+            "Rejected" => row.Status == AssessorOnboardingStatus.Rejected,
+            "Contract" => row.Status == AssessorOnboardingStatus.AwaitingSignature && row.ContractTokenHash == email.CredentialHash,
+            "ReadOtp" => row.Status == AssessorOnboardingStatus.AwaitingSignature && row.OtpPurpose == "Read" && row.OtpHash != null &&
                 AssessorContractSecrets.Hash(row.OtpHash) == email.CredentialHash && row.OtpExpiresAt > now,
-            "SignOtp" => row.OtpPurpose == "Sign" && row.OtpHash != null &&
+            "SignOtp" => row.Status == AssessorOnboardingStatus.AwaitingSignature && row.OtpPurpose == "Sign" && row.OtpHash != null &&
                 AssessorContractSecrets.Hash(row.OtpHash) == email.CredentialHash && row.OtpExpiresAt > now,
             _ => false
         };

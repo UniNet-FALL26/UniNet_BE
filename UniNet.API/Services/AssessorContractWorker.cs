@@ -73,6 +73,14 @@ public sealed class AssessorContractWorker(IServiceScopeFactory scopes, ILogger<
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<AssessorActivationService>().ApproveNext(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception) { logger.LogWarning("Assessor approval failed; pending work will be retried."); }
+
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
                 await scope.ServiceProvider.GetRequiredService<AssessorContractTasks>().SendNext(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }

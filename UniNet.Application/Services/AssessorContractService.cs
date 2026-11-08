@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UniNet.Domain;
@@ -9,7 +8,7 @@ namespace UniNet.Application.Services;
 
 public sealed class AssessorContractService(
     UniNetDbContext db, AssessorContractSecrets secrets, IAssessorContractFiles files,
-    IOptions<AssessorContractOptions> options, TimeProvider clock)
+    IOptions<AssessorContractOptions> options, TimeProvider clock, AssessorOnboardingEmailQueue emails)
 {
     private readonly AssessorContractOptions settings = options.Value;
 
@@ -165,13 +164,7 @@ public sealed class AssessorContractService(
 
     private void Queue(AssessorOnboarding row, string kind, string credentialHash, DateTimeOffset expiry, AssessorEmailPayload payload)
     {
-        var now = clock.GetUtcNow();
-        db.AssessorOnboardingEmails.Add(new()
-        {
-            OnboardingId = row.Id, Kind = kind, CreatedAt = now, ExpiresAt = expiry, NextAttemptAt = now,
-            DeduplicationKey = $"{row.Id:N}:{kind}:{Guid.NewGuid():N}",
-            CredentialHash = credentialHash, PayloadCiphertext = secrets.Protect(JsonSerializer.Serialize(payload))
-        });
+        emails.Add(row.Id, kind, credentialHash, expiry, payload);
     }
 
     private async Task Save(AssessorOnboarding row, CancellationToken ct)
