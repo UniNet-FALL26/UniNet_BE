@@ -8,8 +8,11 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Extensions.Configuration.IConfiguration configuration, ILogger<VerificationDeadlineTasks>? logger = null)
+public sealed class VerificationDeadlineTasks(UniNetDbContext db, ILogger<VerificationDeadlineTasks>? logger = null)
 {
+    public VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Extensions.Configuration.IConfiguration configuration,
+        ILogger<VerificationDeadlineTasks>? logger = null) : this(db, logger) { }
+
     public const string AssignmentTimeout = "SYSTEM_TIMEOUT:ASSIGNMENT";
     public const string ReplacementTimeout = "SYSTEM_TIMEOUT:REPLACEMENT";
 
@@ -122,7 +125,7 @@ public sealed class VerificationDeadlineTasks(UniNetDbContext db, Microsoft.Exte
                     active.ProjectVerification.Status == ProjectVerificationStatus.Pending))
                 .OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
             var eligible = true;
-            try { await new VerificationEligibility(db, configuration).RequireCaseAsync(v, ct); }
+            try { await new VerificationEligibility(db).RequireCaseAsync(v, ct); }
             catch (UniNet.Application.ProjectVerificationException) { eligible = false; }
             eligible = eligible && await db.Transactions.AnyAsync(t => t.VerificationId == v.Id &&
                 t.Status == PaymentStatus.Success && t.PackageId == v.PackageId &&

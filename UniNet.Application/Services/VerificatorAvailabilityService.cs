@@ -95,7 +95,7 @@ public sealed class VerificatorAvailabilityService(UniNetDbContext db)
             await transaction.CommitAsync(ct);
             return result;
         }
-        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        catch (Exception ex) when (DatabaseWriteConflicts.IsWriteConflict(ex))
         {
             throw new ProjectVerificationException("AVAILABILITY_CONFLICT", "Availability changed concurrently. Reload and retry.", 409);
         }

@@ -13,9 +13,6 @@ public sealed partial class ProjectVerificationTests
     public async Task DiscoveryUsesSubmissionDecisionWhenEvidenceIsNewer()
     {
         await using var f = await Fixture.CreateAsync();
-        var evidence = await f.Db.ProjectModerations.SingleAsync();
-        evidence.AttemptNumber = 999;
-        evidence.Status = ProjectModerationStatus.Rejected;
         f.Project.Status = ProjectStatus.Active;
         f.Project.Visibility = ProjectVisibility.Public;
         f.Project.RecruitmentStatus = RecruitmentStatus.Open;
@@ -27,7 +24,6 @@ public sealed partial class ProjectVerificationTests
         var service = new ProjectService(f.Db, null!, f.Configuration);
         Assert.Equal(1, (await service.DiscoverPublicProjectsAsync()).TotalItems);
         submission.Status = ProjectModerationStatus.Rejected;
-        evidence.Status = ProjectModerationStatus.Passed;
         await f.Db.SaveChangesAsync();
         Assert.Equal(0, (await service.DiscoverPublicProjectsAsync()).TotalItems);
     }
@@ -36,8 +32,6 @@ public sealed partial class ProjectVerificationTests
     public async Task SubmissionQueueAndLatestIgnoreHigherEvidenceAttemptNumbers()
     {
         await using var f = await Fixture.CreateAsync();
-        var evidence = await f.Db.ProjectModerations.SingleAsync();
-        evidence.AttemptNumber = 999;
         var submission = new ProjectModeration { ProjectId = f.Project.Id, AttemptNumber = 1,
             Status = ProjectModerationStatus.ReviewRequired, ContentHash = "submission" };
         f.Db.ProjectModerations.Add(submission);
@@ -53,9 +47,6 @@ public sealed partial class ProjectVerificationTests
     public async Task EvidenceProcessingDoesNotBlockSubmissionOrBecomeSubmissionRetryWork()
     {
         await using var f = await Fixture.CreateAsync();
-        var evidence = await f.Db.ProjectModerations.SingleAsync();
-        evidence.Status = ProjectModerationStatus.Processing;
-        evidence.UpdatedAt = DateTimeOffset.UtcNow.AddHours(-1);
         f.Project.Status = ProjectStatus.Rejected;
         f.Configuration["ProjectModeration:AutoApproveConfidence"] = "0.9";
         f.Db.ProjectModerations.Add(new() { ProjectId = f.Project.Id, AttemptNumber = 1,
@@ -67,27 +58,18 @@ public sealed partial class ProjectVerificationTests
         var result = await service.SubmitProjectAsync(f.Project.Id, f.Owner.Id, default);
         Assert.Equal(ProjectModerationStatus.Approved, result.Status);
         Assert.Equal(1, probe.Calls);
-        Assert.Equal(ProjectModerationStatus.Processing, evidence.Status);
     }
 
-    [Theory]
-    [InlineData("attempt")]
-    [InlineData("case")]
-    public async Task DatabaseRejectsEvidenceReferencesToSubmission(string target)
+    [Fact]
+    public async Task CurrentSchemaRejectsRetiredEvidencePurpose()
     {
         await using var f = await Fixture.CreateAsync();
-        var submission = new ProjectModeration { ProjectId = f.Project.Id, AttemptNumber = 1,
-            Status = ProjectModerationStatus.Approved, ContentHash = "submission" };
-        f.Db.ProjectModerations.Add(submission);
-        await f.Db.SaveChangesAsync();
-        if (target == "case")
-        {
-            await f.CreateVerificationAsync();
-            (await f.Db.ProjectVerifications.SingleAsync()).EvidenceModerationId = submission.Id;
-        }
-        else
-            f.Db.EvidenceModerationAttempts.Add(new() { ModerationId = submission.Id, Number = 1, StartedAt = DateTimeOffset.UtcNow });
+        f.Db.ProjectModerations.Add(new() { ProjectId = f.Project.Id, Purpose = ProjectModerationPurpose.ProjectEvidence });
         await Assert.ThrowsAsync<DbUpdateException>(() => f.Db.SaveChangesAsync());
+        var model = f.Db.Model;
+        Assert.Null(model.FindEntityType(typeof(ProjectModeration))!.FindProperty("SnapshotJson"));
+        Assert.Null(model.FindEntityType(typeof(ProjectVerification))!.FindProperty("EvidenceModerationId"));
+        Assert.DoesNotContain(model.GetEntityTypes(), e => e.GetTableName() == "EvidenceModerationAttempts");
     }
 
     [Fact]
@@ -107,16 +89,4 @@ public sealed partial class ProjectVerificationTests
             fk => fk.Properties.Any(p => p.Name == nameof(VerificationNotification.TargetId)));
     }
 
-    [Theory]
-    [InlineData(ProjectModerationStatus.Pending, EvidenceModerationStatus.Pending)]
-    [InlineData(ProjectModerationStatus.Processing, EvidenceModerationStatus.Processing)]
-    [InlineData(ProjectModerationStatus.Passed, EvidenceModerationStatus.Passed)]
-    [InlineData(ProjectModerationStatus.Rejected, EvidenceModerationStatus.Rejected)]
-    [InlineData(ProjectModerationStatus.NeedsEvidence, EvidenceModerationStatus.NeedsEvidence)]
-    [InlineData(ProjectModerationStatus.Error, EvidenceModerationStatus.Error)]
-    public void EvidenceApiRetainsItsStatusContract(ProjectModerationStatus stored, EvidenceModerationStatus api)
-    {
-        Assert.Equal(api, EvidenceModerationMapping.ToEvidenceStatus(new() { Purpose = ProjectModerationPurpose.ProjectEvidence, Status = stored }));
-        Assert.Throws<InvalidOperationException>(() => EvidenceModerationMapping.ToEvidenceStatus(new() { Status = stored }));
-    }
 }

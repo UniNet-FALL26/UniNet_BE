@@ -10,8 +10,10 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class ExternalProjectDraftService(UniNetDbContext db, IConfiguration configuration)
+public sealed class ExternalProjectDraftService(UniNetDbContext db)
 {
+    public ExternalProjectDraftService(UniNetDbContext db, IConfiguration configuration) : this(db) { }
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private async Task<UserProfile> Actor(Guid accountId, CancellationToken ct) =>
@@ -78,7 +80,7 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db, IConfigurati
     public async Task<ConfirmExternalProjectDraftResponse> ConfirmAsync(Guid id, Guid accountId, ConfirmExternalProjectDraftRequest request, CancellationToken ct)
     {
         try { return await ConfirmCore(id, accountId, request, ct); }
-        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        catch (Exception ex) when (DatabaseWriteConflicts.IsWriteConflict(ex))
         {
             db.ChangeTracker.Clear();
             var draft = await Owned(id, accountId, ct);
@@ -117,17 +119,12 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db, IConfigurati
         draft.Status = ExternalProjectDraftStatus.Confirmed; draft.ConfirmedProject = project;
         draft.Version++; draft.UpdatedAt = now; draft.LeaseToken = null; draft.LeaseExpiresAt = null;
         await db.SaveChangesAsync(ct);
-        var moderation = await new EvidenceModerationSource(db, configuration).RefreshAsync(project.Id, now, ct, createInitial: true);
         await transaction.CommitAsync(ct);
-        return new(draft.Id, project.Id, moderation!.Id, draft.Version);
+        return new(draft.Id, project.Id, draft.Version);
     }
 
-    private async Task<ConfirmExternalProjectDraftResponse> Confirmed(ExternalProjectDraft draft, CancellationToken ct)
-    {
-        var reviewId = await db.ProjectModerations.Where(m => m.ProjectId == draft.ConfirmedProjectId &&
-            m.Purpose == ProjectModerationPurpose.ProjectEvidence).OrderBy(m => m.Version).Select(m => m.Id).FirstAsync(ct);
-        return new(draft.Id, draft.ConfirmedProjectId!.Value, reviewId, draft.Version);
-    }
+    private static Task<ConfirmExternalProjectDraftResponse> Confirmed(ExternalProjectDraft draft, CancellationToken ct) =>
+        Task.FromResult(new ConfirmExternalProjectDraftResponse(draft.Id, draft.ConfirmedProjectId!.Value, draft.Version));
 
     private async Task ValidateReferences(ExternalProjectDraft draft, ExternalProjectDraftData data, Guid accountId, CancellationToken ct)
     {

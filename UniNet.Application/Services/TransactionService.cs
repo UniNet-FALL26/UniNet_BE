@@ -28,7 +28,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 "INVALID_VERIFICATION_STATE", "Only pending, unfinalized verifications can be paid.", 409);
             Require(verification.Project.Status == ProjectStatus.Completed, "PROJECT_NOT_COMPLETED",
                 "Only completed projects are eligible for verification payment.", 409);
-            await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+            await new VerificationEligibility(db).RequireCaseAsync(verification, ct);
             var attempts = await db.Transactions.AsNoTracking()
                 .Where(t => t.VerificationId == verificationId)
                 .OrderByDescending(t => t.CreatedAt).ThenBy(t => t.Id).ToListAsync(ct);
@@ -227,7 +227,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                     {
                         try
                         {
-                            await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+                            await new VerificationEligibility(db).RequireCaseAsync(verification, ct);
                             if (!await new ProjectVerificationService(db, configuration).HasConfirmationCapacityAsync(verification, ct))
                                 transaction.FailureReason = TransactionMapping.BookingPaymentReview;
                         }
@@ -313,7 +313,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
             await transaction.CommitAsync(ct);
             return result;
         }
-        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        catch (Exception ex) when (DatabaseWriteConflicts.IsWriteConflict(ex))
         {
             throw new TransactionException("PAYMENT_CONFLICT", "Payment data changed concurrently. Reload and retry the same operation.", 409);
         }

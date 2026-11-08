@@ -135,7 +135,7 @@ public sealed class ReportService(UniNetDbContext db) : IReportService
             await transaction.CommitAsync(ct);
             return result;
         }
-        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        catch (Exception ex) when (DatabaseWriteConflicts.IsWriteConflict(ex))
         {
             throw new ReportException("REPORT_CONFLICT", "Report data changed concurrently. Reload and try again.", 409);
         }

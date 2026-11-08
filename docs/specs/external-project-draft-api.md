@@ -75,10 +75,10 @@ The original extraction/error remains available for context.
 ```
 
 The backend validates the current form, ownership, active skills and explicit sharing permission.
-One Serializable transaction creates the project, its skills/evidence, confirms the draft and creates
-the initial Pending level-1 moderation case. Failure rolls back the whole transaction.
+One Serializable transaction creates the project and its skills/document references and confirms
+the draft. No Level 1 review is created or required. Failure rolls back the whole transaction.
 
-Response: `draftId`, `projectId`, `evidenceModerationId`, `version`, `origin`, `status`.
+Response: `draftId`, `projectId`, `version`, `origin`, `status`.
 Confirmation replay returns the same IDs even with the original version. Concurrent confirmation uses
 the draft concurrency token and PostgreSQL conflict handling; a losing attempt returns the confirmed
 project if available, otherwise 409. No internal completion workflow, tasks, contribution cycle or
@@ -113,16 +113,12 @@ minutes, up to three attempts; permanent errors stay Failed. Expired leases are 
 An interrupted third attempt becomes Failed with `EXTRACTION_RETRY_EXHAUSTED`. Expiry invalidates outstanding work.
 PATCH remains disabled during Processing, so extraction cannot overwrite an in-progress user edit.
 
-## Direct project evidence and level 1
+## Direct project documents
 
 `ProjectEvidenceDocuments` references the selected `UploadedFiles` with a unique project/file pair.
-Level-1 snapshots now support `projectEvidence` containing submitted project text and the document metadata.
-No fake tasks/reports are inserted. Checks apply the existing text policy and URL reputation checks;
-file content remains explicitly NotChecked, preserving the existing scope.
-
-Direct results have null task/report IDs and, where applicable, `projectEvidenceDocumentId`.
-Changes to direct source metadata/text produce a different source hash and invalidate an earlier decision.
-The new snapshot property is omitted for internal projects, preserving legacy internal snapshot hashes.
+These documents remain available as submitted project information for human assessment.
+Confirmation does not create tasks, reports, evidence moderation snapshots, AI content verdicts or
+URL reputation checks. Later skill or document metadata changes do not queue a Level 1 review.
 
 Rollback of the schema is blocked while external projects exist to avoid converting inapplicable null
 recruitment fields into misleading internal-project values.

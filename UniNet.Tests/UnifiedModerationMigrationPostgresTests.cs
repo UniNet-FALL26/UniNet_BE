@@ -67,7 +67,7 @@ VALUES ({id},{project},{status},{version},{new string('A',64)},{new string('B',6
         return (string)(await command.ExecuteScalarAsync())!;
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task AllStatusesSnapshotsAttemptsPinnedCasesAndNotificationsSurviveUpAndDown()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -101,17 +101,22 @@ VALUES ({Guid.NewGuid()},{seed.Project},{seed.User},{seed.Package},0,'2026-10-17
         var oldNotifications = await RowsAsync(db, "VerificationNotification");
         var oldCases = await RowsAsync(db, "ProjectVerifications");
         await db.GetService<IMigrator>().MigrateAsync(After); db.ChangeTracker.Clear();
-        var migrated = await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectEvidence).OrderBy(m => m.Version).ToListAsync();
+        using var migrated = System.Text.Json.JsonDocument.Parse(await RowsAsync(db, "ProjectModerations"));
+        var evidence = migrated.RootElement.EnumerateArray().Where(x => x.GetProperty("Purpose").GetInt32() == 1)
+            .OrderBy(x => x.GetProperty("Version").GetInt32()).ToArray();
         Assert.Equal(new[] { ProjectModerationStatus.Pending, ProjectModerationStatus.Processing, ProjectModerationStatus.Passed,
-            ProjectModerationStatus.Rejected, ProjectModerationStatus.NeedsEvidence, ProjectModerationStatus.Error }, migrated.Select(m => m.Status));
-        Assert.Equal(ids, migrated.Select(m => m.Id));
-        Assert.All(migrated, m => { Assert.Equal(2, m.AttemptCount); Assert.Equal(0, m.AttemptNumber); });
-        Assert.All(migrated.Take(5), m => Assert.NotNull(m.SupersededAt));
-        Assert.Null(migrated.Last().SupersededAt);
-        Assert.Equal(6, await db.EvidenceModerationAttempts.CountAsync());
+            ProjectModerationStatus.Rejected, ProjectModerationStatus.NeedsEvidence, ProjectModerationStatus.Error },
+            evidence.Select(x => (ProjectModerationStatus)x.GetProperty("Status").GetInt32()));
+        Assert.Equal(ids, evidence.Select(x => x.GetProperty("Id").GetGuid()));
+        Assert.All(evidence, x => Assert.Equal(2, x.GetProperty("AttemptCount").GetInt32()));
+        Assert.All(evidence.Take(5), x => Assert.NotEqual(System.Text.Json.JsonValueKind.Null, x.GetProperty("SupersededAt").ValueKind));
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, evidence.Last().GetProperty("SupersededAt").ValueKind);
+        using var attempts = System.Text.Json.JsonDocument.Parse(await RowsAsync(db, "EvidenceModerationAttempts"));
+        Assert.Equal(6, attempts.RootElement.GetArrayLength());
         // This test intentionally stops before the Notifications migration; use that historical table's schema.
         Assert.Equal(6, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*)::integer AS \"Value\" FROM \"VerificationNotification\"").SingleAsync());
-        Assert.Equal(ids[2], (await db.ProjectVerifications.Include(v => v.EvidenceModeration).SingleAsync()).EvidenceModeration!.Id);
+        using var cases = System.Text.Json.JsonDocument.Parse(await RowsAsync(db, "ProjectVerifications"));
+        Assert.Equal(ids[2], cases.RootElement[0].GetProperty("EvidenceModerationId").GetGuid());
         Assert.Equal(6, await db.ProjectModerations.CountAsync(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission));
         await db.GetService<IMigrator>().MigrateAsync(Before); db.ChangeTracker.Clear();
         Assert.Equal(oldEvidence, await RowsAsync(db, "ProjectEvidenceModerations"));
@@ -121,7 +126,7 @@ VALUES ({Guid.NewGuid()},{seed.Project},{seed.User},{seed.Package},0,'2026-10-17
         Assert.Equal(oldCases, await RowsAsync(db, "ProjectVerifications"));
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task IdCollisionStopsMigrationWithoutChangingEitherTable()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -138,7 +143,7 @@ VALUES ({id},{seed.Project},3,0,0,'original',1,0,now(),now());
         Assert.DoesNotContain("20261019072056_UnifyProjectModerationPurposes", await db.Database.GetAppliedMigrationsAsync());
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task UnknownInboundForeignKeyStopsMigrationBeforeDroppingData()
     {
         await using var store = new Store(); await store.InitializeAsync();

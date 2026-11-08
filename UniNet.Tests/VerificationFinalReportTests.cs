@@ -33,7 +33,7 @@ public sealed partial class ProjectVerificationTests
     [InlineData(ProjectVerificationStatus.Failed)]
     public async Task ReportSubmitsOnceAndFinalizesCaseWithoutAdminReview(ProjectVerificationStatus outcome)
     {
-        await using var f = await Fixture.CreateAsync(); var data = await PrepareFinalReportAsync(f);
+        await using var f = await Fixture.CreateAsync(passed: false); var data = await PrepareFinalReportAsync(f);
         var service = new ReportService(f.Db);
         var result = await service.SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment, outcome));
         f.Db.ChangeTracker.Clear();
@@ -48,6 +48,7 @@ public sealed partial class ProjectVerificationTests
         var error = await Assert.ThrowsAsync<ReportException>(() => service.SubmitAsync(data.Staff.AccountId, FinalReport(data.Assignment)));
         Assert.Equal("REPORT_EXISTS", error.Code); Assert.Single(await f.Db.VerificationReports.ToListAsync());
         Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
+        Assert.Empty(await f.Db.ProjectModerations.ToListAsync());
     }
 
     [Fact]
@@ -142,20 +143,6 @@ public sealed partial class ProjectVerificationTests
         f.Db.ChangeTracker.Clear(); stored = await f.Db.VerificationReports.SingleAsync(); f.Db.VerificationReports.Remove(stored);
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Db.SaveChangesAsync());
         Assert.DoesNotContain(f.Db.Model.GetEntityTypes(), e => e.ClrType.Name == "VerificationReportVersion");
-    }
-
-    [Fact]
-    public async Task EvidenceWorkerPersistsFailureAndRetriesWithoutNotificationTable()
-    {
-        await using var f = await Fixture.CreateAsync(passed: false); await SeedEvidenceAsync(f); await CompleteAsync(f);
-        await f.Db.Database.ExecuteSqlRawAsync("DROP TABLE Notifications");
-        var content = new ContentChecker { Error = new("Unavailable", true) }; var worker = EvidenceWorker(f, content, new());
-        var now = DateTimeOffset.UtcNow;
-        await worker.RunAsync(now, default); await worker.RunAsync(now.AddMinutes(2), default);
-        Assert.Equal(2, content.Calls);
-        var moderation = await f.Db.ProjectModerations.SingleAsync();
-        Assert.Equal(ProjectModerationStatus.Error, moderation.Status); Assert.NotNull(moderation.NextRetryAt);
-        Assert.Equal(2, await f.Db.EvidenceModerationAttempts.CountAsync());
     }
 
     [Fact]

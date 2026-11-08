@@ -31,14 +31,12 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
             (leader.Account.Role == AccountRole.Partner && package.Role == TargetRole.Company),
             "INVALID_PACKAGE_ROLE", "The package is not available for your account role.");
 
-        var moderation = await new VerificationEligibility(db, configuration).RequirePassedAsync(projectId, null, ct);
         var now = DateTimeOffset.UtcNow;
         var verification = new ProjectVerification
         {
             Id = Guid.NewGuid(), ProjectId = project.Id, Project = project,
             AssessmentRubricJson = ProjectAssessmentPolicy.CurrentSnapshot(),
             RequestByUserId = leader.Id, RequestByUser = leader, PackageId = package.Id, Package = package,
-            EvidenceModerationId = moderation.Id, EvidenceModeration = moderation,
             Status = ProjectVerificationStatus.Pending, SubmittedAt = now, CreatedAt = now, UpdatedAt = now
         };
         db.ProjectVerifications.Add(verification);
@@ -78,7 +76,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
         var verification = await GetOwnedVerificationAsync(verificationId, accountId, false, ct);
-        await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+        await new VerificationEligibility(db).RequireCaseAsync(verification, ct);
         RequireSchedulable(verification);
         from = from.ToUniversalTime();
         to = to.ToUniversalTime();
@@ -99,7 +97,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         ScheduleProjectVerificationRequest request, CancellationToken ct = default) => MutateAsync(async () =>
     {
         var verification = await GetOwnedVerificationAsync(verificationId, accountId, true, ct);
-        await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+        await new VerificationEligibility(db).RequireCaseAsync(verification, ct);
         RequireSchedulable(verification);
         var start = request.StartAt.ToUniversalTime();
         var end = request.EndAt.ToUniversalTime();
@@ -178,7 +176,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
     {
         var profile = await GetActiveProfileAsync(accountId, ct);
         IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project).ThenInclude(p => p.Creator)
-            .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts).Include(v => v.Assignments).ThenInclude(a => a.Report)
+            .Include(v => v.Assignments).ThenInclude(a => a.Report)
 
             .Include(v => v.Transactions)
                 .ThenInclude(t => t.RefundTransactions).AsSplitQuery();
@@ -243,7 +241,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         }
     }
 
-    private static bool IsWriteConflict(Exception ex) => EvidenceModerationSource.IsWriteConflict(ex);
+    private static bool IsWriteConflict(Exception ex) => DatabaseWriteConflicts.IsWriteConflict(ex);
 
     private static void Require([DoesNotReturnIf(false)] bool condition, string code, string message, int status = 400)
     {

@@ -43,7 +43,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
                 (t.Status == PaymentStatus.Pending || t.Status == PaymentStatus.Success), ct))
             throw Error("PAYMENT_NOT_RECOVERABLE", "Recovery requires one successful matching payment under booking review and no pending or completed refund.", 409);
         var settings = configuration ?? new ConfigurationBuilder().Build();
-        await new VerificationEligibility(db, settings).RequireCaseAsync(verification, ct);
+        await new VerificationEligibility(db).RequireCaseAsync(verification, ct);
         if (!await new ProjectVerificationService(db, settings).HasConfirmationCapacityAsync(verification, ct))
             throw Error("BOOKING_CAPACITY_UNAVAILABLE", "The original meeting no longer has available capacity.", 409);
         verification.BookingStatus = VerificationBookingStatus.Confirmed;
@@ -107,7 +107,6 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
     {
         var query = db.ProjectVerifications.AsNoTracking()
             .Include(v => v.Project).ThenInclude(p => p.Creator)
-            .Include(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
             .Include(v => v.Assignments).ThenInclude(a => a.Report)
             .Include(v => v.Transactions).ThenInclude(t => t.RefundTransactions)
             .AsSplitQuery();

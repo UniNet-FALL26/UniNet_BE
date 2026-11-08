@@ -14,7 +14,7 @@ public sealed partial class TransactionTests
     [InlineData(false, true)]
     public async Task AdminRecoveryChecksPaymentAndCapacity(bool refundPending, bool noCapacity)
     {
-        await using var f = await Fixture.CreateAsync();
+        await using var f = await Fixture.CreateAsync(includeLegacyEvidence: false);
         var checkout = await f.CheckoutAsync();
         f.Verification.ReservedUntil = DateTimeOffset.UtcNow.AddSeconds(-1);
         await f.Db.SaveChangesAsync();
@@ -136,11 +136,37 @@ public sealed partial class TransactionTests
     }
 
     [Fact]
-    public async Task ChangedLevel1AfterCheckoutRecordsMoneyForReviewWithoutConfirming()
+    public async Task MissingEvidenceDoesNotBlockCheckoutAndConfirmation()
     {
         await using var f = await Fixture.CreateAsync();
         var checkout = await f.CheckoutAsync();
         f.Configuration["EvidenceModeration:PolicyVersion"] = "changed";
+        f.Provider.WebhookResult = FakeProvider.Result(checkout.ProviderOrderCode!, 37000, PaymentStatus.Success);
+        await f.Service.HandlePayOSWebhookAsync(default);
+        var paid = await f.Service.GetAsync(f.Verification.Id, checkout.Id, f.Owner.Id);
+        Assert.Equal(PaymentStatus.Success, paid.Status);
+        Assert.Null(paid.DiagnosticCode);
+        Assert.Equal(VerificationBookingStatus.Confirmed, f.Verification.BookingStatus);
+        Assert.NotNull(f.Verification.BookingConfirmedAt);
+        await f.Service.HandlePayOSWebhookAsync(default);
+        Assert.Single(await f.Db.Transactions.ToListAsync());
+        Assert.Empty(await f.Db.VerificationAssignments.ToListAsync());
+        Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task IncompleteProjectStillCannotCheckoutOrConfirmPayment()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Project.Status = ProjectStatus.Active;
+        await f.Db.SaveChangesAsync();
+        await Error("PROJECT_NOT_COMPLETED", f.CheckoutAsync);
+        Assert.Equal(0, f.Provider.CreateCalls);
+        f.Project.Status = ProjectStatus.Completed;
+        await f.Db.SaveChangesAsync();
+        var checkout = await f.CheckoutAsync();
+        f.Project.Status = ProjectStatus.Active;
+        await f.Db.SaveChangesAsync();
         f.Provider.WebhookResult = FakeProvider.Result(checkout.ProviderOrderCode!, 37000, PaymentStatus.Success);
         await f.Service.HandlePayOSWebhookAsync(default);
         var paid = await f.Service.GetAsync(f.Verification.Id, checkout.Id, f.Owner.Id);

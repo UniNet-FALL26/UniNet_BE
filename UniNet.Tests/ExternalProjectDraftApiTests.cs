@@ -31,7 +31,7 @@ namespace UniNet.Tests;
 public sealed class ExternalProjectDraftApiTests
 {
     private const string Route = "api/external-project-drafts";
-    private sealed class Providers : IUploadedDocumentContentReader, IProjectInformationExtractor, IEvidenceContentReviewer, IEvidenceUrlChecker
+    private sealed class Providers : IUploadedDocumentContentReader, IProjectInformationExtractor
     {
         public string Model => "fixture-model";
         public int ExtractionCalls;
@@ -49,8 +49,6 @@ public sealed class ExternalProjectDraftApiTests
                 StartDate = Field("2024"), EndDate = Field("2024"), Skills = [new(Field("C#"))]
             });
         }
-        public Task<EvidenceContentVerdict> ReviewContentAsync(string text, EvidencePolicySnapshot policy, CancellationToken ct) => Task.FromResult(new EvidenceContentVerdict(true, "Fixture passed", "{}"));
-        public Task<EvidenceUrlVerdict> CheckAsync(string url, EvidencePolicySnapshot policy, CancellationToken ct) => Task.FromResult(new EvidenceUrlVerdict(true, "Fixture passed", "{}"));
     }
 
     public sealed class TimeModel(ModelCustomizerDependencies dependencies) : ModelCustomizer(dependencies)
@@ -102,18 +100,7 @@ public sealed class ExternalProjectDraftApiTests
             b.Services.AddSingleton<Providers>();
             b.Services.AddSingleton<IUploadedDocumentContentReader>(s => s.GetRequiredService<Providers>());
             b.Services.AddSingleton<IProjectInformationExtractor>(s => s.GetRequiredService<Providers>());
-            b.Services.AddSingleton<IEvidenceContentReviewer>(s => s.GetRequiredService<Providers>());
-            b.Services.AddSingleton<IEvidenceUrlChecker>(s => s.GetRequiredService<Providers>());
-            b.Services.AddScoped<EvidenceModerationChecks>(); b.Services.AddScoped<EvidenceModerationTasks>();
             b.Configuration["Gemini:Model"] = "fixture-model";
-            b.Configuration["EvidenceModeration:PolicyVersion"] = "fixture-v1";
-            b.Configuration["EvidenceModeration:ContentInstructions"] = "Check submitted text";
-            b.Configuration["EvidenceModeration:ForbiddenTerms:0"] = "banned-phrase";
-            b.Configuration["EvidenceModeration:TermMatchMode"] = "WholeWord";
-            b.Configuration["EvidenceModeration:TextNormalization"] = "FormC";
-            b.Configuration["EvidenceModeration:CaseSensitive"] = "false";
-            b.Configuration["SafeBrowsing:ThreatTypes:0"] = "MALWARE";
-            b.Configuration["SafeBrowsing:PlatformTypes:0"] = "ANY_PLATFORM";
             b.Services.AddControllers().AddApplicationPart(typeof(ExternalProjectDraftsController).Assembly);
             b.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
             {
@@ -168,13 +155,15 @@ public sealed class ExternalProjectDraftApiTests
     }
 
     [Fact]
-    public async Task HttpFlowCreatesExternalProjectOnceAndInitializesWorkingLevelOneReview()
+    public async Task HttpFlowCreatesExternalProjectOnceWithoutInitializingEvidenceReview()
     {
         await using var api = await Api.Start(); using var client = api.Client(api.Owner);
         var draft = await Ready(api, client);
         Assert.Equal(ExternalProjectDraftStatus.Ready, draft.Status); Assert.Contains("submitterRole", draft.MissingFields);
         draft = await Patch(client, draft, Complete(draft)); Assert.Empty(draft.MissingFields);
         var response = await client.PostAsJsonAsync($"{Route}/{draft.DraftId}/confirm", new ConfirmExternalProjectDraftRequest(draft.Version, true)); response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(json.RootElement.TryGetProperty("evidenceModerationId", out _));
         var confirmed = (await response.Content.ReadFromJsonAsync<ConfirmExternalProjectDraftResponse>())!;
         var repeated = await client.PostAsJsonAsync($"{Route}/{draft.DraftId}/confirm", new ConfirmExternalProjectDraftRequest(draft.Version, true)); repeated.EnsureSuccessStatusCode();
         Assert.Equal(confirmed, await repeated.Content.ReadFromJsonAsync<ConfirmExternalProjectDraftResponse>());
@@ -186,20 +175,10 @@ public sealed class ExternalProjectDraftApiTests
         Assert.Equal(api.Owner, project.Creator.AccountId); Assert.Null(ProjectIdentityMapping.LeaderId(project));
         Assert.Equal("Actual external leader", ProjectIdentityMapping.Leader(project)!.FullName);
         Assert.Empty(await db.ContributionCycles.ToListAsync()); Assert.Empty(await db.ProjectTasks.ToListAsync()); Assert.Empty(await db.ProjectMembers.ToListAsync());
-        var review = await db.ProjectModerations.SingleAsync();
-        var source = JsonSerializer.Deserialize<EvidenceSourceSnapshot>(review.SnapshotJson!)!;
-        Assert.Empty(source.Tasks); Assert.Equal(api.File, Assert.Single(source.ProjectEvidence!.Documents).UploadedFileId);
-        await scope.ServiceProvider.GetRequiredService<EvidenceModerationTasks>().RunAsync(DateTimeOffset.UtcNow, default);
-        db.ChangeTracker.Clear(); Assert.Equal(ProjectModerationStatus.Passed, (await db.ProjectModerations.SingleAsync()).Status);
+        Assert.Equal(api.File, Assert.Single(project.EvidenceDocuments).UploadedFileId);
+        Assert.Empty(await db.ProjectModerations.ToListAsync());
         Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsJsonAsync($"{Route}/{draft.DraftId}", new UpdateExternalProjectDraftRequest(confirmed.Version, draft.Data))).StatusCode);
         var skill = await db.Skills.SingleAsync(); skill.Name = "C sharp"; await db.SaveChangesAsync();
-        await using (var transaction = await db.Database.BeginTransactionAsync())
-        {
-            var next = await new EvidenceModerationSource(db, scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>())
-                .RefreshAsync(project.Id, DateTimeOffset.UtcNow, default);
-            Assert.NotEqual(confirmed.EvidenceModerationId, next!.Id);
-            await transaction.CommitAsync();
-        }
         var replay = await client.PostAsJsonAsync($"{Route}/{draft.DraftId}/confirm", new ConfirmExternalProjectDraftRequest(draft.Version, true));
         replay.EnsureSuccessStatusCode(); Assert.Equal(confirmed, await replay.Content.ReadFromJsonAsync<ConfirmExternalProjectDraftResponse>());
     }
@@ -247,15 +226,24 @@ public sealed class ExternalProjectDraftApiTests
     }
 
     [Fact]
-    public async Task ModerationInsertFailureRollsBackProjectAndDraftConfirmation()
+    public async Task AttachmentInsertFailureRollsBackProjectAndDraftConfirmation()
     {
         await using var api = await Api.Start(); using var client = api.Client(api.Owner);
         var draft = await Ready(api, client); draft = await Patch(client, draft, Complete(draft));
         await using (var scope = api.Scope())
-            await scope.ServiceProvider.GetRequiredService<UniNetDbContext>().Database.ExecuteSqlRawAsync("CREATE TRIGGER fail_moderation BEFORE INSERT ON ProjectModerations BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;");
+            await scope.ServiceProvider.GetRequiredService<UniNetDbContext>().Database.ExecuteSqlRawAsync("CREATE TRIGGER fail_attachment BEFORE INSERT ON ProjectEvidenceDocuments BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;");
         Assert.Equal(HttpStatusCode.InternalServerError, (await client.PostAsJsonAsync($"{Route}/{draft.DraftId}/confirm", new ConfirmExternalProjectDraftRequest(draft.Version, true))).StatusCode);
         await using var check = api.Scope(); var db = check.ServiceProvider.GetRequiredService<UniNetDbContext>();
         Assert.Empty(await db.Projects.ToListAsync()); Assert.Empty(await db.ProjectEvidenceDocuments.ToListAsync());
         var stored = await db.ExternalProjectDrafts.SingleAsync(); Assert.Equal(ExternalProjectDraftStatus.Ready, stored.Status); Assert.Null(stored.ConfirmedProjectId);
+    }
+
+    [Fact]
+    public async Task RetiredEvidenceReviewRoutesAreNotExposed()
+    {
+        await using var api = await Api.Start(); using var client = api.Client(api.Owner);
+        var route = $"api/projects/{Guid.NewGuid()}/evidence-moderation";
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(route)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync(route + "/retry", new { })).StatusCode);
     }
 }

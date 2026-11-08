@@ -39,7 +39,6 @@ public record VerificationFinalResultResponse(ProjectVerificationStatus Status, 
     Guid? FinalizedByUserId, List<VerificationReportResponse> Reports);
 public record ProjectVerificationDetailResponse(ProjectVerificationResponse Verification,
     VerificationProjectResponse Project, Guid PackageId,
-    UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration,
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt,
     List<VerificationAssignmentResponse> Assignments, List<VerificationPaymentResponse> Payments,
     VerificationFinalResultResponse? FinalResult, string? CancellationReason, DateTimeOffset? CancelledAt,
