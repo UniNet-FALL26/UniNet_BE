@@ -12,7 +12,7 @@ namespace UniNet.Tests;
 
 public sealed partial class VerificationReservationPostgresTests
 {
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task PostgreSqlBookingPaymentAssignmentAndCalendarProtectionUseDeclaredAvailability()
     {
         await using var store = new Store();
@@ -60,7 +60,7 @@ public sealed partial class VerificationReservationPostgresTests
         }
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ConcurrentHoldsCannotReserveSameVerificatorWithSpareGlobalCapacity()
     {
         await using var store = new Store();
@@ -72,7 +72,7 @@ public sealed partial class VerificationReservationPostgresTests
         Assert.NotNull(held.ReservedVerificatorUserId);
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ConcurrentAvailabilityRemovalAndHoldCannotLeaveUncoveredReservation()
     {
         await using var store = new Store();

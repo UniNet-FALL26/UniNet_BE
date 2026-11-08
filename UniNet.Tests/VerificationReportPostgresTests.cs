@@ -29,10 +29,10 @@ public sealed partial class VerificationReservationPostgresTests
         }
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public Task ConcurrentReportSubmissionsForSameAssignmentFinalizeOnlyOnce() => ConcurrentReportsAsync(false);
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public Task DifferentAssignmentsCannotFinalizeSameCaseTwice() => ConcurrentReportsAsync(true);
 
     private static async Task ConcurrentReportsAsync(bool differentAssignments)

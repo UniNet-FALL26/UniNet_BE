@@ -29,5 +29,5 @@ public sealed record ExternalProjectDraftResponse(Guid DraftId, ExternalProjectD
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset ExpiresAt, string? ErrorCode,
     Guid? ConfirmedProjectId, ExternalProjectDraftData Data, ProjectDraftExtractionResult? Extraction,
     List<string> MissingFields, List<DraftUploadedFileResponse> Files);
-public sealed record ConfirmExternalProjectDraftResponse(Guid DraftId, Guid ProjectId, Guid EvidenceModerationId,
+public sealed record ConfirmExternalProjectDraftResponse(Guid DraftId, Guid ProjectId,
     int Version, ProjectOrigin Origin = ProjectOrigin.External, ProjectStatus Status = ProjectStatus.Completed);

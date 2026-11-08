@@ -144,7 +144,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         Assert.True(process.ExitCode == 0, await error);
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task NonemptyArchiveSurvivesPgDumpRestoreAndCanStillRollback()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -176,7 +176,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         }
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ArchivesEveryRevisionAndActionWithKeysConstraintsAndRefundAuditIntact()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -239,7 +239,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         Assert.Equal(before, await RowsAsync(db, "VerificationAdminAction", store.Archive));
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task LegacyAdminFinalizerWithMatchingReviewAuditIsPreserved()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -266,7 +266,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         Assert.Contains("20261019131816_ArchiveVerificationHistory", await db.Database.GetAppliedMigrationsAsync());
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task TamperedArchiveRefusesRollbackAtomically()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -279,7 +279,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         Assert.Contains("20261019131816_ArchiveVerificationHistory", await db.Database.GetAppliedMigrationsAsync());
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ExistingArchiveSchemaCannotBeOverwritten()
     {
         await using var store = new Store(); await store.InitializeAsync();

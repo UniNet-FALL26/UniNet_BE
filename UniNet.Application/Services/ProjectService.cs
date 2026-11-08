@@ -76,13 +76,13 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                     $"Dự án {project.Title} đã hoàn thành. Bạn có thể xem kết quả và đánh giá đóng góp.",
                     "Project", project.Id, EventKey: $"project:{project.Id}:completed", SenderUserId: accountId), ct);
             await db.SaveChangesAsync(ct);
-            await new EvidenceModerationSource(db, configuration).RefreshAsync(request.ProjectId, now, ct, createInitial: true);
+
             await transaction.CommitAsync(ct);
             return new(request.ProjectId, ProjectStatus.Completed, now, now);
         }
-        catch (Exception ex) when (EvidenceModerationSource.IsWriteConflict(ex))
+        catch (Exception ex) when (DatabaseWriteConflicts.IsWriteConflict(ex))
         {
-            throw new ProjectException("EVIDENCE_MODERATION_CONFLICT", "Project evidence changed concurrently. Reload and try again.", 409);
+            throw new ProjectException("PROJECT_CONFLICT", "Project changed concurrently. Reload and try again.", 409);
         }
     }
 

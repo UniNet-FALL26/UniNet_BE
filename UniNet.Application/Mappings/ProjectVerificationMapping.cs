@@ -31,7 +31,7 @@ public static class ProjectVerificationMapping
             verification.Project.ProjectField, verification.Project.Description, verification.Project.Status,
             ProjectIdentityMapping.LeaderId(verification.Project), verification.Project.Origin, verification.Project.CreatorId,
             ProjectIdentityMapping.Leader(verification.Project), ProjectIdentityMapping.ExternalDetails(verification.Project)), verification.PackageId,
-        verification.EvidenceModeration == null ? null : EvidenceModerationMapping.ToResponse(verification.EvidenceModeration), verification.MeetingStartAt, verification.MeetingEndAt,
+        verification.MeetingStartAt, verification.MeetingEndAt,
         verification.Assignments.OrderBy(a => a.AssignedAt).ThenBy(a => a.Id)
             .Select(a => new VerificationAssignmentResponse(a.Id, a.AssignedToUserId, a.Status, a.AssignedAt,
                 a.Report == null ? null : ToReportResponse(a.Report))).ToList(),

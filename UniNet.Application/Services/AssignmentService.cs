@@ -10,8 +10,11 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.Configuration.IConfiguration configuration) : IAssignmentService
+public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
 {
+    // Preserve existing callers while assignment eligibility no longer needs L1 configuration.
+    public AssignmentService(UniNetDbContext db, Microsoft.Extensions.Configuration.IConfiguration configuration) : this(db) { }
+
     public async Task<AssignmentDetailResponse> GetDetailAsync(Guid assignmentId, Guid accountId,
         CancellationToken ct = default)
     {
@@ -23,7 +26,6 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
                 .ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
                 .ThenInclude(p => p.Members).ThenInclude(m => m.User)
-            .Include(a => a.ProjectVerification).ThenInclude(v => v.EvidenceModeration).ThenInclude(m => m!.Attempts)
             .Include(a => a.Report).AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == assignmentId &&
                 (user.Account.Role == AccountRole.Admin || a.AssignedToUserId == user.Id), ct)
@@ -189,7 +191,7 @@ public sealed class AssignmentService(UniNetDbContext db, Microsoft.Extensions.C
             verification.ScheduledStartAt < verification.ScheduledEndAt &&
             (replacement || verification.ScheduledStartAt > DateTimeOffset.UtcNow),
             "INVALID_VERIFICATION_SCHEDULE", "A valid future meeting schedule is required.", 409);
-        await new VerificationEligibility(db, configuration).RequireCaseAsync(verification, ct);
+        await new VerificationEligibility(db).RequireCaseAsync(verification, ct);
         Require(await db.Transactions.AnyAsync(v => v.VerificationId == id &&
             v.Status == PaymentStatus.Success && v.PackageId == verification.PackageId &&
             v.UserId == verification.RequestByUserId &&

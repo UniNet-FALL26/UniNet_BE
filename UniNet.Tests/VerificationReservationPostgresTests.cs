@@ -75,16 +75,6 @@ public sealed partial class VerificationReservationPostgresTests
             Project ProjectFor(Account user) => new() { Creator = user.Profile!, Title = "Completed", Description = "Done",
                 ProjectField = "IT", MemberTarget = 2, Status = ProjectStatus.Completed };
             var projects = new[] { ProjectFor(owner), ProjectFor(other) }; db.Projects.AddRange(projects); await db.SaveChangesAsync();
-            foreach (var project in projects)
-            {
-                var source = new EvidenceModerationSource(db, Config);
-                var snapshot = JsonSerializer.Serialize(await source.CaptureAsync(project.Id, default));
-                var policy = JsonSerializer.Serialize(source.CapturePolicy());
-                db.ProjectModerations.Add(new() { Purpose = ProjectModerationPurpose.ProjectEvidence, ProjectId = project.Id, Version = 1, SnapshotJson = snapshot,
-                    SourceHash = EvidenceModerationSource.Hash(snapshot), PolicyJson = policy,
-                    PolicyHash = EvidenceModerationSource.Hash(policy), Status = ProjectModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow });
-            }
-            await db.SaveChangesAsync();
             Owner = owner.Id; Other = other.Id;
             var service = new ProjectVerificationService(db, Config);
             First = (await service.CreateAsync(projects[0].Id, Owner, new(package.Id))).Verification.Id;
@@ -97,14 +87,14 @@ public sealed partial class VerificationReservationPostgresTests
         }
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ConcurrentLastSlotHoldsHaveOnlyOneWinner()
     {
         await using var store = new Store(); await store.InitializeAsync();
         await AssertOneWinnerAsync(store);
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ConcurrentHoldsCannotDoubleBookSameLeaderAcrossProjects()
     {
         await using var store = new Store(); await store.InitializeAsync(sameLeader: true);
@@ -145,7 +135,7 @@ public sealed partial class VerificationReservationPostgresTests
         public ProviderPaymentResult VerifyWebhook(JsonElement payload) => Result;
     }
 
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task ConcurrentRepeatedWebhooksConfirmExactlyOnceAndExpiryCannotRevokeBooking()
     {
         await using var store = new Store(); await store.InitializeAsync();
@@ -174,7 +164,7 @@ public sealed partial class VerificationReservationPostgresTests
         Assert.Single(await check.Transactions.Where(t => t.Status == PaymentStatus.Success).ToListAsync());
         Assert.Empty(await check.RefundTransactions.ToListAsync());
     }
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task LatePaymentRacingExpiryAndAnotherLeaderCannotStealReleasedSlot()
     {
         await using var store = new Store(); await store.InitializeAsync();
