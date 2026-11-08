@@ -24,6 +24,8 @@ builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AssessorOnboardingService>();
 builder.Services.AddScoped<AssessorContractService>();
+builder.Services.AddScoped<AssessorActivationService>();
+builder.Services.AddScoped<AssessorOnboardingEmailQueue>();
 builder.Services.AddScoped<AssessorContractTasks>();
 builder.Services.AddSingleton<AssessorContractSecrets>();
 builder.Services.AddScoped<IAssessorContractFiles, AssessorContractFiles>();
@@ -37,8 +39,9 @@ builder.Services.AddOptions<AssessorContractOptions>()
         string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment) && uri.AbsolutePath == "/" &&
         Path.IsPathFullyQualified(o.StoragePath) && File.Exists(o.TemplatePath) && File.Exists(o.FontPath) &&
         !string.IsNullOrWhiteSpace(o.TemplateVersion) && !string.IsNullOrWhiteSpace(o.SignatureStatement) &&
-        !string.IsNullOrWhiteSpace(builder.Configuration["AssessorOnboarding:KeyRingPath"])),
-        "Enabled assessor contracts require a public origin, private storage, template, Unicode font, template version, signature statement and persistent key ring.")
+        (builder.Environment.IsDevelopment() ||
+         !string.IsNullOrWhiteSpace(builder.Configuration["AssessorOnboarding:KeyRingPath"]))),
+        "Enabled assessor contracts require a public origin, private storage, template, Unicode font, template version, signature statement and a persistent key ring outside Development.")
     .Validate(o => !o.Enabled || !Path.GetFullPath(o.StoragePath).StartsWith(
         Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "wwwroot")), StringComparison.OrdinalIgnoreCase),
         "Assessor contracts must be stored outside wwwroot.")

@@ -7,9 +7,40 @@ namespace UniNet.API.Controllers;
 
 [ApiController, Authorize(Roles = "Admin"), Route("api/admin/assessor-onboardings")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public sealed class AdminAssessorOnboardingController(AssessorOnboardingService onboarding, AssessorContractService contracts) : ControllerBase
+public sealed class AdminAssessorOnboardingController(
+    AssessorOnboardingService onboarding, AssessorContractService contracts, AssessorActivationService activation,
+    IAssessorContractFiles files) : ControllerBase
 {
     private Guid Actor => Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)!.Value);
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> Review(Guid id, CancellationToken ct)
+        => Ok(await activation.Review(Actor, id, ct));
+
+    [HttpGet("{id:guid}/contract")]
+    public async Task<IActionResult> ReviewContract(Guid id, CancellationToken ct)
+    {
+        // Get the immutable PDF through the same integrity-checked private store.
+        return File(await activation.ReviewPdf(Actor, id, files, ct), "application/pdf");
+    }
+
+    [HttpPost("{id:guid}/approve")]
+    public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
+    {
+        var result = await activation.Approve(Actor, id, ct);
+        return result.Status == "ApprovalConflict" ? Conflict(result) : Ok(result);
+    }
+
+    [HttpPost("{id:guid}/reject")]
+    public async Task<IActionResult> Reject(Guid id, RejectAssessorRequest request, CancellationToken ct)
+        => Ok(await activation.Reject(Actor, id, request.Reason, ct));
+
+    [HttpPost("{id:guid}/resend-password")]
+    public async Task<IActionResult> ResendPassword(Guid id, CancellationToken ct)
+    {
+        await activation.ResendPasswordByAdmin(Actor, id, ct);
+        return Accepted();
+    }
 
     [HttpPost("{id:guid}/resend-contract")]
     public async Task<IActionResult> ResendContract(Guid id, CancellationToken ct)

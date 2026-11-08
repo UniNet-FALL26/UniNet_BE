@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Kích hoạt tài khoản UniNet</title>
+  <style>
+    body { font: 1rem system-ui, sans-serif; margin: 2rem auto; max-width: 34rem; padding: 0 1rem; }
+    label { display: block; margin: 1rem 0; }
+    input { box-sizing: border-box; width: 100%; font: inherit; padding: .5rem; }
+    button { font: inherit; padding: .5rem 1rem; }
+  </style>
+  <script src="./activate.js" defer></script>
+</head>
+<body>
+<main>
+  <h1>Kích hoạt tài khoản Assessor</h1>
+  <p id="message" role="status">Đang kiểm tra link kích hoạt…</p>
+  <form id="password" hidden>
+    <p id="identity"></p>
+    <label>Mật khẩu mới <input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="1024"></label>
+    <label>Nhập lại mật khẩu <input name="confirmPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="1024"></label>
+    <p>Mật khẩu từ 8 ký tự, có ít nhất một chữ cái và một chữ số.</p>
+    <button>Kích hoạt tài khoản</button>
+  </form>
+  <button id="resend" type="button" hidden>Gửi lại link kích hoạt qua email</button>
+</main>
+</body>
+</html>

@@ -17,6 +17,7 @@ internal static class AssessorOnboardingConfiguration
             entity.HasIndex(x => x.ProfileTokenHash).IsUnique();
             entity.HasIndex(x => x.ContractTokenHash).IsUnique();
             entity.HasIndex(x => x.ReadSessionHash).IsUnique();
+            entity.HasIndex(x => x.SetPasswordTokenHash).IsUnique();
             entity.HasIndex(x => x.EmailNormalized).IsUnique()
                 .HasDatabaseName("UX_AssessorOnboardings_OpenEmail")
                 .HasFilter("\"Status\" IN (0, 1, 2, 3, 4, 9)");

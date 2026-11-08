@@ -2,6 +2,11 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -13,6 +18,8 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
 using UniNet.API.Controllers;
 using UniNet.Application;
 using UniNet.Application.Services;
@@ -24,6 +31,63 @@ namespace UniNet.Tests;
 
 public sealed class AssessorContractTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubmittedProfileCanBeSignedApprovedAndActivatedForNormalLogin(bool automatic)
+    {
+        await using var fixture = await Fixture.Create();
+        var profileToken = AssessorContractSecrets.Token();
+        var profileHash = AssessorContractSecrets.Hash(profileToken);
+        var expires = fixture.Clock.GetUtcNow().AddDays(7);
+        await fixture.Db.AssessorOnboardings.ExecuteUpdateAsync(x =>
+            x.SetProperty(p => p.Status, AssessorOnboardingStatus.Invited)
+                .SetProperty(p => p.ProfileTokenHash, profileHash).SetProperty(p => p.ProfileTokenExpiresAt, expires)
+                .SetProperty(p => p.AutoApprove, automatic));
+        fixture.Db.ChangeTracker.Clear();
+        var profile = new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock);
+        Assert.Equal("assessor@example.test", await profile.ReadForm(profileToken, default));
+        var id = await profile.Submit(new(profileToken, "Nguyễn Văn Thử", "000000000000", "0123456789",
+            "Ngân hàng thử nghiệm", "000123456789", "NGUYEN VAN THU"), default);
+        await fixture.Tasks.GenerateNext(default);
+        var contractToken = (await fixture.LatestPayload("Contract")).Body.Split("#token=")[1];
+        await fixture.Tasks.SendNext(default);
+        await fixture.Service.RequestReadOtp(contractToken, default);
+        var readCode = await fixture.Code("ReadOtp");
+        await fixture.Tasks.SendNext(default);
+        var session = await fixture.Service.VerifyReadOtp(contractToken, readCode, default);
+        await fixture.Service.Pdf(session, default);
+        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
+        await fixture.Service.RequestSignOtp(session, default);
+        var signCode = await fixture.Code("SignOtp");
+        await fixture.Tasks.SendNext(default);
+        await fixture.Service.Sign(new(session, signCode, "Nguyễn Văn Thử", fixture.Files.Hash, true), default);
+        var activation = new AssessorActivationService(fixture.Db, new(fixture.Db, fixture.Secrets, fixture.Clock),
+            fixture.Options, fixture.Clock);
+        if (automatic)
+        {
+            fixture.Clock.Advance(TimeSpan.FromMinutes(16));
+            await activation.ApproveNext(default);
+        }
+        else
+        {
+            var admin = await fixture.Db.Accounts.SingleAsync(x => x.Role == AccountRole.Admin);
+            await activation.Approve(admin.Id, id, default);
+        }
+        var passwordToken = (await fixture.LatestPayload("SetPassword")).Body.Split("#token=")[1];
+        await fixture.Tasks.SendNext(default);
+        Assert.Equal(4, fixture.Mail.Sent.Count);
+        await activation.SetPassword(new(passwordToken, "Password123", "Password123"), default);
+        fixture.Db.ChangeTracker.Clear();
+        var auth = new AuthService(fixture.Db, new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> {
+                ["Jwt:Key"] = "e2e-assessor-signing-key-at-least-32-bytes",
+                ["Jwt:Issuer"] = "UniNet", ["Jwt:Audience"] = "UniNetMobile"
+            }).Build());
+        await auth.Login(new("assessor@example.test", "Password123"), default);
+        Assert.Equal(AssessorOnboardingStatus.Activated, (await fixture.Db.AssessorOnboardings.SingleAsync()).Status);
+    }
+
     [Fact]
     public async Task HttpContractEndpointsValidateInputsAndKeepPdfPrivateUntilEmailVerification()
     {
@@ -34,6 +98,20 @@ public sealed class AssessorContractTests
         builder.Logging.ClearProviders();
         builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(fixture.Service);
+        var activation = new AssessorActivationService(fixture.Db, new(fixture.Db, fixture.Secrets, fixture.Clock),
+            fixture.Options, fixture.Clock);
+        builder.Services.AddSingleton(activation);
+        builder.Services.AddSingleton(new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock));
+        builder.Services.AddSingleton<IAssessorContractFiles>(fixture.Files);
+        const string signingKey = "assessor-http-test-signing-key-at-least-32-bytes";
+        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
+        {
+            o.MapInboundClaims = false;
+            o.TokenValidationParameters = new TokenValidationParameters {
+                ValidateIssuer = false, ValidateAudience = false, ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey))
+            };
+        });
         builder.Services.AddControllers().AddApplicationPart(typeof(AssessorContractController).Assembly);
         builder.Services.AddAuthorization();
         builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("AssessorContracts",
@@ -47,6 +125,7 @@ public sealed class AssessorContractTests
         }));
         app.UseRouting();
         app.UseRateLimiter();
+        app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
         await app.StartAsync();
@@ -70,6 +149,29 @@ public sealed class AssessorContractTests
             accepted = true, contractSha256 = fixture.Files.Hash };
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(route + "sign", signature)).StatusCode);
         Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(route + "pdf", new { token = session })).StatusCode);
+        var row = await fixture.Db.AssessorOnboardings.AsNoTracking().SingleAsync();
+        var reviewRoute = $"/api/admin/assessor-onboardings/{row.Id}";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync(reviewRoute + "/approve", null)).StatusCode);
+        var jwt = new JwtSecurityToken(claims: [
+            new Claim(JwtRegisteredClaimNames.Sub, row.CreatedByAccountId.ToString()),
+            new Claim(ClaimTypes.Role, "Admin")
+        ], expires: DateTime.UtcNow.AddMinutes(5), signingCredentials: new(
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)), SecurityAlgorithms.HmacSha256));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(jwt));
+        var review = await client.GetAsync(reviewRoute);
+        review.EnsureSuccessStatusCode();
+        Assert.DoesNotContain("sensitiveProfileCiphertext", await review.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(reviewRoute + "/contract")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(reviewRoute + "/approve", null)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = null;
+        var passwordToken = (await fixture.LatestPayload("SetPassword")).Body.Split("#token=")[1];
+        const string passwordRoute = "/api/assessor-onboarding/password";
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(passwordRoute + "/inspect", new { token = passwordToken })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(passwordRoute,
+            new { token = passwordToken, password = "short", confirmPassword = "short" })).StatusCode);
+        var credentials = new { token = passwordToken, password = "Password123", confirmPassword = "Password123" };
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(passwordRoute, credentials)).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(passwordRoute, credentials)).StatusCode);
         await app.StopAsync();
     }
 
@@ -209,6 +311,7 @@ public sealed class AssessorContractTests
             SignatureStatement = "Tôi đồng ý với bản thử nghiệm."
         });
         public AssessorContractSecrets Secrets { get; private set; } = null!;
+        public IDataProtectionProvider Protection { get; private set; } = null!;
         public AssessorContractService Service { get; private set; } = null!;
         public AssessorContractTasks Tasks { get; private set; } = null!;
 
@@ -221,8 +324,9 @@ public sealed class AssessorContractTests
                 .ReplaceService<IModelCustomizer, UtcSqliteModelCustomizer>().Options);
             await fixture.Db.Database.EnsureCreatedAsync();
             var provider = new EphemeralDataProtectionProvider();
+            fixture.Protection = provider;
             fixture.Secrets = new(provider);
-            fixture.Service = new(fixture.Db, fixture.Secrets, fixture.Files, fixture.Options, fixture.Clock);
+            fixture.Service = new(fixture.Db, fixture.Secrets, fixture.Files, fixture.Options, fixture.Clock, new(fixture.Db, fixture.Secrets, fixture.Clock));
             fixture.Tasks = new(fixture.Db, provider, fixture.Secrets, fixture.Files, fixture.Mail, fixture.Service, fixture.Options, fixture.Clock);
             var admin = new Account { Email = "admin@example.test", Role = AccountRole.Admin };
             fixture.Db.Accounts.Add(admin);
