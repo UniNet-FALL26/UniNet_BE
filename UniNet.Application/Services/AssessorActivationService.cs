@@ -8,7 +8,9 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed record AssessorReviewResult(Guid Id, string Status, Guid? AccountId);
+public sealed record AssessorReviewResult(
+    Guid Id, string Status, Guid? AccountId, Guid? ReviewedByAccountId,
+    DateTimeOffset? ReviewedAt, string? ReviewReason);
 public sealed record RejectAssessorRequest([Required, MaxLength(2000)] string Reason);
 public sealed record SetAssessorPassword(
     [Required, StringLength(43, MinimumLength = 43)] string Token,
@@ -127,6 +129,7 @@ public sealed class AssessorActivationService(
                     .SetProperty(p => p.Revision, claimedRevision), ct);
             if (changed == 0) return await ApprovedOrChanged(id, ct);
             row.Status = AssessorOnboardingStatus.ApprovalConflict;
+            row.ReviewReason = "EMAIL_ALREADY_REGISTERED";
             return Result(row);
         }
 
@@ -173,6 +176,9 @@ public sealed class AssessorActivationService(
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         row.Status = AssessorOnboardingStatus.Rejected;
+        row.ReviewedByAccountId = actor;
+        row.ReviewedAt = now;
+        row.ReviewReason = reason;
         return Result(row);
     }
 
@@ -280,6 +286,7 @@ public sealed class AssessorActivationService(
     private async Task RecordConflict(AssessorOnboarding row, CancellationToken ct)
     {
         row.Status = AssessorOnboardingStatus.ApprovalConflict;
+        row.ReviewReason = "EMAIL_ALREADY_REGISTERED";
         await db.AssessorOnboardings.Where(x => x.Id == row.Id)
             .ExecuteUpdateAsync(x => x.SetProperty(p => p.Status, AssessorOnboardingStatus.ApprovalConflict)
                 .SetProperty(p => p.AutoApproveAt, (DateTimeOffset?)null)
@@ -306,7 +313,8 @@ public sealed class AssessorActivationService(
         if (!options.Value.Enabled) throw new AuthException("CONTRACTS_DISABLED", "Chức năng onboarding chưa được cấu hình.", 503);
     }
 
-    private static AssessorReviewResult Result(AssessorOnboarding row) => new(row.Id, row.Status.ToString(), row.AccountId);
+    private static AssessorReviewResult Result(AssessorOnboarding row) => new(
+        row.Id, row.Status.ToString(), row.AccountId, row.ReviewedByAccountId, row.ReviewedAt, row.ReviewReason);
     private static AuthException Changed() => new("ONBOARDING_CHANGED", "Hồ sơ không ở trạng thái có thể xử lý hoặc vừa được cập nhật.", 409);
     private static AuthException PasswordUnavailable() => new("ACTIVATION_UNAVAILABLE", "Link kích hoạt không hợp lệ, đã dùng hoặc hết hạn.", 410);
 }

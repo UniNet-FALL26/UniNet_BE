@@ -162,7 +162,13 @@ public sealed class AssessorContractTests
         review.EnsureSuccessStatusCode();
         Assert.DoesNotContain("sensitiveProfileCiphertext", await review.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(reviewRoute + "/contract")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(reviewRoute + "/approve", null)).StatusCode);
+        var approval = await client.PostAsync(reviewRoute + "/approve", null);
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        var approvalBody = await approval.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(row.CreatedByAccountId, approvalBody.GetProperty("reviewedByAccountId").GetGuid());
+        Assert.Equal(fixture.Clock.GetUtcNow(), approvalBody.GetProperty("reviewedAt").GetDateTimeOffset());
+        var persistedReview = await fixture.Db.AssessorOnboardings.AsNoTracking().SingleAsync();
+        Assert.Equal(row.CreatedByAccountId, persistedReview.ReviewedByAccountId);
         client.DefaultRequestHeaders.Authorization = null;
         var passwordToken = (await fixture.LatestPayload("SetPassword")).Body.Split("#token=")[1];
         const string passwordRoute = "/api/assessor-onboarding/password";
