@@ -17,6 +17,38 @@ namespace UniNet.Tests;
 
 public sealed class AssessorActivationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManualReviewReturnsPersistedReviewerAndRetryPreservesOriginalAudit(bool reject)
+    {
+        await using var fixture = await Fixture.Create();
+        var creator = new Account { Email = "creator@example.test", Role = AccountRole.Student };
+        fixture.Db.Accounts.Add(creator);
+        await fixture.Db.SaveChangesAsync();
+        // The system permits one Admin. Keep a distinct historical invitation creator.
+        await fixture.Db.AssessorOnboardings.ExecuteUpdateAsync(x => x.SetProperty(p => p.CreatedByAccountId, creator.Id));
+        var reviewer = fixture.Admin;
+        var result = reject
+            ? await fixture.Service.Reject(reviewer.Id, fixture.Row.Id, "  Invalid profile  ", default)
+            : await fixture.Service.Approve(reviewer.Id, fixture.Row.Id, default);
+        Assert.Equal(reviewer.Id, result.ReviewedByAccountId);
+        Assert.Equal(fixture.Clock.GetUtcNow(), result.ReviewedAt);
+        Assert.Equal(reject ? "Invalid profile" : null, result.ReviewReason);
+        fixture.Db.ChangeTracker.Clear();
+        var saved = await fixture.Db.AssessorOnboardings.AsNoTracking().SingleAsync();
+        Assert.Equal(result.ReviewedByAccountId, saved.ReviewedByAccountId);
+        Assert.Equal(result.ReviewedAt, saved.ReviewedAt);
+        Assert.Equal(result.ReviewReason, saved.ReviewReason);
+        var review = JsonSerializer.SerializeToElement(await fixture.Service.Review(reviewer.Id, saved.Id, default));
+        Assert.Equal(reviewer.Id, review.GetProperty("ReviewedByAccountId").GetGuid());
+        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+        var repeated = reject
+            ? await fixture.Service.Reject(fixture.Admin.Id, saved.Id, "Invalid profile", default)
+            : await fixture.Service.Approve(fixture.Admin.Id, saved.Id, default);
+        Assert.Equal(result, repeated);
+    }
+
     [Fact]
     public async Task ApprovalCreatesOnePendingAccountAndPasswordActivatesNormalLoginExactlyOnce()
     {
@@ -83,6 +115,8 @@ public sealed class AssessorActivationTests
         await fixture.Db.SaveChangesAsync();
         var conflict = await fixture.Service.Approve(fixture.Admin.Id, fixture.Row.Id, default);
         Assert.Equal("ApprovalConflict", conflict.Status);
+        Assert.Equal(fixture.Admin.Id, conflict.ReviewedByAccountId);
+        Assert.Equal("EMAIL_ALREADY_REGISTERED", conflict.ReviewReason);
         fixture.Db.ChangeTracker.Clear();
         var row = await fixture.Db.AssessorOnboardings.SingleAsync();
         Assert.Null(row.AccountId);
@@ -149,6 +183,8 @@ public sealed class AssessorActivationTests
         await using var fixture = await Fixture.Create(new ConcurrentEmailRegistration());
         var result = await fixture.Service.Approve(fixture.Admin.Id, fixture.Row.Id, default);
         Assert.Equal("ApprovalConflict", result.Status);
+        Assert.Equal(fixture.Admin.Id, result.ReviewedByAccountId);
+        Assert.Equal("EMAIL_ALREADY_REGISTERED", result.ReviewReason);
         fixture.Db.ChangeTracker.Clear();
         var row = await fixture.Db.AssessorOnboardings.SingleAsync();
         Assert.Equal(AssessorOnboardingStatus.ApprovalConflict, row.Status);

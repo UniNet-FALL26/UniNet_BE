@@ -75,6 +75,8 @@ Chạy kiểm thử bằng dotnet test UniNet.Tests --filter FullyQualifiedName~
 
 ## Duyệt hồ sơ và kích hoạt tài khoản
 
+Phản hồi `approve` (kể cả HTTP 409 ApprovalConflict) và `reject` trả thêm `reviewedByAccountId`, `reviewedAt`, `reviewReason`, khớp dữ liệu GET chi tiết. ID admin lấy từ JWT người thực hiện, có thể khác người tạo lời mời. Gọi lại thao tác đã hoàn tất giữ nguyên thông tin review ban đầu. Duyệt tự động giữ `reviewedByAccountId` là null.
+
 Admin sử dụng JWT của tài khoản Admin đang Active. API xem hồ sơ trả về thông tin xét duyệt và bằng chứng ký. API PDF kiểm tra quyền Admin và tính toàn vẹn của file trước khi trả về.
 
 | Method | Đường dẫn | Input và kết quả |
