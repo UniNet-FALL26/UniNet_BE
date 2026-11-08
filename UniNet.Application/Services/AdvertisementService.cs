@@ -268,7 +268,7 @@ public sealed class AdvertisementService(
 
         await db.SaveChangesAsync(ct);
 
-        return TransactionMapping.ToResponse(transaction, campaignId);
+        return TransactionMapping.ToResponse(transaction, campaignId, result.CheckoutUrl);
     }
 
     // Xử lý Webhook khi thanh toán thành công (BƯỚC CHẠY AI REVIEW)
