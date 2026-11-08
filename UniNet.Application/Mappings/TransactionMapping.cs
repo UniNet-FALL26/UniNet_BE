@@ -9,7 +9,7 @@ public static class TransactionMapping
     public const string BookingPaymentReview = "BOOKING_PAYMENT_REVIEW_REQUIRED";
     public const string DuplicatePaymentReview = "DUPLICATE_PAYMENT_REVIEW_REQUIRED";
 
-    public static TransactionResponse ToResponse(Transaction transaction, Guid verificationId, string? checkoutUrl = null) => new(
+    public static TransactionResponse ToResponse(Transaction transaction, Guid verificationId, string checkoutUrl = null) => new(
         transaction.Id, verificationId, transaction.PackageId, transaction.Amount, "VND",
         transaction.Status, transaction.PaymentMethod, transaction.ProviderOrderCode,
         transaction.ProviderPaymentLinkId, checkoutUrl, transaction.PaidAt,
