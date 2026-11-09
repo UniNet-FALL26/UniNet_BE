@@ -69,6 +69,7 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
         Editable(draft, request.Version);
         if (request.Data == null) throw new ProjectException("INVALID_DRAFT_DATA", "Provide the editable data object.");
         var data = ExternalProjectDraftValidation.Validate(request.Data);
+        await SpecializationService.ValidateProjectAsync(db, data.SpecializationId, ct);
         await ValidateReferences(draft, data, accountId, ct);
         draft.EditedDataJson = JsonSerializer.Serialize(data, Json);
         draft.Status = ExternalProjectDraftStatus.Ready;
@@ -101,10 +102,12 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
         if (missing.Count > 0) throw new ProjectException("DRAFT_INCOMPLETE", "Missing fields: " + string.Join(", ", missing));
         await ValidateReferences(draft, data, accountId, ct);
         var now = DateTimeOffset.UtcNow;
+        var specialization = await SpecializationService.ValidateProjectAsync(db, data.SpecializationId, ct, required: true);
         var project = new Project
         {
             CreatorId = draft.OwnerUserId, Origin = ProjectOrigin.External,
             Title = data.Title!, Description = data.Description!, ProjectField = data.ProjectField!,
+            SpecializationId = specialization!.Id, Specialization = specialization,
             ImplementationStartDate = data.StartDate, ImplementationEndDate = data.EndDate,
             SubmitterRole = data.SubmitterRole, SubmitterContribution = data.SubmitterContribution,
             SubmitterIsLeader = data.SubmitterIsLeader!.Value, ExternalLeaderName = data.SubmitterIsLeader.Value ? null : data.LeaderName,

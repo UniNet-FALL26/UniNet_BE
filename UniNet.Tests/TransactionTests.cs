@@ -65,10 +65,22 @@ public sealed partial class TransactionTests
         Assert.Equal(0, f.Provider.CreateCalls);
     }
 
-    [Fact]
-    public async Task OwnershipAndAssociationAreEnforcedForEveryUserOperation()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Developer")]
+    [InlineData("Leader")]
+    public async Task OwnershipAndAssociationAreEnforcedForEveryUserOperation(string? memberRole)
     {
         await using var f = await Fixture.CreateAsync();
+        if (memberRole != null)
+        {
+            f.Db.ProjectMembers.Add(new ProjectMember
+            {
+                ProjectId = f.Project.Id, UserId = f.Other.Profile!.Id,
+                Role = memberRole, Status = ProjectMemberStatus.Active
+            });
+            await f.Db.SaveChangesAsync();
+        }
         await Error("FORBIDDEN", () => f.Service.CreateAsync(f.Verification.Id, f.Other.Id));
         var result = await f.CheckoutAsync();
         await Error("FORBIDDEN", () => f.Service.GetHistoryAsync(f.Verification.Id, f.Other.Id));

@@ -53,10 +53,12 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         ProjectVerificationStatus? status = null, int page = 1, int pageSize = 10, CancellationToken ct = default)
     {
         var leader = await GetActiveProfileAsync(accountId, ct);
-        if (projectId.HasValue) await GetOwnedProjectAsync(projectId.Value, leader.Id, ct);
+        if (projectId.HasValue) await RequireReadableProjectAsync(projectId.Value, leader.Id, ct);
         Require(!status.HasValue || Enum.IsDefined(status.Value), "INVALID_VERIFICATION_STATUS", "Invalid verification status.");
         var query = db.ProjectVerifications.AsNoTracking().Include(v => v.Project)
-            .Where(v => v.Project.CreatorId == leader.Id);
+            .Where(v => v.Project.CreatorId == leader.Id || db.ProjectMembers.Any(m =>
+                m.ProjectId == v.ProjectId && m.UserId == leader.Id &&
+                m.Status == ProjectMemberStatus.Active && m.LeftAt == null));
         if (projectId.HasValue) query = query.Where(v => v.ProjectId == projectId.Value);
         if (status.HasValue) query = query.Where(v => v.Status == status.Value);
         page = Math.Max(1, page);
@@ -70,7 +72,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
 
     public async Task<ProjectVerificationDetailResponse> GetDetailAsync(Guid verificationId, Guid accountId,
         CancellationToken ct = default) => ProjectVerificationMapping.ToDetailResponse(
-            await GetOwnedVerificationAsync(verificationId, accountId, false, ct));
+            await GetOwnedVerificationAsync(verificationId, accountId, false, ct, allowMembers: true));
 
     public async Task<VerificationMeetingSlotsResponse> GetAvailableMeetingSlotsAsync(Guid verificationId, Guid accountId,
         DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
@@ -149,7 +151,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
     public async Task<VerificationFinalResultResponse> GetFinalResultAsync(Guid verificationId, Guid accountId,
         CancellationToken ct = default)
     {
-        var verification = await GetOwnedVerificationAsync(verificationId, accountId, false, ct);
+        var verification = await GetOwnedVerificationAsync(verificationId, accountId, false, ct, allowMembers: true);
         return ProjectVerificationMapping.ToFinalResponse(verification)
             ?? throw new ProjectVerificationException("VERIFICATION_RESULT_NOT_AVAILABLE", "No report or final result is available yet.", 404);
     }
@@ -163,6 +165,17 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         return profile;
     }
 
+    private Task<bool> IsActiveMemberAsync(Guid projectId, Guid profileId, CancellationToken ct) =>
+        db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == profileId &&
+            m.Status == ProjectMemberStatus.Active && m.LeftAt == null, ct);
+
+    private async Task RequireReadableProjectAsync(Guid projectId, Guid profileId, CancellationToken ct)
+    {
+        var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            ?? throw new ProjectVerificationException("PROJECT_NOT_FOUND", "Project not found.", 404);
+        Require(project.CreatorId == profileId || await IsActiveMemberAsync(projectId, profileId, ct),
+            "FORBIDDEN", "Only the project owner or active members can view its verifications.", 403);
+    }
     private async Task<Project> GetOwnedProjectAsync(Guid projectId, Guid profileId, CancellationToken ct)
     {
         var project = await db.Projects.Include(p => p.Creator).FirstOrDefaultAsync(p => p.Id == projectId, ct)
@@ -172,7 +185,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
     }
 
     private async Task<ProjectVerification> GetOwnedVerificationAsync(Guid verificationId, Guid accountId,
-        bool tracked, CancellationToken ct)
+        bool tracked, CancellationToken ct, bool allowMembers = false)
     {
         var profile = await GetActiveProfileAsync(accountId, ct);
         IQueryable<ProjectVerification> query = db.ProjectVerifications.Include(v => v.Project).ThenInclude(p => p.Creator)
@@ -183,7 +196,9 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         if (!tracked) query = query.AsNoTracking();
         var verification = await query.FirstOrDefaultAsync(v => v.Id == verificationId, ct)
             ?? throw new ProjectVerificationException("VERIFICATION_NOT_FOUND", "Verification request not found.", 404);
-        Require(verification.Project.CreatorId == profile.Id, "FORBIDDEN", "Only the project record owner can access this verification.", 403);
+        Require(verification.Project.CreatorId == profile.Id || (allowMembers &&
+            await IsActiveMemberAsync(verification.ProjectId, profile.Id, ct)),
+            "FORBIDDEN", "You do not have access to this verification.", 403);
         return verification;
     }
 

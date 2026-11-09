@@ -11,6 +11,7 @@ public sealed record ExternalProjectDraftData
     public string? Title { get; init; }
     public string? Description { get; init; }
     public string? ProjectField { get; init; }
+    public Guid? SpecializationId { get; init; }
     public string? StartDate { get; init; }
     public string? EndDate { get; init; }
     public string? RepositoryUrl { get; init; }

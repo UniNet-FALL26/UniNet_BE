@@ -17,6 +17,55 @@ namespace UniNet.Tests;
 
 public sealed class AssessorActivationTests
 {
+    [Fact]
+    public async Task AdminOnboardingListPaginatesFiltersAndOmitsSecrets()
+    {
+        await using var f = await Fixture.Create();
+        var service = new AssessorOnboardingService(f.Db, new EphemeralDataProtectionProvider(), f.Clock);
+        var now = f.Clock.GetUtcNow();
+        f.Db.AssessorOnboardings.AddRange(
+            new AssessorOnboarding { EmailNormalized = "alpha@example.test", FullName = "Alpha Expert",
+                Status = AssessorOnboardingStatus.Invited, CreatedByAccountId = f.Admin.Id,
+                CreatedAt = now.AddDays(1), ProfileTokenHash = "alpha-secret-hash", SensitiveProfileCiphertext = "private" },
+            new AssessorOnboarding { EmailNormalized = "beta@example.test", FullName = "Beta Expert",
+                Status = AssessorOnboardingStatus.Rejected, CreatedByAccountId = f.Admin.Id,
+                CreatedAt = now.AddDays(2), ProfileTokenHash = "beta-secret-hash" });
+        await f.Db.SaveChangesAsync();
+        var page = await service.List(f.Admin.Id, pageSize: 1);
+        Assert.Equal(3, page.TotalItems);
+        Assert.Equal(3, page.TotalPages);
+        Assert.Equal("beta@example.test", Assert.Single(page.Onboardings).EmailNormalized);
+        Assert.Equal("alpha@example.test", Assert.Single((await service.List(f.Admin.Id, page: 2, pageSize: 1)).Onboardings).EmailNormalized);
+        var match = Assert.Single((await service.List(f.Admin.Id, AssessorOnboardingStatus.Invited, " ALPHA ")).Onboardings);
+        Assert.Equal("Invited", match.Status);
+        Assert.Equal("Alpha Expert", Assert.Single((await service.List(f.Admin.Id, keyword: "ALPHA EXPERT")).Onboardings).FullName);
+        Assert.Empty((await service.List(f.Admin.Id, keyword: "no-match")).Onboardings);
+        Assert.Empty((await service.List(f.Admin.Id, page: int.MaxValue)).Onboardings);
+        var json = JsonSerializer.Serialize(match);
+        Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Ciphertext", json);
+        Assert.DoesNotContain("Token", json);
+    }
+
+    [Fact]
+    public async Task AdminOnboardingListValidatesQueriesAndActiveAdminRole()
+    {
+        await using var f = await Fixture.Create();
+        var service = new AssessorOnboardingService(f.Db, new EphemeralDataProtectionProvider(), f.Clock);
+        Assert.Equal("INVALID_PAGINATION", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, page: 0))).Code);
+        Assert.Equal("INVALID_PAGINATION", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, pageSize: 101))).Code);
+        Assert.Equal("INVALID_ONBOARDING_STATUS", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, (AssessorOnboardingStatus)100))).Code);
+        Assert.Equal("INVALID_KEYWORD", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, keyword: new string('a', 256)))).Code);
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => service.List(Guid.NewGuid()))).Status);
+        await f.Db.Accounts.Where(a => a.Id == f.Admin.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, AccountStatus.Suspended));
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id))).Status);
+        await f.Db.Accounts.Where(a => a.Id == f.Admin.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, AccountStatus.Active)
+                .SetProperty(a => a.Role, AccountRole.Assessor));
+        Assert.Equal(403, (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id))).Status);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

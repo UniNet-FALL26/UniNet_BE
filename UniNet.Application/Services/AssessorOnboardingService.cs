@@ -12,6 +12,13 @@ namespace UniNet.Application.Services;
 
 public sealed record CreateAssessorInvitation([Required, EmailAddress, MaxLength(255)] string Email, bool AutoApprove = false);
 public sealed record AssessorInvitation(Guid Id, string Email, DateTimeOffset ExpiresAt, string ProfileLink);
+public sealed record AssessorOnboardingListItem(
+    Guid Id, string EmailNormalized, string? FullName, string Status, Guid? AccountId,
+    bool AutoApprove, DateTimeOffset CreatedAt, DateTimeOffset? SubmittedAt,
+    DateTimeOffset? SignedAt, DateTimeOffset? AutoApproveAt, Guid? ReviewedByAccountId,
+    DateTimeOffset? ReviewedAt, string? ReviewReason, DateTimeOffset? ActivatedAt);
+public sealed record AssessorOnboardingsResponse(int Page, int PageSize, int TotalItems, int TotalPages,
+    IReadOnlyList<AssessorOnboardingListItem> Onboardings);
 public sealed record AssessorProfileLink([Required, StringLength(43, MinimumLength = 43)] string Token);
 public sealed record SubmitAssessorOnboardingProfile(
     [Required, StringLength(43, MinimumLength = 43)] string Token,
@@ -24,6 +31,34 @@ public sealed record SubmitAssessorOnboardingProfile(
 
 public sealed class AssessorOnboardingService(UniNetDbContext db, IDataProtectionProvider protection, TimeProvider clock)
 {
+    public async Task<AssessorOnboardingsResponse> List(Guid actor, AssessorOnboardingStatus? status = null,
+        string? keyword = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
+    {
+        await RequireAdmin(actor, ct);
+        if (page < 1 || pageSize is < 1 or > 100)
+            throw new AuthException("INVALID_PAGINATION", "Page phải từ 1; pageSize phải từ 1 đến 100.", 400);
+        if (status.HasValue && !Enum.IsDefined(status.Value))
+            throw new AuthException("INVALID_ONBOARDING_STATUS", "Trạng thái onboarding không hợp lệ.", 400);
+        if (keyword?.Length > 255)
+            throw new AuthException("INVALID_KEYWORD", "Từ khóa tối đa 255 ký tự.", 400);
+        var query = db.AssessorOnboardings.AsNoTracking();
+        if (status.HasValue) query = query.Where(x => x.Status == status.Value);
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var term = keyword.Trim().ToLowerInvariant();
+            query = query.Where(x => x.EmailNormalized.ToLower().Contains(term) ||
+                (x.FullName != null && x.FullName.ToLower().Contains(term)));
+        }
+        var total = await query.CountAsync(ct);
+        var rows = await query.OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue)).Take(pageSize)
+            .Select(x => new AssessorOnboardingListItem(x.Id, x.EmailNormalized, x.FullName,
+                x.Status.ToString(), x.AccountId, x.AutoApprove, x.CreatedAt, x.SubmittedAt,
+                x.SignedAt, x.AutoApproveAt, x.ReviewedByAccountId, x.ReviewedAt, x.ReviewReason, x.ActivatedAt))
+            .ToListAsync(ct);
+        return new(page, pageSize, total, (int)(((long)total + pageSize - 1) / pageSize), rows);
+    }
+
     public async Task<AssessorInvitation> Invite(Guid actor, CreateAssessorInvitation request, CancellationToken ct)
     {
         await RequireAdmin(actor, ct);

@@ -96,6 +96,7 @@ public sealed class ExternalProjectDraftApiTests
             b.Logging.ClearProviders(); b.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
             b.Services.AddDbContext<UniNetDbContext>(o => o.UseSqlite($"Data Source={path}").ReplaceService<IModelCustomizer, TimeModel>());
             b.Services.AddScoped<ExternalProjectDraftService>(); b.Services.AddScoped<ExternalProjectDraftTasks>();
+            b.Services.AddScoped<SpecializationService>();
             b.Services.AddScoped<ExternalProjectDraftExtractionService>(); b.Services.AddSingleton<IProjectDocumentTextReader, ProjectDocumentTextReader>();
             b.Services.AddSingleton<Providers>();
             b.Services.AddSingleton<IUploadedDocumentContentReader>(s => s.GetRequiredService<Providers>());
@@ -147,7 +148,49 @@ public sealed class ExternalProjectDraftApiTests
         return (await client.GetFromJsonAsync<ExternalProjectDraftResponse>($"{Route}/{draft.DraftId}"))!;
     }
     private static ExternalProjectDraftData Complete(ExternalProjectDraftResponse d) => d.Data with
-    { SubmitterRole = "Backend Developer", SubmitterContribution = "Implemented the API", SubmitterIsLeader = false, LeaderName = "Actual external leader" };
+    { SubmitterRole = "Backend Developer", SubmitterContribution = "Implemented the API", SubmitterIsLeader = false, LeaderName = "Actual external leader",
+      SpecializationId = Guid.Parse("a4900000-0000-0000-0000-000000000001") };
+
+    [Fact]
+    public async Task SpecializationHttpRoutesBindCatalogAssignmentAndMatchingWithAdminAuthorization()
+    {
+        await using var api = await Api.Start();
+        using var anonymous = api.Client();
+        var catalog = (await anonymous.GetFromJsonAsync<List<SpecializationResponse>>("api/specializations"))!;
+        var software = catalog.Single(s => s.Code == "SOFTWARE_ENGINEERING");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("api/admin/specializations")).StatusCode);
+        using var student = api.Client(api.Owner);
+        Assert.Equal(HttpStatusCode.Forbidden, (await student.GetAsync("api/admin/specializations")).StatusCode);
+        Guid projectId, assessorId;
+        await using (var scope = api.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+            var admin = await db.Accounts.Include(a => a.Profile).SingleAsync(a => a.Id == api.Owner);
+            admin.Role = AccountRole.Admin; admin.Status = AccountStatus.Active;
+            var assessor = await db.Accounts.Include(a => a.Profile).SingleAsync(a => a.Id == api.Other);
+            assessor.Role = AccountRole.Assessor; assessor.Status = AccountStatus.Active;
+            assessorId = assessor.Profile!.Id;
+            var project = new Project
+            {
+                CreatorId = admin.Profile!.Id, Title = "Test", ProjectField = "IT", Description = "Test",
+                MemberTarget = 3, MinimumQuantity = 2, RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(7)
+            };
+            db.Projects.Add(project); projectId = project.Id;
+            await db.SaveChangesAsync();
+        }
+        using var client = api.Client(api.Owner, "Admin");
+        var assigned = await client.PutAsJsonAsync($"api/admin/assessors/{assessorId}/specializations",
+            new SetAssessorSpecializationsRequest([software.Id]));
+        assigned.EnsureSuccessStatusCode();
+        var changed = await client.PutAsJsonAsync($"api/admin/projects/{projectId}/specialization",
+            new SetProjectSpecializationRequest(software.Id));
+        changed.EnsureSuccessStatusCode();
+        var matches = (await client.GetFromJsonAsync<MatchingAssessorsResponse>(
+            $"api/admin/projects/{projectId}/suitable-assessors?page=1&pageSize=10"))!;
+        Assert.Equal(assessorId, Assert.Single(matches.Assessors).UserId);
+        Assert.Equal(software.Id, matches.Specialization.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await student.GetAsync($"api/admin/projects/{projectId}/suitable-assessors")).StatusCode);
+    }
     private static async Task<ExternalProjectDraftResponse> Patch(HttpClient client, ExternalProjectDraftResponse d, ExternalProjectDraftData data)
     {
         var response = await client.PatchAsJsonAsync($"{Route}/{d.DraftId}", new UpdateExternalProjectDraftRequest(d.Version, data)); response.EnsureSuccessStatusCode();
@@ -170,6 +213,8 @@ public sealed class ExternalProjectDraftApiTests
         await using var scope = api.Scope(); var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
         var project = await db.Projects.Include(p => p.Creator).Include(p => p.EvidenceDocuments).SingleAsync();
         Assert.Equal(ProjectOrigin.External, project.Origin); Assert.Equal(ProjectStatus.Completed, project.Status);
+        Assert.Equal(draft.Data.SpecializationId, project.SpecializationId);
+        Assert.Equal("SOFTWARE_ENGINEERING", ProjectMapping.ToDetailResponse(project, null).Specialization!.Code);
         Assert.Equal(RecruitmentStatus.Closed, project.RecruitmentStatus); Assert.Null(project.MemberTarget); Assert.Null(project.MinimumQuantity); Assert.Null(project.RecruitmentDeadline);
         Assert.NotNull(project.SharingRightsConfirmedAt); Assert.Equal("2024", project.ImplementationStartDate);
         Assert.Equal(api.Owner, project.Creator.AccountId); Assert.Null(ProjectIdentityMapping.LeaderId(project));
@@ -199,6 +244,9 @@ public sealed class ExternalProjectDraftApiTests
     {
         await using var api = await Api.Start(); using var client = api.Client(api.Owner);
         var draft = await Ready(api, client);
+        Assert.Contains("specializationId", draft.MissingFields);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PatchAsJsonAsync($"{Route}/{draft.DraftId}",
+            new UpdateExternalProjectDraftRequest(draft.Version, Complete(draft) with { SpecializationId = Guid.NewGuid() }))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"{Route}/{draft.DraftId}/confirm", new ConfirmExternalProjectDraftRequest(draft.Version, true))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PatchAsJsonAsync($"{Route}/{draft.DraftId}", new UpdateExternalProjectDraftRequest(draft.Version, Complete(draft) with { EvidenceFileIds = [api.ForeignFile] }))).StatusCode);
         var edited = await Patch(client, draft, Complete(draft));

@@ -65,11 +65,8 @@ public sealed class MeetingService(UniNetDbContext db, IConfiguration configurat
             .Include(a => a.ReplacedBy).FirstOrDefaultAsync(a => a.Id == assignmentId, ct)
             ?? throw new MeetingException("ASSIGNMENT_NOT_FOUND", "Assignment not found.", 404);
         var assigned = user.Account.Role == AccountRole.Assessor && assignment.AssignedToUserId == user.Id;
-        var leader = !verificatorOnly && (assignment.ProjectVerification.Project.CreatorId == user.Id ||
-            await db.ProjectMembers.AnyAsync(m =>
-            m.ProjectId == assignment.ProjectVerification.ProjectId && m.UserId == user.Id &&
-            m.Status == ProjectMemberStatus.Active && m.LeftAt == null && m.Role == "Leader", ct));
-        Require(assigned || leader, "FORBIDDEN", "Only the project Leader or assigned Verificator can access this meeting.", 403);
+        var owner = !verificatorOnly && assignment.ProjectVerification.Project.CreatorId == user.Id;
+        Require(assigned || owner, "FORBIDDEN", "Only the project owner or assigned Assessor can access this meeting.", 403);
         try { VerificationMeetingLifecycle.RequireActive(assignment); }
         catch (AssignmentException ex) { throw new MeetingException(ex.Code, ex.Message, ex.Status); }
         var verification = assignment.ProjectVerification;
