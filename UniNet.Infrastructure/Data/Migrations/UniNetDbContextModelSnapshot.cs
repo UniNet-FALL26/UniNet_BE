@@ -2103,41 +2103,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectVerificationEvidence", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("EvidenceJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<Guid>("ProjectVerificationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("SubmittedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("SubmittedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SubmittedByUserId");
-
-                    b.HasIndex("ProjectVerificationId", "Version")
-                        .IsUnique();
-
-                    b.ToTable("ProjectVerificationEvidence", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_ProjectVerificationEvidence_Version", "\"Version\" > 0");
-                        });
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.RefundTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4093,25 +4058,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("RequestByUser");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectVerificationEvidence", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.ProjectVerification", "ProjectVerification")
-                        .WithMany("EvidenceSubmissions")
-                        .HasForeignKey("ProjectVerificationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.UserProfile", "SubmittedByUser")
-                        .WithMany()
-                        .HasForeignKey("SubmittedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ProjectVerification");
-
-                    b.Navigation("SubmittedByUser");
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.RefundTransaction", b =>
                 {
                     b.HasOne("UniNet.Domain.Account", null)
@@ -4767,8 +4713,6 @@ namespace UniNet.Infrastructure.Data.Migrations
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectVerification", b =>
                 {
                     b.Navigation("Assignments");
-
-                    b.Navigation("EvidenceSubmissions");
 
                     b.Navigation("Transactions");
                 });

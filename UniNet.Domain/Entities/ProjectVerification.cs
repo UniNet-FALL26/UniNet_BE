@@ -47,7 +47,6 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? AiNextRetryAt { get; set; }
         public string? AiLastError { get; set; }
         public string AiAdditionalEvidenceJson { get; set; } = "[]";
-        public List<ProjectVerificationEvidence> EvidenceSubmissions { get; set; } = [];
         public List<VerificationAssignment> Assignments { get; set; } = [];
         public List<Transaction> Transactions { get; set; } = [];
     }
