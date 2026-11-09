@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UniNet.Application.Services;
+using UniNet.Domain;
 
 namespace UniNet.API.Controllers;
 
@@ -12,6 +13,12 @@ public sealed class AdminAssessorOnboardingController(
     IAssessorContractFiles files) : ControllerBase
 {
     private Guid Actor => Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)!.Value);
+
+    [HttpGet]
+    public Task<AssessorOnboardingsResponse> List([FromQuery] AssessorOnboardingStatus? status = null,
+        [FromQuery] string? keyword = null, [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20, CancellationToken ct = default)
+        => onboarding.List(Actor, status, keyword, page, pageSize, ct);
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Review(Guid id, CancellationToken ct)

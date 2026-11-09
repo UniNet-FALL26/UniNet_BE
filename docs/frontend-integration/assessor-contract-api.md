@@ -116,3 +116,19 @@ Migration AddAssessorPasswordTokenIndex bổ sung unique index cho SetPasswordTo
 ~~~powershell
 dotnet ef database update AddAssessorPasswordTokenIndex --project UniNet.Infrastructure --startup-project UniNet.API
 ~~~
+
+## Danh sách onboarding dành cho Admin
+
+GET `/api/admin/assessor-onboardings?status=AwaitingApproval&keyword=nguyen&page=1&pageSize=20`
+
+- JWT role Admin và account Admin đang Active. Không giới hạn theo người tạo lời mời: xem được tất cả hồ sơ trong hệ thống.
+- Tất cả query đều tùy chọn. Không truyền status để lấy mọi trạng thái. status nhận tên enum hoặc số 0–9 theo AssessorOnboardingStatus; status trong response là chuỗi tên.
+- keyword tìm không phân biệt hoa thường theo emailNormalized hoặc fullName; trim khoảng trắng, tối đa 255 ký tự. Từ khóa trống không lọc; không tìm trên CCCD/thuế/ngân hàng.
+- page mặc định 1, phải >=1; pageSize mặc định 20, từ 1 đến 100. Sắp xếp createdAt giảm dần, rồi id tăng dần để phân trang ổn định.
+- Body 200: `{ page, pageSize, totalItems, totalPages, onboardings: [...] }`. Trang vượt phạm vi trả mảng rỗng; không có kết quả thì totalPages=0.
+- Mỗi item gồm id, emailNormalized, fullName, status, accountId, autoApprove, createdAt, submittedAt, signedAt, autoApproveAt, reviewedByAccountId, reviewedAt, reviewReason, activatedAt. Các trường chưa có giá trị là null.
+- Không trả entity thô, token/link mời, token hash, OTP, session, dữ liệu mã hóa, CCCD hoặc tài khoản ngân hàng. Dùng GET `/{id}` và `/{id}/contract` hiện có khi mở chi tiết.
+- Đọc trạng thái đang lưu trong database; GET không tự đổi trạng thái hồ sơ hoặc gia hạn lời mời.
+- Lỗi 400: INVALID_PAGINATION, INVALID_ONBOARDING_STATUS, INVALID_KEYWORD. Query không bind được enum/int có thể trả ValidationProblemDetails. 401 nếu thiếu JWT; 403 nếu không phải Admin Active.
+- Dashboard có thể dùng API này để làm danh sách/hàng đợi onboarding thay cho giải pháp nhập ID trước đây. Bỏ query status khi chọn “Tất cả”, đặt page=1 khi đổi bộ lọc.
+- Không cần migration database cho endpoint này.

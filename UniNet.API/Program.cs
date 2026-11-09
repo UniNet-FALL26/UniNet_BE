@@ -101,6 +101,7 @@ builder.Services.AddScoped<StudentVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
+builder.Services.AddScoped<SpecializationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();

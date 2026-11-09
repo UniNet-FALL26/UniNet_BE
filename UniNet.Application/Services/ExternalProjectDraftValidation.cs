@@ -63,6 +63,7 @@ public static class ExternalProjectDraftValidation
     public static List<string> MissingFields(ExternalProjectDraftData d)
     {
         var missing = new List<string>();
+        if (!d.SpecializationId.HasValue || d.SpecializationId == Guid.Empty) missing.Add("specializationId");
         foreach (var (name, value) in new[] { ("title", d.Title), ("description", d.Description), ("projectField", d.ProjectField),
             ("startDate", d.StartDate), ("endDate", d.EndDate), ("submitterRole", d.SubmitterRole), ("submitterContribution", d.SubmitterContribution) })
             if (string.IsNullOrWhiteSpace(value)) missing.Add(name);

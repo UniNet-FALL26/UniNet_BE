@@ -22,7 +22,7 @@ public static class AssignmentMapping
                 .Select(m => new ProjectMemberInfo(m.UserId, m.User.FullName, m.User.Nickname,
                     m.User.AvatarUrl, m.Role, m.Status, m.JoinedAt)).ToList(),
             ProjectIdentityMapping.Leader(a.ProjectVerification.Project), a.ProjectVerification.Project.Origin,
-            a.ProjectVerification.Project.CreatorId, ProjectIdentityMapping.ExternalDetails(a.ProjectVerification.Project)),
+            a.ProjectVerification.Project.CreatorId, ProjectIdentityMapping.ExternalDetails(a.ProjectVerification.Project), SpecializationMapping.ToResponse(a.ProjectVerification.Project.Specialization)),
         a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report),
         Services.ProjectAssessmentPolicy.ReadRubric(a.ProjectVerification.AssessmentRubricJson),
         new(a.AssignedToUserId, a.AssignedToUser.FullName, a.AssignedToUser.AvatarUrl, a.AssignedToUser.Nickname));

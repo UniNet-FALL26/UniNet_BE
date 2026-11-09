@@ -16,7 +16,8 @@ public record ProjectVerificationsResponse(int Page, int PageSize, int TotalItem
 public record VerificationProjectResponse(Guid Id, string Title, string ProjectField, string Description,
     ProjectStatus Status, Guid? LeaderId, ProjectOrigin Origin = ProjectOrigin.Internal, Guid? OwnerUserId = null,
     ProjectLeaderInfo? Leader = null,
-    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null)
+    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
+    SpecializationResponse? Specialization = null)
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ProjectSkillInfo>? Skills { get; init; }

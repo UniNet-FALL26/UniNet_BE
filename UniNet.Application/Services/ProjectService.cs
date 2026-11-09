@@ -145,6 +145,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             }
         }
 
+        var specialization = await SpecializationService.ValidateProjectAsync(db, request.SpecializationId, ct, required: true);
+
         // Get user profile
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
         Require(userProfile != null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
@@ -155,6 +157,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             CreatorId = userProfile.Id,
             Title = request.Title.Trim(),
             ProjectField = request.ProjectField.Trim(),
+            SpecializationId = specialization!.Id,
+            Specialization = specialization,
             Description = request.Description.Trim(),
             MemberTarget = request.MemberTarget,
             MinimumQuantity = request.MinimumQuantity,
@@ -269,6 +273,15 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Require(!await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
             "MODERATION_IN_PROGRESS", "Cannot edit project while it is under moderation.", 409);
+
+        if (request.SpecializationId.HasValue && request.SpecializationId != project.SpecializationId)
+        {
+            Require(!await db.ProjectVerifications.AnyAsync(v => v.ProjectId == projectId, ct),
+                "SPECIALIZATION_LOCKED", "Specialization cannot change after a verification request exists.", 409);
+            var specialization = await SpecializationService.ValidateProjectAsync(db, request.SpecializationId, ct, required: true);
+            project.SpecializationId = specialization!.Id;
+            project.Specialization = specialization;
+        }
 
         // Update fields
         if (!string.IsNullOrWhiteSpace(request.Title))
@@ -552,7 +565,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             members,
             project.Invitations.Select(ProjectInvitationMapping.ToResponse).ToList(),
             project.JoinRequests.Select(ProjectJoinRequestMapping.ToResponse).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project)
+            project.Origin, ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -573,7 +586,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
             project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project)
+            project.Origin, ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -602,7 +615,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            skills
+            skills, SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 }

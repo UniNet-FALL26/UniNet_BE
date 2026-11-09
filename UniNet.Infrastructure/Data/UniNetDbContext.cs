@@ -84,6 +84,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<Specialization> Specializations => Set<Specialization>();
+    public DbSet<AssessorSpecialization> AssessorSpecializations => Set<AssessorSpecialization>();
     public DbSet<ProjectRoleRequirement> ProjectRoleRequirements => Set<ProjectRoleRequirement>();
     public DbSet<ProjectSkill> ProjectSkills => Set<ProjectSkill>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
@@ -127,6 +129,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        SpecializationConfiguration.Configure(model);
         AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftConfiguration());

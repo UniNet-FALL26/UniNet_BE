@@ -521,6 +521,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("AdvertisementTransactions", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.AssessorSpecialization", b =>
+                {
+                    b.Property<Guid>("AssessorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SpecializationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("AssessorUserId", "SpecializationId");
+
+                    b.HasIndex("SpecializationId");
+
+                    b.ToTable("AssessorSpecializations", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1533,6 +1548,9 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("SharingRightsConfirmedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("SpecializationId")
+                        .HasColumnType("uuid");
+
                     b.Property<short>("Status")
                         .HasColumnType("smallint");
 
@@ -1565,6 +1583,8 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectField");
 
                     b.HasIndex("RecruitmentDeadline");
+
+                    b.HasIndex("SpecializationId");
 
                     b.HasIndex("Visibility", "Status", "RecruitmentStatus");
 
@@ -2248,6 +2268,56 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("ReportAuditLogs", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Specialization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Specializations", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("a4900000-0000-0000-0000-000000000001"),
+                            Code = "SOFTWARE_ENGINEERING",
+                            IsActive = true,
+                            Name = "Kỹ thuật phần mềm"
+                        },
+                        new
+                        {
+                            Id = new Guid("a4900000-0000-0000-0000-000000000002"),
+                            Code = "ARTIFICIAL_INTELLIGENCE",
+                            IsActive = true,
+                            Name = "Trí tuệ nhân tạo"
+                        },
+                        new
+                        {
+                            Id = new Guid("a4900000-0000-0000-0000-000000000003"),
+                            Code = "INFORMATION_SECURITY",
+                            IsActive = true,
+                            Name = "An toàn thông tin"
+                        });
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.StudentSavedJob", b =>
@@ -3415,6 +3485,25 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Transaction");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.AssessorSpecialization", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", "Assessor")
+                        .WithMany()
+                        .HasForeignKey("AssessorUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Specialization", "Specialization")
+                        .WithMany()
+                        .HasForeignKey("SpecializationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Assessor");
+
+                    b.Navigation("Specialization");
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Community.CommunityPost", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "AuthorUser")
@@ -3846,7 +3935,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("UniNet.Domain.Entities.Specialization", "Specialization")
+                        .WithMany()
+                        .HasForeignKey("SpecializationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Creator");
+
+                    b.Navigation("Specialization");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceDocument", b =>
