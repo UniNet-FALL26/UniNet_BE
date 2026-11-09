@@ -94,7 +94,8 @@ public sealed partial class ProjectVerificationTests
         Assert.Equal(f.Package.Id, stored.PackageId);
         Assert.Equal(ProjectStatus.Completed, (await f.Db.Projects.SingleAsync()).Status);
         Assert.Empty(await f.Db.Transactions.ToListAsync());
-        Assert.Empty(await f.Db.ProjectVerificationEvidence.ToListAsync());
+        Assert.DoesNotContain(f.Db.Model.GetEntityTypes(), e => e.GetTableName() == "ProjectVerificationEvidence");
+        Assert.Null(f.Db.Model.FindEntityType(typeof(ProjectVerification))!.FindNavigation("EvidenceSubmissions"));
     }
 
     [Fact]
