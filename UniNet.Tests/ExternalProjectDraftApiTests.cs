@@ -191,6 +191,37 @@ public sealed class ExternalProjectDraftApiTests
         Assert.Equal(software.Id, matches.Specialization.Id);
         Assert.Equal(HttpStatusCode.Forbidden, (await student.GetAsync($"api/admin/projects/{projectId}/suitable-assessors")).StatusCode);
     }
+    [Fact]
+    public async Task ProjectSpecializationAllowsCreatorButRejectsAnotherStudent()
+    {
+        await using var api = await Api.Start();
+        using var creator = api.Client(api.Owner);
+        using var other = api.Client(api.Other);
+        var catalog = (await creator.GetFromJsonAsync<List<SpecializationResponse>>("api/specializations"))!;
+        var specialization = catalog.Single(s => s.Code == "SOFTWARE_ENGINEERING");
+        Guid projectId;
+        await using (var scope = api.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+            var creatorProfile = await db.UserProfiles.SingleAsync(p => p.AccountId == api.Owner);
+            var project = new Project
+            {
+                CreatorId = creatorProfile.Id, Title = "Test", ProjectField = "IT", Description = "Test",
+                MemberTarget = 3, MinimumQuantity = 2, RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(7)
+            };
+            db.Projects.Add(project);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+        }
+
+        var route = $"api/admin/projects/{projectId}/specialization";
+        var request = new SetProjectSpecializationRequest(specialization.Id);
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.PutAsJsonAsync(route, request)).StatusCode);
+        var updated = await creator.PutAsJsonAsync(route, request);
+        updated.EnsureSuccessStatusCode();
+        Assert.Equal(specialization.Id, (await updated.Content.ReadFromJsonAsync<SpecializationResponse>())!.Id);
+    }
+
     private static async Task<ExternalProjectDraftResponse> Patch(HttpClient client, ExternalProjectDraftResponse d, ExternalProjectDraftData data)
     {
         var response = await client.PatchAsJsonAsync($"{Route}/{d.DraftId}", new UpdateExternalProjectDraftRequest(d.Version, data)); response.EnsureSuccessStatusCode();

@@ -37,7 +37,7 @@ public sealed class SpecializationsController(SpecializationService service) : C
     public Task<IReadOnlyList<SpecializationResponse>> SetAssessor(Guid userId, SetAssessorSpecializationsRequest request, CancellationToken ct)
         => service.SetAssessorAsync(Actor, userId, request, ct);
 
-    [Authorize(Roles = "Admin"), HttpPut("api/admin/projects/{projectId:guid}/specialization")]
+    [Authorize, HttpPut("api/admin/projects/{projectId:guid}/specialization")]
     public Task<SpecializationResponse> SetProject(Guid projectId, SetProjectSpecializationRequest request, CancellationToken ct)
         => service.SetProjectAsync(Actor, projectId, request, ct);
 

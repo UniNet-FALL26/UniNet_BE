@@ -112,12 +112,22 @@ public sealed class SpecializationService(UniNetDbContext db)
     public async Task<SpecializationResponse> SetProjectAsync(Guid accountId, Guid projectId,
         SetProjectSpecializationRequest request, CancellationToken ct)
     {
-        await RequireAdminAsync(accountId, NotificationPermissionPolicy.EvidenceReview, ct);
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            var actor = await db.Accounts.AsNoTracking()
+                .Where(a => a.Id == accountId && a.Status == AccountStatus.Active)
+                .Select(a => new { a.Role, ProfileId = (Guid?)a.Profile!.Id })
+                .SingleOrDefaultAsync(ct)
+                ?? throw new ProjectException("FORBIDDEN", "An active account is required.", 403);
+            if (actor.Role == AccountRole.Admin)
+                await NotificationPermissionPolicy.RequireAsync(db, accountId, NotificationPermissionPolicy.EvidenceReview, ct);
+
             var project = await db.Projects.SingleOrDefaultAsync(p => p.Id == projectId, ct)
                 ?? throw new ProjectException("PROJECT_NOT_FOUND", "Project not found.", 404);
+            if (actor.Role != AccountRole.Admin && project.CreatorId != actor.ProfileId)
+                throw new ProjectException("FORBIDDEN", "Only the project creator or an authorized admin can update its specialization.", 403);
+
             // Allow backfilling unclassified legacy projects, but do not reclassify existing cases.
             if (project.SpecializationId.HasValue && project.SpecializationId != request.SpecializationId &&
                 await db.ProjectVerifications.AnyAsync(v => v.ProjectId == projectId, ct))
