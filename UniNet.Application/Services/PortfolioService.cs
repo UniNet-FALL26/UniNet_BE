@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Domain;
+using UniNet.Domain.Entities;
+using UniNet.Domain.Enums;
 using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
@@ -47,7 +49,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         if (!string.IsNullOrWhiteSpace(p.ContactEmail) && (!MailAddress.TryCreate(p.ContactEmail, out var email) || email.Address != p.ContactEmail || p.ContactEmail.Length > 255))
             throw new AuthException("INVALID_PORTFOLIO_EMAIL", "Email liên hệ không hợp lệ.");
         Items(p.Skills, 100, x => { if (x.SkillId is null) Text(x.Name, 100, true); if (x.Level is < 0 or > 3 || x.YearsOfExperience is < 0 or > 80 || (x.YearsOfExperience.HasValue && !double.IsFinite(x.YearsOfExperience.Value))) throw new AuthException("INVALID_SKILL", "Mức độ kỹ năng không hợp lệ."); });
-        Items(p.Projects, 50, x => { Text(x.Title, 255, true); Text(x.Description); Text(x.Type, 100); Url(x.CoverUrl); Url(x.Url); Url(x.GithubUrl); Items(x.Technologies, 20, t => Text(t, 100, true)); });
+        Items(p.Projects, 50, x => { Text(x.PersonalContribution); if (x.ProjectId.HasValue) return; Text(x.Title, 255, true); Text(x.Description); Text(x.Type, 100); Url(x.CoverUrl); Url(x.Url); Url(x.GithubUrl); Items(x.Technologies, 20, t => Text(t, 100, true)); });
         void Milestone(PortfolioMilestone x) { Text(x.Title, 255, true); Text(x.Organization, 255); Text(x.Period, 100); Text(x.Description); Text(x.StartDate, 20); Text(x.EndDate, 20); Text(x.Gpa, 20); }
         Items(p.Experience, 50, Milestone); Items(p.Education, 50, Milestone);
         Items(p.Certificates, 50, x => { Text(x.Title, 255, true); Text(x.Issuer, 255, true); Text(x.Year, 100); Url(x.LogoUrl); Url(x.Url); });
@@ -56,7 +58,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         Items(p.Languages ?? [], 20, x => { Text(x.Name, 100, true); Text(x.Level, 100, true); });
         Items(p.SocialLinks, 20, x => { Text(x.Label, 100, true); Url(x.Url, true); });
     }
-    private static PortfolioResponse Map(UserProfile p, bool owner, PortfolioSkillCatalog[] catalog)
+    private async Task<PortfolioResponse> Map(UserProfile p, bool owner, PortfolioSkillCatalog[] catalog, CancellationToken ct)
     {
         var c = p.CareerProfile;
         var b = Decode<Basic>(c?.BasicInfoJson);
@@ -65,7 +67,7 @@ public sealed class PortfolioService(UniNetDbContext db)
             Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = NormalizeAppearance(Decode<ProfileAppearance>(c?.AppearanceJson) ?? new()), YearsOfExperience = b?.YearsOfExperience, Gpa = b?.Gpa,
             Activities = Decode<PortfolioActivity[]>(c?.ActivitiesJson) ?? [], Languages = Decode<PortfolioLanguage[]>(c?.LanguagesJson) ?? [], Location = b?.Location, Availability = b?.Availability,
             ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl, IsPublic = c?.IsPublic ?? false,
-            Skills = ResolveSkills(c?.SkillsJson, catalog), Projects = Decode<PortfolioProject[]>(c?.ProjectsJson) ?? [],
+            Skills = ResolveSkills(c?.SkillsJson, catalog), Projects = await ResolveProjects(p, ct),
             Experience = Decode<PortfolioMilestone[]>(c?.ExperienceJson) ?? [], Education = Decode<PortfolioMilestone[]>(c?.EducationJson) ?? [],
             Certificates = Decode<PortfolioCertificate[]>(c?.CertificatesJson) ?? [], Articles = b?.Articles ?? [],
             SocialLinks = Decode<PortfolioSocial[]>(c?.SocialLinksJson) ?? []
@@ -73,10 +75,10 @@ public sealed class PortfolioService(UniNetDbContext db)
     }
     private async Task<UserProfile> Own(Guid accountId, CancellationToken ct) =>
         await db.UserProfiles.Include(x => x.Account).Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.AccountId == accountId && x.Account.Status == AccountStatus.Active, ct) ?? throw Missing();
-    public async Task<PortfolioResponse> Me(Guid accountId, CancellationToken ct) => Map(await Own(accountId, ct), true, await Catalog(ct));
+    public async Task<PortfolioResponse> Me(Guid accountId, CancellationToken ct) => await Map(await Own(accountId, ct), true, await Catalog(ct), ct);
     public async Task<PortfolioResponse> ApplicationSnapshot(Guid accountId, CancellationToken ct)
     {
-        var response = Map(await Own(accountId, ct), true, await Catalog(ct));
+        var response = await Map(await Own(accountId, ct), true, await Catalog(ct), ct);
         var content = response.Portfolio;
         var hidden = (content.Appearance.Profile.HiddenSections ?? []).ToHashSet(StringComparer.Ordinal);
         var identity = response.Profile;
@@ -107,7 +109,7 @@ public sealed class PortfolioService(UniNetDbContext db)
     public async Task<PortfolioResponse> Read(Guid profileId, Guid? viewerId, CancellationToken ct)
     {
         var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Role == AccountRole.Student && x.Account.Status == AccountStatus.Active && (x.AccountId == viewerId || (x.CareerProfile != null && x.CareerProfile.IsPublic)), ct) ?? throw Missing();
-        var response = Map(p, p.AccountId == viewerId, await Catalog(ct));
+        var response = await Map(p, p.AccountId == viewerId, await Catalog(ct), ct);
         return response.IsOwner ? response : ForVisitor(response);
     }
     public Task<PortfolioResponse> SaveEditor(Guid accountId, PortfolioEditorRequest request, CancellationToken ct)
@@ -124,7 +126,8 @@ public sealed class PortfolioService(UniNetDbContext db)
         var catalog = await Catalog(ct);
         var skills = ReferenceSkills(request.Skills, catalog);
         var p = await Own(accountId, ct);
-        foreach (var url in request.Projects.Select(x => x.CoverUrl).Concat(request.Articles.Select(x => x.CoverUrl)).Concat(request.Certificates.Select(x => x.LogoUrl)))
+        await ValidateProjectReferences(p, request.Projects, ct);
+        foreach (var url in request.Projects.Where(x => !x.ProjectId.HasValue).Select(x => x.CoverUrl).Concat(request.Articles.Select(x => x.CoverUrl)).Concat(request.Certificates.Select(x => x.LogoUrl)))
             await PortraitAssetPolicy.RetainReference(db, accountId, url, null, ct);
         if (presentation is not null)
         {
@@ -149,14 +152,68 @@ public sealed class PortfolioService(UniNetDbContext db)
         var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles, request.YearsOfExperience, request.Gpa), Json)!.AsObject();
         foreach (var property in changes) basic[property.Key] = property.Value?.DeepClone();
         c.BasicInfoJson = basic.ToJsonString(Json);
-        c.SkillsJson = JsonSerializer.Serialize(skills, Json); c.ProjectsJson = JsonSerializer.Serialize(request.Projects, Json);
+        c.SkillsJson = JsonSerializer.Serialize(skills, Json); c.ProjectsJson = JsonSerializer.Serialize(request.Projects.Select(x => x.ProjectId.HasValue ? new PortfolioProject { ProjectId = x.ProjectId, PersonalContribution = x.PersonalContribution, Featured = x.Featured } : x with { Verification = null, Role = null, CompletedAt = null }), Json);
         c.ExperienceJson = JsonSerializer.Serialize(request.Experience, Json); c.EducationJson = JsonSerializer.Serialize(request.Education, Json);
         c.CertificatesJson = JsonSerializer.Serialize(request.Certificates, Json);
         if (request.Activities is not null) c.ActivitiesJson = JsonSerializer.Serialize(request.Activities, Json);
         if (request.Languages is not null) c.LanguagesJson = JsonSerializer.Serialize(request.Languages, Json);
         c.SocialLinksJson = JsonSerializer.Serialize(request.SocialLinks, Json); c.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return Map(p, true, catalog);
+        return await Map(p, true, catalog, ct);
+    }
+
+    private IQueryable<Project> EligibleProjects(Guid userId) => db.Projects.AsNoTracking()
+        .Where(x => x.Status == ProjectStatus.Completed &&
+            (x.CreatorId == userId || x.Members.Any(m => m.UserId == userId && m.Status == ProjectMemberStatus.Active)));
+
+    private async Task ValidateProjectReferences(UserProfile profile, PortfolioProject[] items, CancellationToken ct)
+    {
+        var ids = items.Where(x => x.ProjectId.HasValue).Select(x => x.ProjectId!.Value).ToArray();
+        if (ids.Length == 0) return;
+        RequireStudent(profile);
+        if (ids.Contains(Guid.Empty) || ids.Distinct().Count() != ids.Length)
+            throw new AuthException("INVALID_PROJECT_REFERENCE", "Project references must be unique and non-empty.");
+        if (await EligibleProjects(profile.Id).CountAsync(x => ids.Contains(x.Id), ct) != ids.Length)
+            throw new AuthException("PROJECT_NOT_ELIGIBLE", "Only completed projects you created or actively participate in can be added.", 400);
+    }
+
+    private async Task<PortfolioProject[]> ResolveProjects(UserProfile profile, CancellationToken ct)
+    {
+        var items = Decode<PortfolioProject[]>(profile.CareerProfile?.ProjectsJson) ?? [];
+        var ids = items.Where(x => x.ProjectId.HasValue).Select(x => x.ProjectId!.Value).Distinct().ToArray();
+        var projects = ids.Length == 0 ? new Dictionary<Guid, PortfolioProject>() : await LoadProjects(profile.Id, ids, ct);
+        return items.Where(x => !x.ProjectId.HasValue || projects.ContainsKey(x.ProjectId.Value))
+            .Select(x => x.ProjectId.HasValue
+                ? projects[x.ProjectId.Value] with { Featured = x.Featured, PersonalContribution = x.PersonalContribution }
+                : x with { Verification = null, Role = null, CompletedAt = null }).ToArray();
+    }
+
+    private async Task<Dictionary<Guid, PortfolioProject>> LoadProjects(Guid userId, Guid[]? ids, CancellationToken ct)
+    {
+        var query = EligibleProjects(userId);
+        if (ids is not null) query = query.Where(x => ids.Contains(x.Id));
+        var projects = await query.Include(x => x.ProjectSkills).ThenInclude(x => x.Skill)
+            .Include(x => x.Members).Include(x => x.Verifications).AsSplitQuery().ToListAsync(ct);
+        return projects.OrderByDescending(x => x.CompletedAt).ThenBy(x => x.Id).ToDictionary(x => x.Id, x =>
+        {
+            var verification = x.Verifications.Where(v => v.FinalizedAt.HasValue)
+                .OrderByDescending(v => v.FinalizedAt).ThenByDescending(v => v.CreatedAt).ThenBy(v => v.Id).FirstOrDefault();
+            return new PortfolioProject
+            {
+                ProjectId = x.Id, Title = x.Title, Description = x.Description, Type = x.ProjectField,
+                Technologies = x.ProjectSkills.Select(s => s.Skill.Name).Distinct().OrderBy(n => n).ToArray(),
+                Role = x.Members.FirstOrDefault(m => m.UserId == userId && m.Status == ProjectMemberStatus.Active)?.Role ?? x.SubmitterRole,
+                CompletedAt = x.CompletedAt,
+                Verification = verification is null ? null : new(verification.Id, verification.Status.ToString(), verification.FinalizedAt)
+            };
+        });
+    }
+
+    public async Task<PortfolioProject[]> EligibleProjectList(Guid accountId, CancellationToken ct)
+    {
+        var profile = await Own(accountId, ct);
+        RequireStudent(profile);
+        return (await LoadProjects(profile.Id, null, ct)).Values.ToArray();
     }
 
     public async Task<PortfolioSkillCatalog[]> Catalog(CancellationToken ct) => await db.Skills.AsNoTracking().Where(s => s.IsActive).OrderBy(s => s.Name).ThenBy(s => s.Id).Select(s => new PortfolioSkillCatalog(s.Id, s.Name, s.IconUrl, s.Category == SkillCategory.ToolsAndOther ? "Tools & Other" : s.Category.HasValue ? s.Category.Value.ToString() : "")).ToArrayAsync(ct);
@@ -195,7 +252,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         ApplyAppearance(p.CareerProfile, appearance);
         p.CareerProfile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return Map(p, true, await Catalog(ct));
+        return await Map(p, true, await Catalog(ct), ct);
     }
 
     private static ProfileAppearance NormalizeAppearance(ProfileAppearance appearance)
@@ -230,7 +287,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         profile["showPortfolio"] = showPortfolio; root["profile"] = profile.DeepClone();
         p.CareerProfile.AppearanceJson = root.ToJsonString(Json); p.CareerProfile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return Map(p, true, await Catalog(ct));
+        return await Map(p, true, await Catalog(ct), ct);
     }
 
     private static PortfolioResponse ForVisitor(PortfolioResponse response)
