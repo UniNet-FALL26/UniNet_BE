@@ -33,6 +33,26 @@ dotnet run --project ./UniNet.API --launch-profile https
 
 PublicBaseUrl là origin của backend, gồm giao thức và host với port nếu có. HTTPS bắt buộc ngoài Development. Khi chạy nhiều instance, dùng chung khóa Data Protection và vùng lưu PDF. StoragePath phải ở ngoài wwwroot, có quyền đọc ghi cho tài khoản chạy ứng dụng. FontPath trỏ đến font TrueType có đủ ký tự tiếng Việt và quyền sử dụng phù hợp với môi trường triển khai.
 
+### Link email trên môi trường deploy (Render)
+
+Các trang profile.html, contract.html và activate.html đã nằm trong `UniNet.API/wwwroot/assessor-onboarding` và được backend phục vụ. Không cần đăng nhập UniNet_FE để mở các trang này. JavaScript gọi API cùng origin với trang đang mở.
+
+Trên Render, đặt biến môi trường của dịch vụ backend:
+
+```text
+AssessorOnboarding__PublicBaseUrl=https://uninet-be.onrender.com
+```
+
+Không thêm `/api`, `/assessor-onboarding` hoặc token vào giá trị cấu hình. Lưu cấu hình và khởi động lại/redeploy dịch vụ. Biến môi trường triển khai ưu tiên hơn `.env`; giữ localhost trong `.env` cho phát triển cục bộ không ảnh hưởng khi Render có biến ghi đè.
+
+Sau đó email hợp đồng mới sẽ chứa link dạng `https://uninet-be.onrender.com/assessor-onboarding/contract.html#token=...`; email đặt mật khẩu dùng cùng origin với đường dẫn activate.html. API tạo lời mời hiện trả profileLink dạng tương đối, nên Dashboard ghép với origin backend deploy khi chia sẻ link điền hồ sơ.
+
+Dashboard phải gọi backend deploy để tạo hồ sơ/phát hành link. Không chỉ thay hostname của link được tạo bởi backend local: token, hồ sơ, khóa Data Protection và PDF phải thuộc môi trường phục vụ link. Các trang deploy cũng gọi API deploy, không gọi máy localhost của Admin.
+
+Email đã gửi không tự đổi URL khi sửa cấu hình. Với hồ sơ còn AwaitingSignature, Admin dùng `POST /api/admin/assessor-onboardings/{id}/resend-contract` trên backend deploy để phát hành link mới, theo điều kiện/hạn mức gửi lại của API. Với hồ sơ AwaitingPassword, dùng `POST /api/admin/assessor-onboardings/{id}/resend-password`. Nếu hồ sơ chỉ tồn tại trong database local thì cần tạo lời mời mới trên deploy hoặc thực hiện một kế hoạch chuyển dữ liệu riêng; không giả định đổi tên miền sẽ chuyển hồ sơ.
+
+Các đường dẫn StoragePath, TemplatePath, FontPath và KeyRingPath phải hợp lệ trên máy chủ deploy. Không sao chép đường dẫn ổ D hoặc font Windows từ máy phát triển sang môi trường Linux. Giữ PDF và key ring trên vùng lưu bền vững để không mất khả năng đọc hợp đồng sau khi redeploy.
+
 Mẫu hợp đồng là tệp UTF-8 dạng văn bản thuần, xuống dòng và tự phân trang. Các placeholder được hỗ trợ gồm {{OnboardingId}}, {{FullName}}, {{Email}}, {{CitizenId}}, {{TaxCode}}, {{BankName}}, {{BankAccountNumber}}, {{BankAccountHolder}}, {{TemplateVersion}} và {{SignatureStatement}}. Mỗi phiên bản mẫu cần có nội dung đã được duyệt. Khi thay nội dung, tăng TemplateVersion. PDF đã phát hành và câu xác nhận trên hồ sơ được giữ nguyên khi cấp lại link.
 
 Để kiểm tra trên Development bằng file .eml, đặt AssessorOnboarding__Smtp__From thành email thử nghiệm và AssessorOnboarding__Smtp__PickupDirectory thành đường dẫn tuyệt đối ngoài wwwroot, ví dụ D:/UniNetData/mail-pickup. Chế độ này ghi email vào thư mục để mở bằng trình đọc email. Chỉ định PickupDirectory sẽ ưu tiên ghi file thay cho kết nối SMTP. Giới hạn quyền truy cập vì file chứa OTP và link. Production từ chối chế độ pickup.
