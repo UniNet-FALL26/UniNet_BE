@@ -6,6 +6,7 @@
 # dotenv files
 .env.e2e
 .env.e2e.local
+.env.github-app.e2e
 __pycache__/
 App_Data/profile-images/
 .env

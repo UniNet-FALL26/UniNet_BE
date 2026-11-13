@@ -129,6 +129,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ProjectGitActivityGrant> ProjectGitActivityGrants => Set<ProjectGitActivityGrant>();
     public DbSet<GitCommitBranchReference> GitCommitBranchReferences => Set<GitCommitBranchReference>();
     public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
+    public DbSet<GitHubAppWebhookDelivery> GitHubAppWebhookDeliveries => Set<GitHubAppWebhookDelivery>();
     public DbSet<ProjectGitActivityVisibility> ProjectGitActivityVisibilities => Set<ProjectGitActivityVisibility>();
     public DbSet<WorkspaceChannel> WorkspaceChannels => Set<WorkspaceChannel>();
     public DbSet<WorkspaceMessage> WorkspaceMessages => Set<WorkspaceMessage>();
@@ -190,6 +191,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
         GitHubIntegrationConfiguration.Configure(model);
+        GitHubAppInstallationConfiguration.Configure(model);
         ProjectGitMemberIdentityConfiguration.Configure(model);
         GitSyncConfiguration.Configure(model);
         GitActivityConfiguration.Configure(model);

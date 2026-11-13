@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
+using UniNet.Domain.Enums;
 
 namespace UniNet.Infrastructure.Data;
 
@@ -16,12 +17,14 @@ public static class GitSyncConfiguration
                 t.HasCheckConstraint("CK_GitSyncJobs_Type", "\"SyncType\" BETWEEN 0 AND 4");
                 t.HasCheckConstraint("CK_GitSyncJobs_RetryCount", "\"RetryCount\" >= 0");
                 t.HasCheckConstraint("CK_GitSyncJobs_Lease", "(\"LeaseId\" IS NULL) = (\"LeaseExpiresAt\" IS NULL)");
+                t.HasCheckConstraint("CK_GitSyncJobs_CredentialSource", "(\"CredentialSource\" = 0 AND \"OAuthConnectionId\" IS NOT NULL AND \"GitHubAppRepositoryGrantId\" IS NULL) OR (\"CredentialSource\" = 1 AND \"OAuthConnectionId\" IS NULL AND \"GitHubAppRepositoryGrantId\" IS NOT NULL)");
                 t.HasCheckConstraint("CK_GitSyncJobs_CompletedAt",
                     "(\"Status\" IN (2, 3, 5) AND \"CompletedAt\" IS NOT NULL) OR (\"Status\" NOT IN (2, 3, 5) AND \"CompletedAt\" IS NULL)");
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.SyncType).HasConversion<short>();
             e.Property(x => x.Status).HasConversion<short>();
+            e.Property(x => x.CredentialSource).HasConversion<short>().HasDefaultValue(GitRepositoryCredentialSource.OAuth);
             e.Property(x => x.ErrorCode).HasMaxLength(100);
             e.Property(x => x.ErrorMessage).HasMaxLength(1000);
             e.Property(x => x.IdempotencyKey).HasMaxLength(255);
@@ -37,6 +40,8 @@ public static class GitSyncConfiguration
                 .HasForeignKey(x => x.GitHubRepositoryId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<GitHubOAuthConnection>().WithMany()
                 .HasForeignKey(x => x.OAuthConnectionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<GitHubAppRepositoryGrant>().WithMany()
+                .HasForeignKey(x => x.GitHubAppRepositoryGrantId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<UserProfile>().WithMany()
                 .HasForeignKey(x => x.RequestedByProfileId).OnDelete(DeleteBehavior.Restrict);
         });

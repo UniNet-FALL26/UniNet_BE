@@ -79,6 +79,27 @@ public static class GitActivityConfiguration
             e.HasIndex(x => new { x.ProviderRepositoryId, x.ReceivedAt });
         });
 
+        model.Entity<GitHubAppWebhookDelivery>(e =>
+        {
+            e.ToTable("GitHubAppWebhookDeliveries", t =>
+            {
+                t.HasCheckConstraint("CK_GitHubAppWebhookDelivery_Status", "\"Status\" IN (0, 1, 2, 3, 4, 5, 6)");
+                t.HasCheckConstraint("CK_GitHubAppWebhookDelivery_Route", "\"Route\" IN (0, 1, 2)");
+                t.HasCheckConstraint("CK_GitHubAppWebhookDelivery_Attempts", "\"AttemptCount\" >= 0");
+                t.HasCheckConstraint("CK_GitHubAppWebhookDelivery_Lease", "(\"Status\" = 3 AND \"LeaseId\" IS NOT NULL AND \"LeaseExpiresAt\" IS NOT NULL) OR (\"Status\" <> 3 AND \"LeaseId\" IS NULL AND \"LeaseExpiresAt\" IS NULL)");
+            });
+            e.HasKey(x => x.Id);
+            e.Property(x => x.DeliveryId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.EventName).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Action).HasMaxLength(100);
+            e.Property(x => x.PayloadHash).HasMaxLength(64).IsRequired();
+            e.Property(x => x.PayloadEncrypted).IsRequired();
+            e.Property(x => x.LastErrorCode).HasMaxLength(100);
+            e.HasIndex(x => x.DeliveryId).IsUnique();
+            e.HasIndex(x => new { x.Status, x.NextAttemptAt });
+            e.HasIndex(x => new { x.ProviderInstallationId, x.ProviderRepositoryId });
+        });
+
         model.Entity<ProjectGitActivityVisibility>(e =>
         {
             e.ToTable("ProjectGitActivityVisibilities");

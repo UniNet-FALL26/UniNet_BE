@@ -10,14 +10,93 @@ namespace UniNet.API.Services;
 public sealed class GitSyncWorker(
     IServiceScopeFactory scopes,
     IOptions<GitSyncOptions> options,
-    ILogger<GitSyncWorker> logger) : BackgroundService
+    ILogger<GitSyncWorker> logger,
+    IOptions<GitHubAppOptions>? appOptions = null,
+    GitHubWorkerProgress? progress = null) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!options.Value.Enabled) return Task.CompletedTask;
         var concurrency = Math.Clamp(options.Value.WorkerConcurrency, 1, 16);
-        return Task.WhenAll(Enumerable.Range(0, concurrency)
-            .Select(_ => RunWorkerAsync(stoppingToken)));
+        var workers = Enumerable.Range(0, concurrency).Select(_ => RunWorkerAsync(stoppingToken));
+        if (appOptions?.Value.Enabled == true)
+        {
+            workers = workers.Append(RunReconciliationAsync(stoppingToken)).Append(RunWebhookAsync(stoppingToken));
+            if (progress is not null) workers = workers.Append(RunDurableHeartbeatAsync(stoppingToken));
+        }
+        return Task.WhenAll(workers);
+    }
+
+    private async Task RunDurableHeartbeatAsync(CancellationToken ct)
+    {
+        var nextCleanup = DateTimeOffset.UtcNow.AddHours(1);
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+                var current = progress!.Snapshot(); var now = DateTimeOffset.UtcNow;
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "GitHubAppWorkerHeartbeats" ("Id", "UpdatedAt", "WorkerAt", "ConsumerAt", "ReconciliationAt")
+                    VALUES ({progress.InstanceId}, {now}, {current.Worker}, {current.Consumer}, {current.Reconciliation})
+                    ON CONFLICT ("Id") DO UPDATE SET "UpdatedAt" = EXCLUDED."UpdatedAt", "WorkerAt" = EXCLUDED."WorkerAt",
+                        "ConsumerAt" = EXCLUDED."ConsumerAt", "ReconciliationAt" = EXCLUDED."ReconciliationAt"
+                    """, ct);
+                if (now >= nextCleanup)
+                {
+                    await db.Set<UniNet.Domain.Entities.GitHubAppWorkerHeartbeat>()
+                        .Where(x => x.UpdatedAt < now.AddDays(-7)).ExecuteDeleteAsync(ct);
+                    nextCleanup = now.AddHours(1);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception) { logger.LogWarning("GitHub worker heartbeat persistence failed."); }
+            try { await Task.Delay(TimeSpan.FromSeconds(15), ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        }
+    }
+
+    private async Task RunWebhookAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+                if (!db.Database.IsNpgsql()) return;
+                var consumer = scope.ServiceProvider.GetService<GitHubAppWebhookConsumer>();
+                var processed = consumer is not null && await consumer.ProcessNextAsync(ct);
+                progress?.Completed("consumer");
+                if (processed) continue;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception) { logger.LogWarning("GitHub App webhook consumption deferred; delivery state remains durable."); }
+            try { await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(options.Value.PollSeconds, 1, 300)), ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        }
+    }
+
+    // Managed alongside job loops in the existing hosted worker, so long-running jobs cannot starve polling.
+    private async Task RunReconciliationAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+                if (!db.Database.IsNpgsql()) return;
+                await scope.ServiceProvider.GetRequiredService<GitHubAppInstallationReconciliationService>().ReconcileAsync(ct);
+                await scope.ServiceProvider.GetRequiredService<GitHubAppRepositoryActivationService>().RetryPendingAsync(ct);
+                progress?.Completed("reconciliation");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception) { logger.LogWarning("GitHub App reconciliation deferred; durable state will be retried."); }
+            try { await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(options.Value.ReconciliationPollSeconds, 1, 300)), ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        }
     }
 
     private async Task RunWorkerAsync(CancellationToken ct)
@@ -40,6 +119,7 @@ public sealed class GitSyncWorker(
 
                 var jobs = scope.ServiceProvider.GetRequiredService<IGitSyncJobService>();
                 var claimed = await jobs.ClaimNextAsync(leaseDuration, ct);
+                progress?.Completed("worker");
                 if (claimed is null)
                 {
                     await jobs.EnqueueDueScheduledJobsAsync(DateTimeOffset.UtcNow, ct);
@@ -49,11 +129,14 @@ public sealed class GitSyncWorker(
 
                 var leaseId = claimed.LeaseId
                     ?? throw new InvalidOperationException("Claimed Git sync job has no lease.");
+                logger.LogInformation("Claimed Git sync job {JobId} for repository association {AssociationId} source {CredentialSource}",
+                    claimed.Id, claimed.ProjectGitRepositoryId, claimed.CredentialSource);
                 var processor = scope.ServiceProvider.GetRequiredService<IGitSyncJobProcessor>();
                 try
                 {
                     await ProcessWithHeartbeatAsync(processor, claimed, leaseId, leaseDuration, ct);
                     await jobs.CompleteAsync(claimed.Id, leaseId, ct);
+                    logger.LogInformation("Completed Git sync job {JobId}", claimed.Id);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -61,15 +144,16 @@ public sealed class GitSyncWorker(
                 }
                 catch (GitHubIntegrationException exception)
                 {
+                    logger.LogWarning("Git sync job {JobId} deferred with code {ErrorCode}", claimed.Id, exception.Code);
                     await ScheduleFailureAsync(jobs, claimed.Id, leaseId,
                         claimed.RetryCount, exception.Code, exception.Message, exception.RetryAfter,
                         exception.Code is not ("GITHUB_REPOSITORY_ACCESS_LOST" or
                             "GITHUB_REAUTH_REQUIRED" or "GITHUB_SYNC_ASSOCIATION_CHANGED" or
                             "GITHUB_REPOSITORY_NOT_AUTHORIZED"), ct);
                 }
-                catch (Exception exception)
+                catch (Exception)
                 {
-                    logger.LogError(exception, "Git sync job {JobId} failed.", claimed.Id);
+                    logger.LogError("Git sync job {JobId} failed with an internal error.", claimed.Id);
                     await ScheduleFailureAsync(jobs, claimed.Id, leaseId, claimed.RetryCount,
                         "GITHUB_SYNC_INTERNAL", "Synchronization failed due to an internal processing error.",
                         null, true, ct);
@@ -79,9 +163,9 @@ public sealed class GitSyncWorker(
             {
                 return;
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                logger.LogError(exception, "Git synchronization worker loop failed; durable jobs remain queued.");
+                logger.LogError("Git synchronization worker loop failed; durable jobs remain queued.");
                 await Task.Delay(pollDelay, ct);
             }
         }
@@ -106,6 +190,7 @@ public sealed class GitSyncWorker(
                 if (!await heartbeatJobs.RenewLeaseAsync(job.Id, leaseId, leaseDuration, ct))
                     throw new GitHubIntegrationException(
                         "GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
+                progress?.Completed("worker");
             }
             await processing;
         }

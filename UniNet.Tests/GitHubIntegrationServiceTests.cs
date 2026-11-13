@@ -22,6 +22,195 @@ namespace UniNet.Tests;
 public sealed class GitHubIntegrationServiceTests
 {
     [Fact]
+    public async Task AppManualAndScheduledSyncUseAppGrantAndCoalesce()
+    {
+        await using var database = await CreateDatabaseAsync(); var db = database.Context;
+        var creator = AddStudent(db, "app-manual"); var project = CreateProject(creator.Profile!);
+        var repo = new GitHubRepository { ProviderRepositoryId = 8753, ProviderOwnerId = 42, OwnerLogin = "example", Name = "repo", FullName = "example/repo", HtmlUrl = "https://github.com/example/repo" };
+        var installation = new GitHubAppInstallation { ProviderInstallationId = 55, OwnerAccountId = 42, OwnerLogin = "example", OwnerType = "User" };
+        var grant = new GitHubAppRepositoryGrant { InstallationId = installation.Id, ProviderRepositoryId = 8753, VerifiedAt = DateTimeOffset.UtcNow };
+        var link = new ProjectGitRepository { ProjectId = project.Id, GitHubRepositoryId = repo.Id, LinkedByProfileId = creator.Profile!.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = grant.Id, SyncPaused = false, AccessStatus = ProjectGitRepositoryAccessStatus.Active, LinkedAt = DateTimeOffset.UtcNow.AddDays(-1) };
+        db.AddRange(project, repo, installation, grant, link); await db.SaveChangesAsync();
+        var service = new GitSyncJobService(db, Options.Create(new GitSyncOptions { Enabled = true }), Options.Create(new GitHubAppOptions { Enabled = true }));
+        var first = await service.RequestManualSyncAsync(creator.Id, project.Id, link.Id, default);
+        var again = await service.RequestManualSyncAsync(creator.Id, project.Id, link.Id, default);
+        Assert.True(again.WasAlreadyQueued); Assert.Equal(first.Job.Id, again.Job.Id);
+        var job = await db.GitSyncJobs.SingleAsync(); Assert.Equal(GitRepositoryCredentialSource.GitHubApp, job.CredentialSource);
+        Assert.Equal(grant.Id, job.GitHubAppRepositoryGrantId); Assert.Null(job.OAuthConnectionId);
+        job.Status = GitSyncJobStatus.Completed; job.CompletedAt = DateTimeOffset.UtcNow.AddHours(-7); await db.SaveChangesAsync();
+        Assert.Equal(1, await service.EnqueueDueScheduledJobsAsync(DateTimeOffset.UtcNow, default));
+        var scheduled = await db.GitSyncJobs.SingleAsync(x => x.SyncType == GitSyncType.Scheduled);
+        Assert.Equal(grant.Id, scheduled.GitHubAppRepositoryGrantId); Assert.Null(scheduled.OAuthConnectionId);
+        Assert.Equal(0, await service.EnqueueDueScheduledJobsAsync(DateTimeOffset.UtcNow, default));
+        var paused = await service.UpdateSyncSettingsAsync(creator.Id, project.Id, link.Id, new(6, true), default);
+        Assert.Equal("Paused", paused.SyncReadiness);
+        Assert.Equal(0, await service.EnqueueDueScheduledJobsAsync(DateTimeOffset.UtcNow.AddDays(1), default));
+        var resumed = await service.UpdateSyncSettingsAsync(creator.Id, project.Id, link.Id, new(6, false), default);
+        Assert.Equal("PendingWorker", resumed.SyncReadiness);
+    }
+
+    private sealed class FakeInstallationTokens : IGitHubAppInstallationTokenProvider
+    {
+        public int Calls;
+        public int Invalidations;
+        public bool Deny;
+        public Task<string> GetAsync(long installationId, long repositoryId, CancellationToken ct)
+        {
+            Assert.Equal(55, installationId); Assert.Equal(8753, repositoryId); Calls++;
+            if (Deny) throw new GitHubIntegrationException("GITHUB_APP_ACCESS_DENIED", "Unavailable", 403);
+            return Task.FromResult("installation-test-token");
+        }
+        public void InvalidateInstallation(long installationId) { Invalidations++; }
+    }
+
+    [Fact]
+    public async Task SuspendedInstallationCancelsQueuedJobAndRecoversOnlyAfterLiveVerification()
+    {
+        await using var database = await CreateDatabaseAsync(); var db = database.Context;
+        var creator = AddStudent(db, "app-suspended"); var project = CreateProject(creator.Profile!);
+        var repo = new GitHubRepository { ProviderRepositoryId = 8753, ProviderOwnerId = 42, OwnerLogin = "example", Name = "repo", FullName = "example/repo", HtmlUrl = "https://github.com/example/repo" };
+        var installation = new GitHubAppInstallation { ProviderInstallationId = 55, OwnerAccountId = 42, OwnerLogin = "example", OwnerType = "User", Status = GitHubAppInstallationStatus.Suspended };
+        var grant = new GitHubAppRepositoryGrant { InstallationId = installation.Id, ProviderRepositoryId = 8753, VerifiedAt = DateTimeOffset.UtcNow };
+        var link = new ProjectGitRepository { ProjectId = project.Id, GitHubRepositoryId = repo.Id, LinkedByProfileId = creator.Profile!.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = grant.Id, SyncPaused = false, AccessStatus = ProjectGitRepositoryAccessStatus.Active };
+        var job = new GitSyncJob { ProjectGitRepositoryId = link.Id, GitHubRepositoryId = repo.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = grant.Id, SyncType = GitSyncType.Initial, Status = GitSyncJobStatus.Pending };
+        db.AddRange(project, repo, installation, grant, link, job); await db.SaveChangesAsync();
+        var tokens = new FakeInstallationTokens { Deny = true }; var provider = new FakeGitHubProvider();
+        var activation = new GitHubAppRepositoryActivationService(db, tokens, provider, Options.Create(new GitSyncOptions { Enabled = true }), Options.Create(new GitHubAppOptions { Enabled = true }));
+        await activation.RetryPendingAsync(default);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.AccessLost, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync()).AccessStatus);
+        Assert.Equal(GitSyncJobStatus.Cancelled, (await db.GitSyncJobs.AsNoTracking().SingleAsync()).Status);
+        Assert.True(tokens.Invalidations > 0);
+        tokens.Deny = false; await activation.RetryPendingAsync(default);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.AccessLost, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync()).AccessStatus);
+        // Simulate an authoritative installation check confirming the suspension has ended.
+        installation.Status = GitHubAppInstallationStatus.Active; installation.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        await activation.RetryPendingAsync(default);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.Active, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync()).AccessStatus);
+        Assert.Equal(1, await db.GitSyncJobs.CountAsync(x => x.SyncType == GitSyncType.Initial));
+        Assert.Equal(1, await db.GitSyncJobs.CountAsync(x => x.SyncType == GitSyncType.Scheduled && x.Status == GitSyncJobStatus.Pending));
+    }
+
+    [Fact]
+    public async Task ConfirmedAppReadLossPreservesHistoryAndRecoverySchedulesWithoutAnotherInitial()
+    {
+        await using var database = await CreateDatabaseAsync(); var db = database.Context;
+        var creator = AddStudent(db, "app-access-loss"); var project = CreateProject(creator.Profile!);
+        var repo = new GitHubRepository { ProviderRepositoryId = 8753, ProviderOwnerId = 42, OwnerLogin = "example", Name = "repo", FullName = "example/repo", HtmlUrl = "https://github.com/example/repo" };
+        var installation = new GitHubAppInstallation { ProviderInstallationId = 55, OwnerAccountId = 42, OwnerLogin = "example", OwnerType = "User" };
+        var grant = new GitHubAppRepositoryGrant { InstallationId = installation.Id, ProviderRepositoryId = 8753, VerifiedAt = DateTimeOffset.UtcNow };
+        var link = new ProjectGitRepository { ProjectId = project.Id, GitHubRepositoryId = repo.Id, LinkedByProfileId = creator.Profile!.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = grant.Id, SyncPaused = false, AccessStatus = ProjectGitRepositoryAccessStatus.Active };
+        var initial = new GitSyncJob { ProjectGitRepositoryId = link.Id, GitHubRepositoryId = repo.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = grant.Id, SyncType = GitSyncType.Initial, Status = GitSyncJobStatus.Completed, CompletedAt = DateTimeOffset.UtcNow };
+        var raw = new GitHubProviderObject { GitHubRepositoryId = repo.Id, Category = "commits", ExternalObjectId = "existing", PayloadJson = "{}", FirstObservedAt = DateTimeOffset.UtcNow, LastObservedAt = DateTimeOffset.UtcNow };
+        var activity = new GitActivity { GitHubProviderObjectId = raw.Id, ActivityType = "commit.created", OccurredAt = DateTimeOffset.UtcNow };
+        db.AddRange(project, repo, installation, grant, link, initial, raw, activity); await db.SaveChangesAsync();
+        var tokens = new FakeInstallationTokens();
+        var provider = new FakeGitHubProvider { Repository = new(8753, 42, "example", "repo", "example/repo", "https://github.com/example/repo", null, "main", true, false, false) };
+        var options = Options.Create(new GitSyncOptions { Enabled = true });
+        var processor = new GitHubSyncJobProcessor(db, provider, new GitHubCredentialService(db, provider, new FakeTokenProtector()), options, tokens, Options.Create(new GitHubAppOptions { Enabled = true }));
+        var job = new GitSyncJob { ProjectGitRepositoryId = link.Id, GitHubRepositoryId = repo.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = grant.Id, SyncType = GitSyncType.Manual };
+        var error = await Assert.ThrowsAsync<GitHubIntegrationException>(() => processor.ProcessAsync(job, default));
+        Assert.Equal("GITHUB_REPOSITORY_ACCESS_LOST", error.Code); Assert.True(tokens.Invalidations > 0);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.AccessLost, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync()).AccessStatus);
+        Assert.Single(await db.GitActivities.ToListAsync());
+        provider.Repository = provider.Repository with { CanRead = true };
+        await new GitHubAppRepositoryActivationService(db, tokens, provider, options, Options.Create(new GitHubAppOptions { Enabled = true })).RetryPendingAsync(default);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.Active, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync()).AccessStatus);
+        Assert.Equal(1, await db.GitSyncJobs.CountAsync(x => x.SyncType == GitSyncType.Initial));
+        Assert.Equal(1, await db.GitSyncJobs.CountAsync(x => x.SyncType == GitSyncType.Scheduled));
+        Assert.Single(await db.GitActivities.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("suspended")]
+    [InlineData("revoked")]
+    [InlineData("wrong-repository")]
+    [InlineData("unlinked")]
+    [InlineData("provider-error")]
+    public async Task AppActivationCreatesExactlyOneScopedInitialJobOnlyWhenVerified(string scenario)
+    {
+        await using var database = await CreateDatabaseAsync();
+        var db = database.Context;
+        var creator = AddStudent(db, "activation-creator");
+        var project = CreateProject(creator.Profile!);
+        var repo = new GitHubRepository { ProviderRepositoryId = 8753, ProviderOwnerId = 42, OwnerLogin = "example", Name = "repo", FullName = "example/repo", HtmlUrl = "https://github.com/example/repo" };
+        var installation = new GitHubAppInstallation { ProviderInstallationId = 55, OwnerAccountId = 42, OwnerLogin = "example", OwnerType = "User", Status = scenario == "suspended" ? GitHubAppInstallationStatus.Suspended : GitHubAppInstallationStatus.Active };
+        var grant = new GitHubAppRepositoryGrant { InstallationId = installation.Id, ProviderRepositoryId = scenario == "wrong-repository" ? 8754 : 8753, VerifiedAt = DateTimeOffset.UtcNow, RevokedAt = scenario == "revoked" ? DateTimeOffset.UtcNow : null };
+        var link = new ProjectGitRepository { ProjectId = project.Id, GitHubRepositoryId = repo.Id, LinkedByProfileId = creator.Profile!.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = grant.Id, SyncPaused = true, AccessStatus = ProjectGitRepositoryAccessStatus.PendingAuthorization,
+            UnlinkedAt = scenario == "unlinked" ? DateTimeOffset.UtcNow.AddSeconds(1) : null };
+        db.AddRange(project, repo, installation, grant, link); await db.SaveChangesAsync();
+        var tokens = new FakeInstallationTokens();
+        var provider = new FakeGitHubProvider();
+        if (scenario == "provider-error") provider.RepositoryException = new GitHubIntegrationException("GITHUB_RATE_LIMITED", "test", 429);
+        var service = new GitHubAppRepositoryActivationService(db, tokens, provider, Options.Create(new GitSyncOptions { Enabled = true }), Options.Create(new GitHubAppOptions { Enabled = true }));
+        if (scenario == "provider-error") await Assert.ThrowsAsync<GitHubIntegrationException>(() => service.ActivateAsync(link.Id, default));
+        else Assert.Equal(scenario == "valid", await service.ActivateAsync(link.Id, default));
+        if (scenario == "valid")
+        {
+            Assert.True(await service.ActivateAsync(link.Id, default));
+            var stored = await db.ProjectGitRepositories.AsNoTracking().SingleAsync(); Assert.False(stored.SyncPaused); Assert.Equal(ProjectGitRepositoryAccessStatus.Active, stored.AccessStatus);
+            var job = await db.GitSyncJobs.SingleAsync(); Assert.Equal(GitRepositoryCredentialSource.GitHubApp, job.CredentialSource);
+            Assert.Equal(grant.Id, job.GitHubAppRepositoryGrantId); Assert.Null(job.OAuthConnectionId); Assert.Equal(GitSyncType.Initial, job.SyncType);
+            var status = await new GitSyncJobService(db, Options.Create(new GitSyncOptions { Enabled = true })).GetProjectStatusAsync(creator.Id, project.Id, default);
+            Assert.Equal("PendingWorker", Assert.Single(status.Items).SyncReadiness);
+            Assert.False(status.Items[0].RequiresAuthorization);
+            Assert.Equal(1, tokens.Calls);
+        }
+        else { Assert.Empty(await db.GitSyncJobs.ToListAsync()); Assert.Equal(ProjectGitRepositoryAccessStatus.PendingAuthorization, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync()).AccessStatus); }
+    }
+
+    [Fact]
+    public async Task AppCredentialLinksStayPendingAndNeverEnterOAuthSyncPaths()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var db = database.Context;
+        var creator = AddStudent(db, "app-guard");
+        var project = CreateProject(creator.Profile!);
+        var repository = new GitHubRepository { ProviderRepositoryId = 8753, ProviderOwnerId = 42, OwnerLogin = "example", Name = "repo", FullName = "example/repo", HtmlUrl = "https://github.com/example/repo" };
+        var installation = new GitHubAppInstallation { ProviderInstallationId = 55, OwnerAccountId = 42, OwnerLogin = "example", OwnerType = "User" };
+        var grant = new GitHubAppRepositoryGrant { InstallationId = installation.Id, ProviderRepositoryId = 8753, VerifiedAt = DateTimeOffset.UtcNow };
+        var link = new ProjectGitRepository { ProjectId = project.Id, GitHubRepositoryId = repository.Id, LinkedByProfileId = creator.Profile!.Id,
+            CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = grant.Id,
+            OAuthConnectionId = null, SyncPaused = true, AccessStatus = ProjectGitRepositoryAccessStatus.PendingAuthorization };
+        db.AddRange(project, repository, installation, grant, link); await db.SaveChangesAsync();
+        var sync = new GitSyncJobService(db, Options.Create(new GitSyncOptions { Enabled = true }), Options.Create(new GitHubAppOptions { Enabled = true }));
+        var status = await sync.GetProjectStatusAsync(creator.Id, project.Id, default);
+        Assert.Equal("PendingActivation", Assert.Single(status.Items).SyncReadiness);
+        Assert.Equal("GITHUB_APP_PENDING_ACTIVATION", (await Assert.ThrowsAsync<GitHubIntegrationException>(() => sync.RequestManualSyncAsync(creator.Id, project.Id, link.Id, default))).Code);
+        Assert.Equal("GITHUB_APP_PENDING_ACTIVATION", (await Assert.ThrowsAsync<GitHubIntegrationException>(() => sync.UpdateSyncSettingsAsync(creator.Id, project.Id, link.Id, new(6, false), default))).Code);
+        Assert.Equal(0, await sync.EnqueueDueScheduledJobsAsync(DateTimeOffset.UtcNow.AddDays(1), default));
+        var provider = new FakeGitHubProvider();
+        var repositories = new ProjectGitRepositoryService(db, provider, new GitHubCredentialService(db, provider, new FakeTokenProtector()));
+        Assert.Equal("GITHUB_APP_PENDING_ACTIVATION", (await Assert.ThrowsAsync<GitHubIntegrationException>(() => repositories.ReplaceCredentialAsync(creator.Id, project.Id, link.Id, new(Guid.NewGuid()), default))).Code);
+        var processor = new GitHubSyncJobProcessor(db, provider, new GitHubCredentialService(db, provider, new FakeTokenProtector()), appOptions: Options.Create(new GitHubAppOptions { Enabled = true }));
+        Assert.Equal("GITHUB_APP_PENDING_ACTIVATION", (await Assert.ThrowsAsync<GitHubIntegrationException>(() => processor.ProcessAsync(new GitSyncJob { ProjectGitRepositoryId = link.Id }, default))).Code);
+        const string secret = "test-webhook-secret";
+        var payload = Encoding.UTF8.GetBytes("{\"repository\":{\"id\":8753}}");
+        var signature = "sha256=" + Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), payload)).ToLowerInvariant();
+        var webhook = new GitHubWebhookService(db, Options.Create(new GitHubWebhookOptions { Secret = secret }));
+        var result = await webhook.HandleAsync(Guid.NewGuid().ToString(), "push", signature, payload, default);
+        Assert.Equal(0, result.EnqueuedJobCount);
+        Assert.Empty(await db.GitSyncJobs.ToListAsync());
+        var appJob = new GitSyncJob { ProjectGitRepositoryId = link.Id, GitHubRepositoryId = repository.Id,
+            CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = grant.Id,
+            OAuthConnectionId = null, SyncType = GitSyncType.Initial };
+        db.Add(appJob); await db.SaveChangesAsync();
+        Assert.Equal("GITHUB_APP_PENDING_ACTIVATION", (await Assert.ThrowsAsync<GitHubIntegrationException>(() => processor.ProcessAsync(appJob, default))).Code);
+        Assert.Equal(0, await sync.EnqueueDueScheduledJobsAsync(DateTimeOffset.UtcNow.AddDays(1), default));
+        await repositories.UnlinkAsync(creator.Id, project.Id, link.Id, default);
+        Assert.NotNull((await db.ProjectGitRepositories.SingleAsync()).UnlinkedAt);
+        link.SyncPaused = false;
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+    }
+
+    [Fact]
     public async Task ReauthorizationReusesConnectionAndScheduledReconciliationRestoresPendingLinks()
     {
         await using var database = await CreateDatabaseAsync();
@@ -426,6 +615,11 @@ public sealed class GitHubIntegrationServiceTests
         await db.SaveChangesAsync();
 
         var service = new GitSyncJobService(db, Options.Create(new GitSyncOptions { Enabled = true }));
+        var provider = new FakeGitHubProvider();
+        var processor = new GitHubSyncJobProcessor(db, provider, new GitHubCredentialService(db, provider, new FakeTokenProtector()), appOptions: Options.Create(new GitHubAppOptions { Enabled = true }));
+        var wrongSource = new GitSyncJob { ProjectGitRepositoryId = link.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp,
+            GitHubAppRepositoryGrantId = Guid.NewGuid(), OAuthConnectionId = null };
+        Assert.Equal("GITHUB_SYNC_ASSOCIATION_CHANGED", (await Assert.ThrowsAsync<GitHubIntegrationException>(() => processor.ProcessAsync(wrongSource, default))).Code);
         var first = await service.RequestManualSyncAsync(creator.Id, project.Id, link.Id, default);
         var repeated = await service.RequestManualSyncAsync(creator.Id, project.Id, link.Id, default);
 
@@ -1369,6 +1563,49 @@ public sealed class GitHubIntegrationServiceTests
     }
 
     [Fact]
+    public async Task InstallationRepositoryRequiresContentsProbeInsteadOfUserPullFlag()
+    {
+        var handler = new InstallationProbeHandler(HttpStatusCode.OK);
+        using var http = new HttpClient(handler);
+        var provider = new GitHubProviderClient(http, Options.Create(new GitHubIntegrationOptions()));
+        Assert.False((await provider.GetRepositoryAsync("access-token", 1001, default)).CanRead);
+        Assert.True((await provider.GetInstallationRepositoryAsync("access-token", 1001, default)).CanRead);
+        Assert.Equal(1, handler.BranchRequests);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "GITHUB_CREDENTIAL_INVALID")]
+    [InlineData(HttpStatusCode.Forbidden, "GITHUB_ACCESS_DENIED")]
+    [InlineData(HttpStatusCode.NotFound, "GITHUB_RESOURCE_UNAVAILABLE")]
+    public async Task InstallationRepositoryContentsProbeFailsClosed(HttpStatusCode status, string code)
+    {
+        using var http = new HttpClient(new InstallationProbeHandler(status));
+        var provider = new GitHubProviderClient(http, Options.Create(new GitHubIntegrationOptions()));
+        var error = await Assert.ThrowsAsync<GitHubIntegrationException>(() => provider.GetInstallationRepositoryAsync("access-token", 1001, default));
+        Assert.Equal(code, error.Code);
+    }
+
+    [Fact]
+    public async Task InstallationRepositoryCannotUsePullFlagToBypassContentsProbe()
+    {
+        using var http = new HttpClient(new InstallationProbeHandler(HttpStatusCode.Forbidden, pull: true));
+        var provider = new GitHubProviderClient(http, Options.Create(new GitHubIntegrationOptions()));
+        var error = await Assert.ThrowsAsync<GitHubIntegrationException>(() => provider.GetInstallationRepositoryAsync("access-token", 1001, default));
+        Assert.Equal("GITHUB_ACCESS_DENIED", error.Code);
+    }
+
+    [Fact]
+    public async Task InstallationRepositoryRejectsDifferentImmutableIdBeforeProbe()
+    {
+        var handler = new InstallationProbeHandler(HttpStatusCode.OK);
+        using var http = new HttpClient(handler);
+        var provider = new GitHubProviderClient(http, Options.Create(new GitHubIntegrationOptions()));
+        var error = await Assert.ThrowsAsync<GitHubIntegrationException>(() => provider.GetInstallationRepositoryAsync("access-token", 999, default));
+        Assert.Equal("GITHUB_INVALID_RESPONSE", error.Code);
+        Assert.Equal(0, handler.BranchRequests);
+    }
+
+    [Fact]
     public async Task ProviderSyncPageUsesEncodedBranchPaginationAndRateLimitMetadata()
     {
         var reset = DateTimeOffset.UtcNow.AddMinutes(2).ToUnixTimeSeconds();
@@ -1612,6 +1849,22 @@ public sealed class GitHubIntegrationServiceTests
         {
                 await Context.DisposeAsync();
                 await connection.DisposeAsync();
+        }
+    }
+
+    private sealed class InstallationProbeHandler(HttpStatusCode branchStatus, bool pull = false) : HttpMessageHandler
+    {
+        public int BranchRequests { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("/branches", StringComparison.Ordinal))
+            {
+                BranchRequests++;
+                return Task.FromResult(new HttpResponseMessage(branchStatus) { Content = new StringContent("[]") });
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""
+                {"id":1001,"name":"private","full_name":"octocat/private","html_url":"https://github.com/octocat/private","private":true,"archived":false,"owner":{"id":123,"login":"octocat"},"permissions":{"pull":false}}
+                """.Replace("\"pull\":false", pull ? "\"pull\":true" : "\"pull\":false") ) });
         }
     }
 

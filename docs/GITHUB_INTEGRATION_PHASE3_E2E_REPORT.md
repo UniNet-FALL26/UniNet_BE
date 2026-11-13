@@ -4,6 +4,8 @@
 **Result:** **BLOCKED — local setup is prepared, but real E2E has not started.**
 **Phase 3 status:** Not complete. No real E2E pass is claimed.
 
+> GitHub App Step 2 PostgreSQL concurrency was tested separately in disposable `uninet_step2_concurrency` using a fake provider; it is not a live GitHub App E2E. See [the architecture checkpoint](./GITHUB_APP_ONBOARDING_ARCHITECTURE.md). Step 2 remains PARTIAL; existing E2E database was not used.
+
 ## Real webhook redelivery deduplication
 
 - **PASS — sequential redelivery:** user reports GitHub redelivery of `1b35888c-d9a5-11f1-8da8-8bb14c640680` returned HTTP 202, `duplicate=true`, `supportedEvent=true` and `enqueuedJobCount=0`. The response is user-reported; the local ngrok capture was unavailable for independent inspection.

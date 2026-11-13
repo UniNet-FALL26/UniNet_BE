@@ -149,7 +149,11 @@ public sealed class ProjectGitRepositoryService(
         var total = await query.CountAsync(ct);
         var links = await query.OrderBy(x => x.Repository.FullName).ThenBy(x => x.Link.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        return new(links.Select(x => ToResponse(x.Link, x.Repository)).ToArray(), page, pageSize, total);
+        var grantIds = links.Select(x => x.Link.GitHubAppRepositoryGrantId).ToArray();
+        var unknown = await UnknownGrantsAsync(grantIds, ct);
+        return new(links.Select(x => unknown.Contains(x.Link.GitHubAppRepositoryGrantId ?? Guid.Empty)
+            ? ToResponse(x.Link, x.Repository) with { SyncReadiness = "VerificationPending" }
+            : ToResponse(x.Link, x.Repository)).ToArray(), page, pageSize, total);
     }
 
     public async Task<ProjectGitRepositoryResponse> GetAsync(
@@ -162,7 +166,8 @@ public sealed class ProjectGitRepositoryService(
                 (link, repository) => new { Link = link, Repository = repository })
             .SingleOrDefaultAsync(ct)
             ?? throw Error("GITHUB_REPOSITORY_LINK_NOT_FOUND", "Linked repository not found.", 404);
-        return ToResponse(row.Link, row.Repository);
+        var unknown = await UnknownGrantsAsync([row.Link.GitHubAppRepositoryGrantId], ct);
+        return unknown.Count > 0 ? ToResponse(row.Link, row.Repository) with { SyncReadiness = "VerificationPending" } : ToResponse(row.Link, row.Repository);
     }
 
     public async Task<ProjectGitRepositoryResponse> ReplaceCredentialAsync(
@@ -172,6 +177,8 @@ public sealed class ProjectGitRepositoryService(
         var actorId = await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
         if (request.OAuthConnectionId == Guid.Empty)
             throw Error("INVALID_GITHUB_CONNECTION", "A valid OAuth connection is required.", 400);
+        if (await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == linkId && x.ProjectId == projectId && x.UnlinkedAt == null && x.CredentialSource == GitRepositoryCredentialSource.GitHubApp, ct))
+            throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App credential replacement is not available yet.", 409);
         var repositoryId = await db.ProjectGitRepositories.AsNoTracking()
             .Where(x => x.Id == linkId && x.ProjectId == projectId && x.UnlinkedAt == null)
             .Select(x => (Guid?)x.GitHubRepositoryId)
@@ -187,6 +194,8 @@ public sealed class ProjectGitRepositoryService(
         var link = await db.ProjectGitRepositories
             .SingleOrDefaultAsync(x => x.Id == linkId && x.ProjectId == projectId && x.UnlinkedAt == null, ct)
             ?? throw Error("GITHUB_REPOSITORY_LINK_NOT_FOUND", "Linked repository not found.", 404);
+        if (link.CredentialSource == GitRepositoryCredentialSource.GitHubApp)
+            throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App credential replacement is not available yet.", 409);
         if (link.OAuthConnectionId == request.OAuthConnectionId)
             throw Error("SAME_GITHUB_CREDENTIAL", "Select a different GitHub connection to replace the credential.", 409);
         var oldConnectionId = link.OAuthConnectionId;
@@ -343,14 +352,14 @@ public sealed class ProjectGitRepositoryService(
         }
     }
 
-    private static bool MetadataChanged(GitHubRepository repository, GitHubRemoteRepository remote) =>
+    internal static bool MetadataChanged(GitHubRepository repository, GitHubRemoteRepository remote) =>
         repository.ProviderOwnerId != remote.OwnerId || repository.OwnerLogin != remote.OwnerLogin ||
         repository.Name != remote.Name || repository.FullName != remote.FullName ||
         repository.HtmlUrl != remote.HtmlUrl || repository.Description != remote.Description ||
         repository.DefaultBranch != remote.DefaultBranch || repository.IsPrivate != remote.IsPrivate ||
         repository.IsArchived != remote.IsArchived;
 
-    private static void UpdateMetadata(GitHubRepository repository, GitHubRemoteRepository remote, DateTimeOffset now)
+    internal static void UpdateMetadata(GitHubRepository repository, GitHubRemoteRepository remote, DateTimeOffset now)
     {
         repository.ProviderOwnerId = remote.OwnerId;
         repository.OwnerLogin = remote.OwnerLogin;
@@ -369,12 +378,27 @@ public sealed class ProjectGitRepositoryService(
         new(repository.Id, repository.OwnerLogin, repository.Name, repository.FullName, repository.HtmlUrl,
             repository.Description, repository.DefaultBranch, repository.IsPrivate, repository.IsArchived);
 
+    private Task<List<Guid>> UnknownGrantsAsync(Guid?[] ids, CancellationToken ct) =>
+        (from grant in db.Set<GitHubAppRepositoryGrant>().AsNoTracking()
+         join installation in db.Set<GitHubAppInstallation>().AsNoTracking() on grant.InstallationId equals installation.Id
+         where ids.Contains(grant.Id) && installation.VerificationUnknown select grant.Id).ToListAsync(ct);
+
     private static ProjectGitRepositoryResponse ToResponse(ProjectGitRepository link, GitHubRepository repository) =>
         new(link.Id, link.ProjectId, new(repository.ProviderRepositoryId, repository.OwnerLogin, repository.Name,
                 repository.FullName, repository.HtmlUrl, repository.Description, repository.DefaultBranch,
                 repository.IsPrivate, repository.IsArchived),
             link.AccessStatus, link.SyncPaused, link.OAuthConnectionId, link.LinkedAt, link.UnlinkedAt,
-            link.LastAccessCheckedAt);
+            link.LastAccessCheckedAt)
+        {
+            CredentialSource = link.CredentialSource,
+            SyncReadiness = link.UnlinkedAt is not null ? "Unlinked" :
+                link.CredentialSource == GitRepositoryCredentialSource.GitHubApp ?
+                    (link.AccessStatus == ProjectGitRepositoryAccessStatus.AccessLost ? "AccessLost" :
+                     link.AccessStatus != ProjectGitRepositoryAccessStatus.Active ? "PendingActivation" : link.SyncPaused ? "Paused" : "PendingWorker") :
+                link.SyncPaused ? "Paused" :
+                link.AccessStatus == ProjectGitRepositoryAccessStatus.Active ? "SyncReady" :
+                link.AccessStatus == ProjectGitRepositoryAccessStatus.AccessLost ? "AccessLost" : "PendingAuthorization"
+        };
 
     private static bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };

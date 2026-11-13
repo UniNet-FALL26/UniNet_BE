@@ -15,21 +15,35 @@ public sealed class GitHubSyncJobProcessor(
     UniNetDbContext db,
     IGitHubProviderClient provider,
     GitHubCredentialService credentials,
-    IOptions<GitSyncOptions>? syncOptions = null) : IGitSyncJobProcessor
+    IOptions<GitSyncOptions>? syncOptions = null,
+    IGitHubAppInstallationTokenProvider? appTokens = null,
+    IOptions<GitHubAppOptions>? appOptions = null) : IGitSyncJobProcessor
 {
     private int PageSize => Math.Clamp(syncOptions?.Value.BatchSize ?? 100, 1, 100);
 
     public async Task ProcessAsync(GitSyncJob job, CancellationToken ct)
     {
+        if (job.CredentialSource == GitRepositoryCredentialSource.GitHubApp) GitHubAppAvailability.Require(appOptions);
+        if (db.Database.IsNpgsql() && job.LeaseId is null)
+            throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job has no active lease.", 409);
+        if (job.LeaseId is { } initialLease) await RequireLeaseAsync(job.Id, initialLease, false, ct);
+        if (await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == job.ProjectGitRepositoryId &&
+            x.CredentialSource == GitRepositoryCredentialSource.GitHubApp && x.AccessStatus == ProjectGitRepositoryAccessStatus.PendingAuthorization, ct))
+            throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App synchronization is not active yet.", 409);
+        if (job.CredentialSource == GitRepositoryCredentialSource.OAuth && (job.GitHubAppRepositoryGrantId is not null || job.OAuthConnectionId is null) ||
+            job.CredentialSource == GitRepositoryCredentialSource.GitHubApp && (job.OAuthConnectionId is not null || job.GitHubAppRepositoryGrantId is null || job.SyncType is not (GitSyncType.Initial or GitSyncType.Manual or GitSyncType.Scheduled or GitSyncType.Webhook)) ||
+            job.CredentialSource is not (GitRepositoryCredentialSource.OAuth or GitRepositoryCredentialSource.GitHubApp))
+            throw Error("GITHUB_SYNC_ASSOCIATION_CHANGED", "Job credential source does not match the repository association.", 409);
         var link = await LoadEligibleLinkAsync(job.ProjectGitRepositoryId, ct,
             includeRecoverable: job.SyncType == GitSyncType.Scheduled);
-        if (link.GitHubRepositoryId != job.GitHubRepositoryId ||
-            link.OAuthConnectionId != job.OAuthConnectionId)
+        if (link.GitHubRepositoryId != job.GitHubRepositoryId || link.Source != job.CredentialSource ||
+            (link.Source == GitRepositoryCredentialSource.OAuth && link.OAuthConnectionId != job.OAuthConnectionId) ||
+            (link.Source == GitRepositoryCredentialSource.GitHubApp && link.AppGrantId != job.GitHubAppRepositoryGrantId))
             throw Error("GITHUB_SYNC_ASSOCIATION_CHANGED", "Repository authorization changed before synchronization.", 409);
         if (link.AccessStatus != ProjectGitRepositoryAccessStatus.Active)
             link = await ReconcileAccessAsync(link, ct);
 
-        await ProcessCategoryAsync(job.Id, link, "branches", null, ct);
+        await ProcessCategoryAsync(job.Id, job.LeaseId, link, "branches", null, ct);
         var branches = await db.GitHubProviderObjects.AsNoTracking()
             .Where(x => x.GitHubRepositoryId == link.GitHubRepositoryId && x.Category == "branches" &&
                 db.ProjectGitActivityGrants.Any(grant =>
@@ -40,27 +54,28 @@ public sealed class GitHubSyncJobProcessor(
             using var document = JsonDocument.Parse(payload);
             if (document.RootElement.TryGetProperty("name", out var name) &&
                 name.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(name.GetString()))
-                await ProcessCategoryAsync(job.Id, link, "commits", name.GetString(), ct);
+                await ProcessCategoryAsync(job.Id, job.LeaseId, link, "commits", name.GetString(), ct);
         }
 
-        await ProcessCategoryAsync(job.Id, link, "pull-requests", null, ct);
+        await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-requests", null, ct);
         var pullRequests = await ReadObjectScopesAsync(link.Id, link.GitHubRepositoryId, "pull-requests", ct);
         foreach (var number in pullRequests)
         {
-            await ProcessCategoryAsync(job.Id, link, "pull-request-reviews", number, ct);
-            await ProcessCategoryAsync(job.Id, link, "pull-request-review-comments", number, ct);
+            await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-request-reviews", number, ct);
+            await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-request-review-comments", number, ct);
         }
 
-        await ProcessCategoryAsync(job.Id, link, "issues", null, ct);
+        await ProcessCategoryAsync(job.Id, job.LeaseId, link, "issues", null, ct);
         var issues = await ReadObjectScopesAsync(link.Id, link.GitHubRepositoryId, "issues", ct);
         foreach (var number in issues)
-            await ProcessCategoryAsync(job.Id, link, "issue-comments", number, ct);
+            await ProcessCategoryAsync(job.Id, job.LeaseId, link, "issue-comments", number, ct);
 
-        await ProcessCategoryAsync(job.Id, link, "releases", null, ct);
+        await ProcessCategoryAsync(job.Id, job.LeaseId, link, "releases", null, ct);
     }
 
     private async Task ProcessCategoryAsync(
         Guid jobId,
+        Guid? leaseId,
         EligibleLink link,
         string category,
         string? scope,
@@ -78,11 +93,45 @@ public sealed class GitHubSyncJobProcessor(
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            if (leaseId is { } currentLease) await RequireLeaseAsync(jobId, currentLease, false, ct);
             var eligible = await LoadEligibleLinkAsync(link.Id, ct);
-            if (eligible.GitHubRepositoryId != link.GitHubRepositoryId ||
-                eligible.OAuthConnectionId != link.OAuthConnectionId)
+            if (eligible.GitHubRepositoryId != link.GitHubRepositoryId || eligible.Source != link.Source ||
+                eligible.OAuthConnectionId != link.OAuthConnectionId || eligible.AppGrantId != link.AppGrantId || eligible.InstallationId != link.InstallationId)
                 throw Error("GITHUB_SYNC_ASSOCIATION_CHANGED", "Repository authorization changed during synchronization.", 409);
-            var accessToken = await credentials.GetValidAccessTokenAsync(
+            string accessToken;
+            if (eligible.Source == GitRepositoryCredentialSource.GitHubApp)
+            {
+                if (appTokens is null || eligible.InstallationId is null)
+                    throw Error("GITHUB_APP_NOT_CONFIGURED", "GitHub App synchronization is not configured.", 503);
+                try { accessToken = await appTokens.GetAsync(eligible.InstallationId.Value, eligible.ProviderRepositoryId, ct); }
+                catch (GitHubIntegrationException ex) when (ex.Code is "GITHUB_APP_ACCESS_DENIED" or "GITHUB_APP_INSTALLATION_UNAVAILABLE")
+                {
+                    appTokens.InvalidateInstallation(eligible.InstallationId.Value);
+                    throw;
+                }
+                try
+                {
+                    var remote = await provider.GetInstallationRepositoryAsync(accessToken, eligible.ProviderRepositoryId, ct);
+                    if (remote.Id != eligible.ProviderRepositoryId || !remote.CanRead)
+                        throw Error("GITHUB_REPOSITORY_ACCESS_LOST", "GitHub App cannot read this repository.", 409);
+                }
+                catch (GitHubIntegrationException ex) when (ex.Code is "GITHUB_CREDENTIAL_INVALID" or "GITHUB_ACCESS_DENIED" or "GITHUB_REPOSITORY_ACCESS_LOST")
+                {
+                    appTokens.InvalidateInstallation(eligible.InstallationId.Value);
+                    if (ex.Code == "GITHUB_REPOSITORY_ACCESS_LOST")
+                    {
+                        await MarkAppAccessLostAsync(eligible, ct);
+                        throw;
+                    }
+                    throw Error(ex.Code == "GITHUB_CREDENTIAL_INVALID" ? "GITHUB_APP_TOKEN_INVALID" : "GITHUB_APP_ACCESS_UNVERIFIED", "GitHub App repository access could not be verified.", 503);
+                }
+                catch (GitHubIntegrationException ex) when (ex.Code == "GITHUB_RESOURCE_UNAVAILABLE")
+                {
+                    appTokens.InvalidateInstallation(eligible.InstallationId.Value);
+                    throw;
+                }
+            }
+            else accessToken = await credentials.GetValidAccessTokenAsync(
                 eligible.AccountId, eligible.OAuthConnectionId, eligible.LinkedByProfileId, ct);
             GitHubSyncPage result;
             try
@@ -90,13 +139,23 @@ public sealed class GitHubSyncJobProcessor(
                 result = await provider.GetSyncPageAsync(accessToken, eligible.FullName,
                     category, scope, pageNumber, PageSize, ct);
             }
-            catch (GitHubIntegrationException exception) when (exception.Code == "GITHUB_CREDENTIAL_INVALID")
+            catch (GitHubIntegrationException exception) when (eligible.Source == GitRepositoryCredentialSource.GitHubApp && (exception.Code is "GITHUB_CREDENTIAL_INVALID" or "GITHUB_ACCESS_DENIED"))
+            {
+                appTokens!.InvalidateInstallation(eligible.InstallationId!.Value);
+                throw Error(exception.Code == "GITHUB_CREDENTIAL_INVALID" ? "GITHUB_APP_TOKEN_INVALID" : "GITHUB_APP_ACCESS_UNVERIFIED", "GitHub App repository access could not be verified.", 503);
+            }
+            catch (GitHubIntegrationException exception) when (eligible.Source == GitRepositoryCredentialSource.GitHubApp && exception.Code == "GITHUB_RESOURCE_UNAVAILABLE")
+            {
+                appTokens!.InvalidateInstallation(eligible.InstallationId!.Value);
+                throw;
+            }
+            catch (GitHubIntegrationException exception) when (eligible.Source == GitRepositoryCredentialSource.OAuth && exception.Code == "GITHUB_CREDENTIAL_INVALID")
             {
                 await credentials.MarkReauthorizationRequiredAsync(
                     eligible.OAuthConnectionId, eligible.LinkedByProfileId, ct);
                 throw Error("GITHUB_REAUTH_REQUIRED", "Reconnect the selected GitHub account before synchronizing.", 409);
             }
-            catch (GitHubIntegrationException exception) when (exception.Code == "GITHUB_ACCESS_DENIED")
+            catch (GitHubIntegrationException exception) when (eligible.Source == GitRepositoryCredentialSource.OAuth && exception.Code == "GITHUB_ACCESS_DENIED")
             {
                 await MarkAccessLostAsync(eligible, ct);
                 throw Error("GITHUB_REPOSITORY_ACCESS_LOST", "GitHub denied access to this repository.", 409);
@@ -104,8 +163,10 @@ public sealed class GitHubSyncJobProcessor(
 
             var observedAt = DateTimeOffset.UtcNow;
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            if (leaseId is { } lockedLease) await RequireLeaseAsync(jobId, lockedLease, true, ct);
             eligible = await LoadEligibleLinkAsync(link.Id, ct);
-            if (eligible.AccessStatus != ProjectGitRepositoryAccessStatus.Active)
+            if (eligible.AccessStatus != ProjectGitRepositoryAccessStatus.Active || eligible.Source != link.Source ||
+                eligible.AppGrantId != link.AppGrantId || eligible.InstallationId != link.InstallationId || eligible.OAuthConnectionId != link.OAuthConnectionId)
                 throw Error("GITHUB_REPOSITORY_NOT_AUTHORIZED", "Repository access changed during synchronization.", 409);
 
             foreach (var item in result.Items)
@@ -134,10 +195,25 @@ public sealed class GitHubSyncJobProcessor(
             currentCheckpoint.LastProcessedAt = observedAt;
             currentCheckpoint.UpdatedAt = observedAt;
             await db.SaveChangesAsync(ct);
+            if (leaseId is { } finalLease) await RequireLeaseAsync(jobId, finalLease, true, ct);
             await transaction.CommitAsync(ct);
             if (!result.HasMore) return;
             pageNumber++;
         }
+    }
+
+    private async Task RequireLeaseAsync(Guid jobId, Guid leaseId, bool lockRow, CancellationToken ct)
+    {
+        if (!db.Database.IsNpgsql()) return; // SQLite test provider has no durable worker claiming.
+        var now = DateTimeOffset.UtcNow;
+        bool valid;
+        if (lockRow)
+        {
+            var rows = await db.GitSyncJobs.FromSqlInterpolated($"SELECT * FROM \"GitSyncJobs\" WHERE \"Id\" = {jobId} AND \"Status\" = {(short)GitSyncJobStatus.Running} AND \"LeaseId\" = {leaseId} AND \"LeaseExpiresAt\" > {now} FOR UPDATE").AsNoTracking().ToListAsync(ct);
+            valid = rows.Count == 1;
+        }
+        else valid = await db.GitSyncJobs.AsNoTracking().AnyAsync(x => x.Id == jobId && x.Status == GitSyncJobStatus.Running && x.LeaseId == leaseId && x.LeaseExpiresAt > now, ct);
+        if (!valid) throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
     }
 
     private async Task PersistItemAsync(
@@ -285,14 +361,15 @@ public sealed class GitHubSyncJobProcessor(
     }
 
     private async Task<EligibleLink> LoadEligibleLinkAsync(
-        Guid linkId, CancellationToken ct, bool includeRecoverable = false) =>
-        await (
+        Guid linkId, CancellationToken ct, bool includeRecoverable = false)
+    {
+        var oauth = await (
             from link in db.ProjectGitRepositories.AsNoTracking()
             join repository in db.GitHubRepositories.AsNoTracking()
                 on link.GitHubRepositoryId equals repository.Id
             join connection in db.GitHubOAuthConnections.AsNoTracking()
                 on link.OAuthConnectionId equals connection.Id
-            where link.Id == linkId && link.UnlinkedAt == null &&
+            where link.Id == linkId && link.CredentialSource == GitRepositoryCredentialSource.OAuth && link.UnlinkedAt == null &&
                 !link.SyncPaused &&
                 (link.AccessStatus == ProjectGitRepositoryAccessStatus.Active ||
                  includeRecoverable &&
@@ -300,11 +377,48 @@ public sealed class GitHubSyncJobProcessor(
                      link.AccessStatus == ProjectGitRepositoryAccessStatus.AccessLost)) &&
                 connection.Status == GitHubOAuthConnectionStatus.Active
             select new EligibleLink(
-                link.Id, link.GitHubRepositoryId, link.OAuthConnectionId,
+                link.Id, link.GitHubRepositoryId, link.OAuthConnectionId!.Value,
                 link.LinkedByProfileId, connection.AccountId, repository.ProviderRepositoryId, repository.FullName,
-                link.AccessStatus))
-            .SingleOrDefaultAsync(ct)
-        ?? throw Error("GITHUB_REPOSITORY_NOT_AUTHORIZED", "Repository association is no longer eligible for synchronization.", 409);
+                link.AccessStatus, GitRepositoryCredentialSource.OAuth, null, null))
+            .SingleOrDefaultAsync(ct);
+        if (oauth is not null) return oauth;
+        var app = await (
+            from link in db.ProjectGitRepositories.AsNoTracking()
+            join repository in db.GitHubRepositories.AsNoTracking() on link.GitHubRepositoryId equals repository.Id
+            join grant in db.Set<GitHubAppRepositoryGrant>().AsNoTracking() on link.GitHubAppRepositoryGrantId equals grant.Id
+            join installation in db.Set<GitHubAppInstallation>().AsNoTracking() on grant.InstallationId equals installation.Id
+            where link.Id == linkId && link.CredentialSource == GitRepositoryCredentialSource.GitHubApp && link.OAuthConnectionId == null &&
+                link.UnlinkedAt == null && !link.SyncPaused && link.AccessStatus == ProjectGitRepositoryAccessStatus.Active &&
+                grant.RevokedAt == null && grant.ProviderRepositoryId == repository.ProviderRepositoryId && installation.Status == GitHubAppInstallationStatus.Active && !installation.VerificationUnknown
+            select new EligibleLink(link.Id, link.GitHubRepositoryId, Guid.Empty, link.LinkedByProfileId, Guid.Empty,
+                repository.ProviderRepositoryId, repository.FullName, link.AccessStatus, GitRepositoryCredentialSource.GitHubApp,
+                grant.Id, installation.ProviderInstallationId)).SingleOrDefaultAsync(ct);
+        if (app is not null) return app;
+        if (await (from association in db.ProjectGitRepositories.AsNoTracking()
+                   join grant in db.Set<GitHubAppRepositoryGrant>().AsNoTracking() on association.GitHubAppRepositoryGrantId equals grant.Id
+                   join installation in db.Set<GitHubAppInstallation>().AsNoTracking() on grant.InstallationId equals installation.Id
+                   where association.Id == linkId && association.CredentialSource == GitRepositoryCredentialSource.GitHubApp && installation.VerificationUnknown
+                   select association.Id).AnyAsync(ct))
+            throw Error("GITHUB_APP_VERIFICATION_PENDING", "Installation verification is pending; synchronization is deferred.", 409);
+        if (await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == linkId &&
+            x.CredentialSource == GitRepositoryCredentialSource.GitHubApp && x.AccessStatus == ProjectGitRepositoryAccessStatus.PendingAuthorization, ct))
+            throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App synchronization is not active yet.", 409);
+        throw Error("GITHUB_REPOSITORY_NOT_AUTHORIZED", "Repository association is no longer eligible for synchronization.", 409);
+    }
+
+    private async Task MarkAppAccessLostAsync(EligibleLink eligible, CancellationToken ct)
+    {
+        var link = await db.ProjectGitRepositories.SingleOrDefaultAsync(x => x.Id == eligible.Id && x.UnlinkedAt == null, ct);
+        if (link is null || link.CredentialSource != GitRepositoryCredentialSource.GitHubApp || link.GitHubAppRepositoryGrantId != eligible.AppGrantId)
+            throw Error("GITHUB_SYNC_ASSOCIATION_CHANGED", "Repository authorization changed during synchronization.", 409);
+        if (link.AccessStatus == ProjectGitRepositoryAccessStatus.AccessLost) return;
+        var now = DateTimeOffset.UtcNow;
+        link.AccessStatus = ProjectGitRepositoryAccessStatus.AccessLost; link.LastAccessCheckedAt = now; link.UpdatedAt = now; link.Version = Guid.NewGuid();
+        db.ProjectGitRepositoryHistory.Add(new ProjectGitRepositoryHistory { ProjectGitRepositoryId = link.Id, ActorProfileId = link.LinkedByProfileId,
+            Action = ProjectGitRepositoryHistoryAction.AccessLost, Details = "GitHub App repository read access could not be confirmed." });
+        await db.SaveChangesAsync(ct);
+        GitHubAppDiagnostics.AccessLost.Add(1);
+    }
 
     private async Task MarkAccessLostAsync(EligibleLink link, CancellationToken ct)
     {
@@ -553,7 +667,8 @@ public sealed class GitHubSyncJobProcessor(
 
     private sealed record EligibleLink(
         Guid Id, Guid GitHubRepositoryId, Guid OAuthConnectionId, Guid LinkedByProfileId,
-        Guid AccountId, long ProviderRepositoryId, string FullName, ProjectGitRepositoryAccessStatus AccessStatus);
+        Guid AccountId, long ProviderRepositoryId, string FullName, ProjectGitRepositoryAccessStatus AccessStatus,
+        GitRepositoryCredentialSource Source, Guid? AppGrantId, long? InstallationId);
     private sealed record ActivityActor(string Role, string? ExternalId, string? Login);
     private sealed record ActivityDefinition(
         string Type, DateTimeOffset OccurredAt, IReadOnlyList<ActivityActor> Actors);

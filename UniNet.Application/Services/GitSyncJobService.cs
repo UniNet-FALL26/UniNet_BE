@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using Npgsql;
 using UniNet.Application.Common;
 using UniNet.Application.DTOs;
@@ -7,11 +8,13 @@ using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
 using UniNet.Infrastructure.Data;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace UniNet.Application.Services;
 
-public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOptions> options) : IGitSyncJobService
+public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOptions> options, IOptions<GitHubAppOptions>? appOptions = null, ILogger<GitSyncJobService>? logger = null) : IGitSyncJobService
 {
+    private bool AppEnabled => appOptions?.Value.Enabled == true;
     private static readonly GitSyncJobStatus[] ActiveStatuses =
     [
         GitSyncJobStatus.Pending,
@@ -43,13 +46,23 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                 FROM "GitSyncJobs" AS candidate
                 INNER JOIN "ProjectGitRepositories" AS association
                     ON association."Id" = candidate."ProjectGitRepositoryId"
-                INNER JOIN "GitHubOAuthConnections" AS credential
+                INNER JOIN "GitHubRepositories" AS repository ON repository."Id" = association."GitHubRepositoryId"
+                LEFT JOIN "GitHubOAuthConnections" AS credential
                     ON credential."Id" = association."OAuthConnectionId"
-                WHERE candidate."OAuthConnectionId" = association."OAuthConnectionId"
+                LEFT JOIN "GitHubAppRepositoryGrants" AS app_grant ON app_grant."Id" = association."GitHubAppRepositoryGrantId"
+                LEFT JOIN "GitHubAppInstallations" AS installation ON installation."Id" = app_grant."InstallationId"
+                WHERE candidate."GitHubRepositoryId" = association."GitHubRepositoryId" AND (
+                    (association."CredentialSource" = 0 AND candidate."CredentialSource" = 0
+                        AND candidate."GitHubAppRepositoryGrantId" IS NULL AND candidate."OAuthConnectionId" = association."OAuthConnectionId"
+                        AND credential."Status" = {(short)GitHubOAuthConnectionStatus.Active}) OR
+                    ({AppEnabled} AND association."CredentialSource" = 1 AND candidate."CredentialSource" = 1 AND candidate."SyncType" IN ({(short)GitSyncType.Initial}, {(short)GitSyncType.Manual}, {(short)GitSyncType.Scheduled}, {(short)GitSyncType.Webhook})
+                        AND candidate."OAuthConnectionId" IS NULL AND association."OAuthConnectionId" IS NULL
+                        AND candidate."GitHubAppRepositoryGrantId" = association."GitHubAppRepositoryGrantId"
+                        AND app_grant."RevokedAt" IS NULL AND app_grant."ProviderRepositoryId" = repository."ProviderRepositoryId"
+                        AND installation."Status" = {(short)GitHubAppInstallationStatus.Active} AND installation."VerificationUnknown" = FALSE))
                     AND association."UnlinkedAt" IS NULL
                     AND association."SyncPaused" = FALSE
                     AND association."AccessStatus" = {(short)ProjectGitRepositoryAccessStatus.Active}
-                    AND credential."Status" = {(short)GitHubOAuthConnectionStatus.Active}
                     AND (
                         candidate."Status" = {(short)GitSyncJobStatus.Running}
                         OR NOT EXISTS (
@@ -70,16 +83,41 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                 LIMIT 1
             )
             RETURNING job.*
-            """).ToListAsync(ct);
+            """).AsNoTracking().ToListAsync(ct);
+        if (jobs.SingleOrDefault() is { CredentialSource: GitRepositoryCredentialSource.GitHubApp } appJob)
+        {
+            var installationId = await db.Set<GitHubAppRepositoryGrant>().AsNoTracking()
+                .Where(x => x.Id == appJob.GitHubAppRepositoryGrantId).Select(x => x.InstallationId).SingleAsync(ct);
+            // A fresh statement after the non-blocking lock avoids using the UPDATE's pre-revoke MVCC snapshot.
+            var acquired = await db.Database.SqlQueryRaw<bool>(
+                "SELECT pg_try_advisory_xact_lock_shared(1920167523, hashtext({0})) AS \"Value\"", installationId.ToString()).SingleAsync(ct);
+            var eligible = acquired ? (await EligibleAppCandidatesAsync(null, appJob.ProjectGitRepositoryId, ct)).SingleOrDefault() : null;
+            if (eligible is null || eligible.GrantId != appJob.GitHubAppRepositoryGrantId || eligible.RepositoryId != appJob.GitHubRepositoryId)
+            {
+                await transaction.RollbackAsync(ct);
+                db.ChangeTracker.Clear();
+                return null;
+            }
+        }
         await transaction.CommitAsync(ct);
+        if (jobs.SingleOrDefault() is { CredentialSource: GitRepositoryCredentialSource.GitHubApp }) GitHubAppDiagnostics.JobClaimed.Add(1);
         return jobs.SingleOrDefault();
     }
 
     public async Task CompleteAsync(Guid jobId, Guid leaseId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
+        if (db.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var job = await db.GitSyncJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.Status == GitSyncJobStatus.Running && x.LeaseId == leaseId, ct);
+            if (job?.LeaseExpiresAt is not { } expiry || expiry <= now)
+                throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
+            job.Status = GitSyncJobStatus.Completed; job.CompletedAt = now; job.LeaseId = null; job.LeaseExpiresAt = null;
+            job.LastHeartbeatAt = now; job.UpdatedAt = now; await db.SaveChangesAsync(ct);
+            GitHubAppDiagnostics.JobCompleted.Add(1); return;
+        }
         var updated = await db.GitSyncJobs
-            .Where(x => x.Id == jobId && x.Status == GitSyncJobStatus.Running && x.LeaseId == leaseId)
+            .Where(x => x.Id == jobId && x.Status == GitSyncJobStatus.Running && x.LeaseId == leaseId && x.LeaseExpiresAt > now)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(x => x.Status, GitSyncJobStatus.Completed)
                 .SetProperty(x => x.CompletedAt, now)
@@ -89,6 +127,8 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                 .SetProperty(x => x.UpdatedAt, now), ct);
         if (updated != 1)
             throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
+        // This count includes both credential sources; it has no high-cardinality labels.
+        GitHubAppDiagnostics.JobCompleted.Add(1);
     }
 
     public async Task<bool> RenewLeaseAsync(
@@ -128,10 +168,31 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         if (string.IsNullOrWhiteSpace(safeErrorMessage) || safeErrorMessage.Length > 1000)
             throw new ArgumentException("A safe bounded error message is required.", nameof(safeErrorMessage));
 
+        if (db.Database.IsNpgsql())
+        {
+            var at = DateTimeOffset.UtcNow; var max = Math.Max(1, options.Value.MaxRetryAttempts);
+            var updated = await db.GitSyncJobs.Where(x => x.Id == jobId && x.Status == GitSyncJobStatus.Running && x.LeaseId == leaseId && x.LeaseExpiresAt > at)
+                .ExecuteUpdateAsync(s => s.SetProperty(j => j.RetryCount, j => j.RetryCount + 1)
+                    .SetProperty(j => j.ErrorCode, errorCode).SetProperty(j => j.ErrorMessage, safeErrorMessage)
+                    .SetProperty(j => j.UpdatedAt, at).SetProperty(j => j.LastHeartbeatAt, at)
+                    .SetProperty(j => j.LeaseId, (Guid?)null).SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.Status, j => !retryable || j.RetryCount + 1 >= max ? GitSyncJobStatus.Failed : GitSyncJobStatus.RetryScheduled)
+                    .SetProperty(j => j.CompletedAt, j => !retryable || j.RetryCount + 1 >= max ? (DateTimeOffset?)at : null)
+                    .SetProperty(j => j.NextAttemptAt, j => !retryable || j.RetryCount + 1 >= max ? null : (DateTimeOffset?)retryAt), ct);
+            if (updated != 1) throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
+            var result = await db.GitSyncJobs.AsNoTracking().Where(x => x.Id == jobId).Select(x => new { x.Status, x.CredentialSource }).SingleAsync(ct);
+            if (result.CredentialSource == GitRepositoryCredentialSource.GitHubApp)
+            {
+                if (result.Status == GitSyncJobStatus.RetryScheduled) GitHubAppDiagnostics.JobRetry.Add(1); else GitHubAppDiagnostics.JobFailed.Add(1);
+                logger?.LogWarning("Git sync job {JobId} changed to {Status} with code {ErrorCode}", jobId, result.Status, errorCode);
+            }
+            return result.Status == GitSyncJobStatus.RetryScheduled;
+        }
+
         var job = await db.GitSyncJobs
             .SingleOrDefaultAsync(x => x.Id == jobId && x.Status == GitSyncJobStatus.Running &&
                 x.LeaseId == leaseId, ct);
-        if (job is null)
+        if (job?.LeaseExpiresAt is not { } leaseExpiry || leaseExpiry <= DateTimeOffset.UtcNow)
             throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
 
         var now = DateTimeOffset.UtcNow;
@@ -163,6 +224,12 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         {
             throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job lease expired or was replaced.", 409);
         }
+        if (job.CredentialSource == GitRepositoryCredentialSource.GitHubApp)
+        {
+            if (job.Status == GitSyncJobStatus.RetryScheduled) GitHubAppDiagnostics.JobRetry.Add(1);
+            else GitHubAppDiagnostics.JobFailed.Add(1);
+            logger?.LogWarning("Git sync job {JobId} changed to {Status} with code {ErrorCode}", job.Id, job.Status, job.ErrorCode);
+        }
         return job.Status == GitSyncJobStatus.RetryScheduled;
     }
 
@@ -173,7 +240,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             from association in db.ProjectGitRepositories.AsNoTracking()
             join credential in db.GitHubOAuthConnections.AsNoTracking()
                 on association.OAuthConnectionId equals credential.Id
-            where association.UnlinkedAt == null &&
+            where association.CredentialSource == GitRepositoryCredentialSource.OAuth && association.UnlinkedAt == null &&
                 association.SyncPaused == false &&
                 (association.AccessStatus == ProjectGitRepositoryAccessStatus.Active ||
                  association.AccessStatus == ProjectGitRepositoryAccessStatus.PendingAuthorization ||
@@ -183,7 +250,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             {
                 association.Id,
                 association.GitHubRepositoryId,
-                association.OAuthConnectionId,
+                OAuthConnectionId = association.OAuthConnectionId!.Value,
                 association.LinkedByProfileId,
                 association.LinkedAt,
                 association.SyncIntervalHours,
@@ -191,7 +258,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                 association.LastAccessCheckedAt,
                 ConnectionUpdatedAt = credential.UpdatedAt
             }).ToListAsync(ct);
-        if (candidates.Count == 0) return 0;
+        if (candidates.Count == 0) return await EnqueueAppScheduledAsync(now, ct);
 
         var linkIds = candidates.Select(x => x.Id).ToArray();
         var jobs = await db.GitSyncJobs.AsNoTracking()
@@ -270,8 +337,119 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             }
         }
 
+        return created + await EnqueueAppScheduledAsync(now, ct);
+    }
+
+    private async Task<List<AppCandidate>> EligibleAppCandidatesAsync(Guid? projectId, Guid? linkId, CancellationToken ct) => await (
+        from link in db.ProjectGitRepositories.AsNoTracking()
+        join repo in db.GitHubRepositories.AsNoTracking() on link.GitHubRepositoryId equals repo.Id
+        join grant in db.Set<GitHubAppRepositoryGrant>().AsNoTracking() on link.GitHubAppRepositoryGrantId equals grant.Id
+        join installation in db.Set<GitHubAppInstallation>().AsNoTracking() on grant.InstallationId equals installation.Id
+        where link.CredentialSource == GitRepositoryCredentialSource.GitHubApp && link.OAuthConnectionId == null &&
+            link.UnlinkedAt == null && !link.SyncPaused && link.AccessStatus == ProjectGitRepositoryAccessStatus.Active &&
+            grant.RevokedAt == null && grant.ProviderRepositoryId == repo.ProviderRepositoryId &&
+            installation.Status == GitHubAppInstallationStatus.Active && !installation.VerificationUnknown &&
+            (projectId == null || link.ProjectId == projectId) && (linkId == null || link.Id == linkId)
+        select new AppCandidate(link.Id, link.GitHubRepositoryId, grant.Id, link.LinkedByProfileId, link.LinkedAt, link.SyncIntervalHours)).ToListAsync(ct);
+
+    private async Task<GitSyncRequestResult> RequestAppManualAsync(Guid accountId, Guid projectId, Guid linkId, Guid actor, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
+        var link = (await EligibleAppCandidatesAsync(projectId, linkId, ct)).SingleOrDefault()
+            ?? throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App repository access is not ready for synchronization.", 409);
+        var existing = await FindActiveJobAsync(link.Id, ct);
+        if (existing is not null) return new(await ToResponseAsync(existing, ct), true);
+        var job = NewAppJob(link, GitSyncType.Manual, actor, DateTimeOffset.UtcNow);
+        db.GitSyncJobs.Add(job);
+        try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
+        catch (DbUpdateException ex) when (IsActiveJobConflict(ex))
+        {
+            db.Entry(job).State = EntityState.Detached;
+            await transaction.RollbackAsync(ct);
+            await transaction.DisposeAsync();
+            existing = await FindActiveJobAsync(link.Id, ct);
+            if (existing is null) throw;
+            return new(await ToResponseAsync(existing, ct), true);
+        }
+        catch (Exception ex) when (ex.GetBaseException() is PostgresException { SqlState: "40001" or "40P01" })
+        { throw Error("GITHUB_SYNC_CONFLICT", "Synchronization state changed concurrently; retry.", 409); }
+        GitHubAppDiagnostics.JobEnqueued.Add(1);
+        logger?.LogInformation("Enqueued App manual sync job {JobId} for association {AssociationId}", job.Id, link.Id);
+        return new(await ToResponseAsync(job, ct), false);
+    }
+
+    private async Task<int> EnqueueAppScheduledAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        if (!AppEnabled) return 0;
+        var candidates = await EligibleAppCandidatesAsync(null, null, ct);
+        if (candidates.Count == 0) return 0;
+        var ids = candidates.Select(x => x.Id).ToArray();
+        var jobs = await db.GitSyncJobs.AsNoTracking().Where(x => ids.Contains(x.ProjectGitRepositoryId)).ToListAsync(ct);
+        var count = 0;
+        foreach (var candidate in candidates)
+        {
+            var related = jobs.Where(x => x.ProjectGitRepositoryId == candidate.Id).ToArray();
+            if (related.Any(x => x.SyncType == GitSyncType.Initial && x.Status == GitSyncJobStatus.Failed) &&
+                !related.Any(x => x.SyncType == GitSyncType.Initial && x.Status == GitSyncJobStatus.Completed)) continue;
+            if (related.Any(x => ActiveStatuses.Contains(x.Status))) continue;
+            var lastAttempt = related.OrderByDescending(x => x.UpdatedAt).FirstOrDefault();
+            if (lastAttempt is not null && lastAttempt.Status != GitSyncJobStatus.Completed && lastAttempt.UpdatedAt.AddHours(candidate.SyncIntervalHours) > now) continue;
+            var last = related.Where(x => x.Status == GitSyncJobStatus.Completed && x.CompletedAt != null)
+                .Select(x => x.CompletedAt!.Value).DefaultIfEmpty(candidate.LinkedAt).Max();
+            if (last.AddHours(candidate.SyncIntervalHours) > now) continue;
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            if ((await EligibleAppCandidatesAsync(null, candidate.Id, ct)).Count == 0 || await FindActiveJobAsync(candidate.Id, ct) is not null) continue;
+            var job = NewAppJob(candidate, GitSyncType.Scheduled, candidate.LinkedByProfileId, now);
+            db.GitSyncJobs.Add(job);
+            try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); count++; GitHubAppDiagnostics.JobEnqueued.Add(1); logger?.LogInformation("Enqueued App scheduled sync job {JobId} for association {AssociationId}", job.Id, candidate.Id); }
+            catch (DbUpdateException ex) when (IsActiveJobConflict(ex)) { db.Entry(job).State = EntityState.Detached; }
+            catch (Exception ex) when (ex.GetBaseException() is PostgresException { SqlState: "40001" or "40P01" }) { db.Entry(job).State = EntityState.Detached; }
+        }
+        return count;
+    }
+
+    private static GitSyncJob NewAppJob(AppCandidate link, GitSyncType type, Guid actor, DateTimeOffset now) => new()
+    {
+        ProjectGitRepositoryId = link.Id, GitHubRepositoryId = link.RepositoryId, OAuthConnectionId = null,
+        CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = link.GrantId,
+        RequestedByProfileId = actor, SyncType = type, Status = GitSyncJobStatus.Pending, CreatedAt = now, UpdatedAt = now
+    };
+
+    // Caller holds the verified installation advisory lock and a serializable transaction.
+    internal static async Task<int> EnqueueAppWebhookAsync(UniNetDbContext db, Guid grantId, Guid repositoryId,
+        string deliveryId, DateTimeOffset now, CancellationToken ct)
+    {
+        var links = await db.ProjectGitRepositories.AsNoTracking().Where(x => x.CredentialSource == GitRepositoryCredentialSource.GitHubApp &&
+            x.OAuthConnectionId == null && x.GitHubAppRepositoryGrantId == grantId && x.GitHubRepositoryId == repositoryId &&
+            x.UnlinkedAt == null && !x.SyncPaused && x.AccessStatus == ProjectGitRepositoryAccessStatus.Active).OrderBy(x => x.Id).ToListAsync(ct);
+        var created = 0;
+        foreach (var link in links)
+        {
+            var idempotencyKey = "app-webhook:" + deliveryId;
+            var prior = await db.GitSyncJobs.AnyAsync(x => x.ProjectGitRepositoryId == link.Id && x.IdempotencyKey == idempotencyKey, ct);
+            if (prior) continue;
+            // Serialize coalescing with job claim: a snapshot that saw Pending must not be
+            // acknowledged after that job has already started fetching provider pages.
+            var activeJobs = await db.GitSyncJobs.FromSqlInterpolated($"""
+                SELECT * FROM "GitSyncJobs" WHERE "ProjectGitRepositoryId" = {link.Id}
+                    AND "Status" IN ({(short)GitSyncJobStatus.Pending}, {(short)GitSyncJobStatus.Running},
+                        {(short)GitSyncJobStatus.RetryScheduled}, {(short)GitSyncJobStatus.Paused})
+                FOR UPDATE
+                """).ToListAsync(ct);
+            var active = activeJobs.Select(x => x.Status).ToList();
+            // Pending has not run yet and covers this event. A running or retrying scan needs one follow-up.
+            if (active.Contains(GitSyncJobStatus.Pending)) continue;
+            if (active.Contains(GitSyncJobStatus.Paused)) throw Error("GITHUB_SYNC_CONFLICT", "Synchronization is temporarily paused.", 409);
+            db.GitSyncJobs.Add(new GitSyncJob { ProjectGitRepositoryId = link.Id, GitHubRepositoryId = repositoryId,
+                CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = grantId,
+                OAuthConnectionId = null, RequestedByProfileId = link.LinkedByProfileId, SyncType = GitSyncType.Webhook,
+                Status = GitSyncJobStatus.Pending, IdempotencyKey = idempotencyKey, CreatedAt = now, UpdatedAt = now });
+            created++;
+        }
         return created;
     }
+    private sealed record AppCandidate(Guid Id, Guid RepositoryId, Guid GrantId, Guid LinkedByProfileId, DateTimeOffset LinkedAt, int SyncIntervalHours);
 
     private static DateTimeOffset Max(DateTimeOffset first, DateTimeOffset second) =>
         first >= second ? first : second;
@@ -282,6 +460,11 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         if (!options.Value.Enabled)
             throw Error("GITHUB_SYNC_DISABLED", "GitHub synchronization is not enabled.", 503);
         var actorProfileId = await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
+        if (await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == projectGitRepositoryId && x.ProjectId == projectId && x.UnlinkedAt == null && x.CredentialSource == GitRepositoryCredentialSource.GitHubApp, ct))
+        {
+            if (!AppEnabled) throw Error("GITHUB_APP_DISABLED", "GitHub App integration is unavailable.", 503);
+            return await RequestAppManualAsync(accountId, projectId, projectGitRepositoryId, actorProfileId, ct);
+        }
         var link = await (
             from repositoryLink in db.ProjectGitRepositories.AsNoTracking()
             join repository in db.GitHubRepositories.AsNoTracking()
@@ -316,7 +499,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         {
             ProjectGitRepositoryId = projectGitRepositoryId,
             GitHubRepositoryId = link.RepositoryId,
-            OAuthConnectionId = link.Link.OAuthConnectionId,
+            OAuthConnectionId = link.Link.OAuthConnectionId!.Value,
             RequestedByProfileId = actorProfileId,
             SyncType = GitSyncType.Manual,
             Status = GitSyncJobStatus.Pending,
@@ -351,6 +534,17 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             .SingleOrDefaultAsync(x => x.Id == projectGitRepositoryId &&
                 x.ProjectId == projectId && x.UnlinkedAt == null, ct)
             ?? throw Error("GITHUB_REPOSITORY_LINK_NOT_FOUND", "Linked repository not found.", 404);
+        if (link.CredentialSource == GitRepositoryCredentialSource.GitHubApp &&
+            link.AccessStatus != ProjectGitRepositoryAccessStatus.Active)
+            throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App repository access is not ready.", 409);
+        if (link.CredentialSource == GitRepositoryCredentialSource.GitHubApp && request.SyncPaused == false &&
+            !await (from grant in db.Set<GitHubAppRepositoryGrant>().AsNoTracking()
+                    join installation in db.Set<GitHubAppInstallation>().AsNoTracking() on grant.InstallationId equals installation.Id
+                    join repository in db.GitHubRepositories.AsNoTracking() on link.GitHubRepositoryId equals repository.Id
+                    where grant.Id == link.GitHubAppRepositoryGrantId && grant.RevokedAt == null &&
+                        grant.ProviderRepositoryId == repository.ProviderRepositoryId && installation.Status == GitHubAppInstallationStatus.Active && !installation.VerificationUnknown
+                    select grant.Id).AnyAsync(ct))
+            throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App repository access is not ready.", 409);
         link.SyncIntervalHours = request.SyncIntervalHours;
         if (request.SyncPaused is { } paused) link.SyncPaused = paused;
         link.UpdatedAt = DateTimeOffset.UtcNow;
@@ -407,7 +601,8 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             join repository in db.GitHubRepositories.AsNoTracking()
                 on repositoryLink.GitHubRepositoryId equals repository.Id
             join connection in db.GitHubOAuthConnections.AsNoTracking()
-                on repositoryLink.OAuthConnectionId equals connection.Id
+                on repositoryLink.OAuthConnectionId equals connection.Id into connections
+            from connection in connections.DefaultIfEmpty()
             where repositoryLink.ProjectId == projectId && repositoryLink.UnlinkedAt == null
             select new
             {
@@ -418,7 +613,18 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                 repositoryLink.SyncPaused,
                 repositoryLink.SyncIntervalHours,
                 repositoryLink.LinkedAt,
-                ConnectionStatus = connection.Status
+                repositoryLink.CredentialSource,
+                AppVerificationUnknown = (from grant in db.Set<GitHubAppRepositoryGrant>()
+                    join installation in db.Set<GitHubAppInstallation>() on grant.InstallationId equals installation.Id
+                    where grant.Id == repositoryLink.GitHubAppRepositoryGrantId && installation.VerificationUnknown
+                    select grant.Id).Any(),
+                AppGrantReady = repositoryLink.CredentialSource != GitRepositoryCredentialSource.GitHubApp ||
+                    (from grant in db.Set<GitHubAppRepositoryGrant>()
+                     join installation in db.Set<GitHubAppInstallation>() on grant.InstallationId equals installation.Id
+                     where grant.Id == repositoryLink.GitHubAppRepositoryGrantId && grant.RevokedAt == null &&
+                         grant.ProviderRepositoryId == repository.ProviderRepositoryId && installation.Status == GitHubAppInstallationStatus.Active && !installation.VerificationUnknown
+                     select grant.Id).Any(),
+                ConnectionStatus = connection == null ? (GitHubOAuthConnectionStatus?)null : connection.Status
             })
             .OrderBy(x => x.RepositoryFullName)
             .ToListAsync(ct);
@@ -446,11 +652,28 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                 link.AccessStatus,
                 link.SyncPaused,
                 link.SyncIntervalHours,
-                link.ConnectionStatus != GitHubOAuthConnectionStatus.Active,
+                link.CredentialSource == GitRepositoryCredentialSource.GitHubApp ?
+                    link.AccessStatus != ProjectGitRepositoryAccessStatus.Active || !link.AppGrantReady : link.ConnectionStatus != GitHubOAuthConnectionStatus.Active,
                 successTimes.GetValueOrDefault(link.Id),
-                (successTimes.GetValueOrDefault(link.Id) ?? link.LinkedAt)
-                    .AddHours(link.SyncIntervalHours),
-                latest is null ? null : await ToResponseAsync(latest, ct)));
+                link.CredentialSource == GitRepositoryCredentialSource.GitHubApp && (link.AccessStatus != ProjectGitRepositoryAccessStatus.Active || link.SyncPaused || !link.AppGrantReady) ? null :
+                    (successTimes.GetValueOrDefault(link.Id) ?? link.LinkedAt).AddHours(link.SyncIntervalHours),
+                latest is null ? null : await ToResponseAsync(latest, ct))
+            {
+                CredentialSource = link.CredentialSource,
+                SyncReadiness = link.CredentialSource == GitRepositoryCredentialSource.GitHubApp ?
+                    (link.AppVerificationUnknown ? "VerificationPending" : link.AccessStatus == ProjectGitRepositoryAccessStatus.AccessLost ? "AccessLost" :
+                     link.AccessStatus != ProjectGitRepositoryAccessStatus.Active ? "PendingActivation" : !link.AppGrantReady ? "AccessLost" :
+                     link.SyncPaused ? "Paused" : latest?.Status switch
+                    {
+                        GitSyncJobStatus.Running => "Syncing",
+                        GitSyncJobStatus.Completed => "SyncReady",
+                        GitSyncJobStatus.Failed => "SyncFailed",
+                        _ => "PendingWorker"
+                    }) :
+                    link.AccessStatus == ProjectGitRepositoryAccessStatus.AccessLost ? "AccessLost" :
+                    link.SyncPaused ? "Paused" :
+                    link.AccessStatus == ProjectGitRepositoryAccessStatus.Active && link.ConnectionStatus == GitHubOAuthConnectionStatus.Active ? "SyncReady" : "PendingAuthorization"
+            });
         }
 
         return new(response);

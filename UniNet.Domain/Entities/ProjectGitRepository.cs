@@ -7,7 +7,9 @@ public sealed class ProjectGitRepository
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public Guid GitHubRepositoryId { get; set; }
-    public Guid OAuthConnectionId { get; set; }
+    public Guid? OAuthConnectionId { get; set; }
+    public GitRepositoryCredentialSource CredentialSource { get; set; } = GitRepositoryCredentialSource.OAuth;
+    public Guid? GitHubAppRepositoryGrantId { get; set; }
     public Guid LinkedByProfileId { get; set; }
     public ProjectGitRepositoryAccessStatus AccessStatus { get; set; } = ProjectGitRepositoryAccessStatus.Active;
     public bool SyncPaused { get; set; }

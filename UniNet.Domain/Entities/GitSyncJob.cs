@@ -7,7 +7,9 @@ public sealed class GitSyncJob
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectGitRepositoryId { get; set; }
     public Guid GitHubRepositoryId { get; set; }
-    public Guid OAuthConnectionId { get; set; }
+    public Guid? OAuthConnectionId { get; set; }
+    public GitRepositoryCredentialSource CredentialSource { get; set; } = GitRepositoryCredentialSource.OAuth;
+    public Guid? GitHubAppRepositoryGrantId { get; set; }
     public Guid? RequestedByProfileId { get; set; }
     public GitSyncType SyncType { get; set; }
     public GitSyncJobStatus Status { get; set; } = GitSyncJobStatus.Pending;

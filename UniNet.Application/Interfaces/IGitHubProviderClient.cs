@@ -37,6 +37,10 @@ public interface IGitHubProviderClient
     Task<GitHubUser> GetAuthenticatedUserAsync(string accessToken, CancellationToken ct);
     Task<IReadOnlyList<GitHubRemoteRepository>> GetRepositoriesAsync(string accessToken, int page, int pageSize, CancellationToken ct);
     Task<GitHubRemoteRepository> GetRepositoryAsync(string accessToken, long repositoryId, CancellationToken ct);
+    // Only call after validating the installation/grant and obtaining a repository-scoped installation token.
+    // Providers without an installation-specific probe retain their existing conservative behavior.
+    Task<GitHubRemoteRepository> GetInstallationRepositoryAsync(string accessToken, long repositoryId, CancellationToken ct) =>
+        GetRepositoryAsync(accessToken, repositoryId, ct);
     Task<GitHubSyncPage> GetSyncPageAsync(
         string accessToken, string repositoryFullName, string category, string? scope,
         int page, int pageSize, CancellationToken ct);

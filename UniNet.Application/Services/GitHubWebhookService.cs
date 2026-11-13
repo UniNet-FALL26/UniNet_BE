@@ -47,6 +47,10 @@ public sealed class GitHubWebhookService(
             using var document = JsonDocument.Parse(payload);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 throw new JsonException();
+            // GitHub includes installation for App deliveries; they must use the App endpoint and secret.
+            if (document.RootElement.TryGetProperty("installation", out var appInstallation) &&
+                appInstallation.ValueKind == JsonValueKind.Object)
+                throw Error("GITHUB_WEBHOOK_SOURCE_MISMATCH", "GitHub App deliveries require the App webhook endpoint.", 400);
             if (document.RootElement.TryGetProperty("repository", out var repository) &&
                 repository.TryGetProperty("id", out var id) &&
                 id.TryGetInt64(out var parsedId) && parsedId > 0)
@@ -84,7 +88,7 @@ public sealed class GitHubWebhookService(
                 from link in db.ProjectGitRepositories
                 join repository in db.GitHubRepositories on link.GitHubRepositoryId equals repository.Id
                 join credential in db.GitHubOAuthConnections on link.OAuthConnectionId equals credential.Id
-                where repository.ProviderRepositoryId == providerRepositoryId &&
+                where link.CredentialSource == GitRepositoryCredentialSource.OAuth && repository.ProviderRepositoryId == providerRepositoryId &&
                     link.UnlinkedAt == null && !link.SyncPaused &&
                     link.AccessStatus == ProjectGitRepositoryAccessStatus.Active &&
                     credential.Status == GitHubOAuthConnectionStatus.Active
@@ -92,7 +96,7 @@ public sealed class GitHubWebhookService(
                 {
                     link.Id,
                     link.GitHubRepositoryId,
-                    link.OAuthConnectionId,
+                    OAuthConnectionId = link.OAuthConnectionId!.Value,
                     link.LinkedByProfileId
                 }).ToListAsync(ct);
 
@@ -139,7 +143,7 @@ public sealed class GitHubWebhookService(
         return new(false, supported, enqueued);
     }
 
-    private static void VerifySignature(string secret, ReadOnlySpan<byte> payload, string signature)
+    internal static void VerifySignature(string secret, ReadOnlySpan<byte> payload, string signature)
     {
         if (signature.Length != 71 || !signature.StartsWith("sha256=", StringComparison.Ordinal))
             throw Error("GITHUB_WEBHOOK_SIGNATURE_INVALID", "Webhook signature is invalid.", 401);

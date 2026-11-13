@@ -63,6 +63,18 @@ public sealed class GitHubProviderClient(HttpClient http, IOptions<GitHubIntegra
         return MapRepository(await SendJsonAsync<RepositoryPayload>(request, ct));
     }
 
+    public async Task<GitHubRemoteRepository> GetInstallationRepositoryAsync(string accessToken, long repositoryId, CancellationToken ct)
+    {
+        var repository = await GetRepositoryAsync(accessToken, repositoryId, ct);
+        if (repository.Id != repositoryId)
+            throw new GitHubIntegrationException("GITHUB_INVALID_RESPONSE", "GitHub returned a different repository than requested.", 502);
+        if (!repository.IsPrivate) return repository;
+        // A scoped installation token can have Contents read while the user-style pull flag is false.
+        // GitHub requires Contents read to list branches; do not infer read access from metadata alone.
+        await GetSyncPageAsync(accessToken, repository.FullName, "branches", null, 1, 1, ct);
+        return repository with { CanRead = true };
+    }
+
     public async Task<GitHubSyncPage> GetSyncPageAsync(
         string accessToken,
         string repositoryFullName,

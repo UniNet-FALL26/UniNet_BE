@@ -35,10 +35,14 @@ public sealed record ProjectGitRepositoryResponse(
     GitHubRepositoryResponse Repository,
     ProjectGitRepositoryAccessStatus AccessStatus,
     bool SyncPaused,
-    [property: JsonPropertyName("oauthConnectionId")] Guid OAuthConnectionId,
+    [property: JsonPropertyName("oauthConnectionId")] Guid? OAuthConnectionId,
     DateTimeOffset LinkedAt,
     DateTimeOffset? UnlinkedAt,
-    DateTimeOffset? LastAccessCheckedAt);
+    DateTimeOffset? LastAccessCheckedAt)
+{
+    public GitRepositoryCredentialSource CredentialSource { get; init; }
+    public string SyncReadiness { get; init; } = "SyncReady";
+}
 public sealed record LinkGitHubRepositoryRequest(
     long ProviderRepositoryId,
     [property: JsonPropertyName("oauthConnectionId")] Guid OAuthConnectionId);
@@ -95,7 +99,11 @@ public sealed record ProjectGitSyncStatusResponse(
     bool RequiresAuthorization,
     DateTimeOffset? LastSuccessfulSyncAt,
     DateTimeOffset? NextScheduledSyncAt,
-    GitSyncJobResponse? LatestJob);
+    GitSyncJobResponse? LatestJob)
+{
+    public GitRepositoryCredentialSource CredentialSource { get; init; }
+    public string SyncReadiness { get; init; } = "SyncReady";
+}
 public sealed record ProjectGitSyncStatusPage(IReadOnlyList<ProjectGitSyncStatusResponse> Items);
 public sealed record GitActivityActorResponse(string Role, string? ExternalAccountId, string? Login);
 public sealed record GitActivityResponse(
