@@ -70,9 +70,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
-    public DbSet<ProjectEvidenceDocument> ProjectEvidenceDocuments => Set<ProjectEvidenceDocument>();
     public DbSet<ExternalProjectDraft> ExternalProjectDrafts => Set<ExternalProjectDraft>();
-    public DbSet<ExternalProjectDraftFile> ExternalProjectDraftFiles => Set<ExternalProjectDraftFile>();
     public DbSet<AssessorOnboarding> AssessorOnboardings => Set<AssessorOnboarding>();
     public DbSet<AssessorOnboardingEmail> AssessorOnboardingEmails => Set<AssessorOnboardingEmail>();
     public DbSet<Account> Accounts => Set<Account>();
@@ -133,14 +131,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftConfiguration());
-        model.ApplyConfiguration(new ExternalProjectDraftFileConfiguration());
-        model.Entity<ProjectEvidenceDocument>(e =>
-        {
-            e.ToTable("ProjectEvidenceDocuments"); e.HasKey(x => x.Id);
-            e.HasOne(x => x.Project).WithMany(x => x.EvidenceDocuments).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.UploadedFile).WithMany().HasForeignKey(x => x.UploadedFileId).OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => new { x.ProjectId, x.UploadedFileId }).IsUnique();
-        });
         AdminManagementConfiguration.Configure(model);
         FinanceConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());

@@ -53,6 +53,5 @@ namespace UniNet.Domain.Entities
         public List<ProjectVerification> Verifications { get; set; } = [];
         public List<WorkspaceChannel> WorkspaceChannels { get; set; } = [];
         public ContributionCycle? ContributionCycle { get; set; }
-        public List<ProjectEvidenceDocument> EvidenceDocuments { get; set; } = [];
     }
 }

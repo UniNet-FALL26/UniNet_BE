@@ -14,7 +14,7 @@ public sealed class VerificationBackgroundWorker(IServiceScopeFactory scopes, IC
     {
         if (!configuration.GetValue("VerificationWorker:Enabled", true)) return Task.CompletedTask;
         return Task.WhenAll(
-            LoopAsync(70110, "External project draft extraction", (s, now, ct) => s.GetRequiredService<ExternalProjectDraftTasks>().RunAsync(now, ct), stoppingToken),
+            LoopAsync(70110, "External project draft expiration", (s, now, ct) => s.GetRequiredService<ExternalProjectDraftTasks>().RunAsync(now, ct), stoppingToken),
             LoopAsync(70109, "Project recruitment deadline", (s, now, ct) => s.GetRequiredService<ProjectRecruitmentTasks>().RunAsync(now, ct), stoppingToken),
             LoopAsync(70108, "Slot reservation expiry", (s, now, ct) => s.GetRequiredService<VerificationReservationTasks>().ExpireAsync(now, ct), stoppingToken),
             LoopAsync(70101, "Payment reconciliation", (s, now, ct) => s.GetRequiredService<TransactionService>().ReconcilePendingInBackgroundAsync(now, ct), stoppingToken),

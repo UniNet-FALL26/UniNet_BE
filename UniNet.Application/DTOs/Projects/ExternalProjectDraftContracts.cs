@@ -2,7 +2,6 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application.DTOs.Projects;
 
-public sealed record CreateExternalProjectDraftRequest(List<Guid> FileIds);
 public sealed record UpdateExternalProjectDraftRequest(int Version, ExternalProjectDraftData Data);
 public sealed record ConfirmExternalProjectDraftRequest(int Version, bool ConfirmSharingRights);
 public sealed record DeclaredProjectMember(string Name, string? Role);

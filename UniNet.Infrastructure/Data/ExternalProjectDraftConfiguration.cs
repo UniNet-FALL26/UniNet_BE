@@ -47,17 +47,5 @@ public sealed class ExternalProjectDraftConfiguration : IEntityTypeConfiguration
         e.HasIndex(x => x.ConfirmedProjectId).IsUnique();
         e.HasIndex(x => new { x.OwnerUserId, x.Status, x.CreatedAt });
         e.HasIndex(x => new { x.Status, x.ExpiresAt });
-        e.HasIndex(x => new { x.Status, x.NextAttemptAt, x.LeaseExpiresAt });
-    }
-}
-
-public sealed class ExternalProjectDraftFileConfiguration : IEntityTypeConfiguration<ExternalProjectDraftFile>
-{
-    public void Configure(EntityTypeBuilder<ExternalProjectDraftFile> e)
-    {
-        e.ToTable("ExternalProjectDraftFiles");
-        e.HasKey(x => new { x.DraftId, x.UploadedFileId });
-        e.HasOne(x => x.Draft).WithMany(x => x.Files).HasForeignKey(x => x.DraftId).OnDelete(DeleteBehavior.Cascade);
-        e.HasOne(x => x.UploadedFile).WithMany(x => x.DraftFiles).HasForeignKey(x => x.UploadedFileId).OnDelete(DeleteBehavior.Restrict);
     }
 }
