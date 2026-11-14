@@ -18,6 +18,7 @@ public interface IAdvertisementService
     // Payment Integration
     Task<TransactionResponse> CreateCampaignPaymentAsync(Guid accountId, Guid campaignId, CancellationToken ct = default);
     Task ProcessPaymentCallbackAsync(string providerOrderCode, bool isSuccess, CancellationToken ct = default);
+    Task<CampaignResponse> SyncCampaignPaymentStatusAsync(Guid accountId, string orderCode, CancellationToken ct = default);
 
     // Admin / Moderator
     Task<CampaignResponse> ModerateCampaignAsync(Guid accountId, Guid campaignId, ModerateCampaignRequest request, CancellationToken ct = default);

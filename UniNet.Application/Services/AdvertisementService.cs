@@ -270,7 +270,42 @@ public sealed class AdvertisementService(
 
         return TransactionMapping.ToResponse(transaction, campaignId, result.CheckoutUrl);
     }
+    public async Task<CampaignResponse> SyncCampaignPaymentStatusAsync(Guid accountId, string orderCode, CancellationToken ct = default)
+    {
+        var partnerProfile = await GetPartnerProfileAsync(accountId, ct);
 
+        var transaction = await db.Transactions
+            .Include(t => t.AdvertisementTransaction)
+            .FirstOrDefaultAsync(t => t.ProviderOrderCode == orderCode && t.UserId == partnerProfile.Id, ct)
+            ?? throw new AdvertisementException("TRANSACTION_NOT_FOUND", "Không tìm thấy giao dịch.", 404);
+
+        if (transaction.AdvertisementTransaction == null)
+            throw new AdvertisementException("INVALID_TRANSACTION", "Giao dịch này không thuộc chiến dịch quảng cáo.", 400);
+
+        var campaignId = transaction.AdvertisementTransaction.CampaignId;
+
+        // Nếu chưa thành công trong DB, chủ động hỏi trực tiếp API PayOS
+        if (transaction.Status != PaymentStatus.Success)
+        {
+            var providerResult = await provider.GetPaymentStatusAsync(orderCode, ct);
+
+            if (providerResult.Status == PaymentStatus.Success)
+            {
+                await ProcessPaymentCallbackAsync(orderCode, isSuccess: true, ct);
+            }
+            else if (providerResult.Status == PaymentStatus.Failed)
+            {
+                await ProcessPaymentCallbackAsync(orderCode, isSuccess: false, ct);
+            }
+        }
+
+        var updatedCampaign = await db.AdvertisementCampaigns.AsNoTracking()
+            .Include(c => c.Package)
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct)
+            ?? throw NotFound();
+
+        return MapToResponse(updatedCampaign, partnerProfile.FullName ?? "Doanh nghiệp", updatedCampaign.Package?.Name);
+    }
     // Xử lý Webhook khi thanh toán thành công (BƯỚC CHẠY AI REVIEW)
     public async Task ProcessPaymentCallbackAsync(string providerOrderCode, bool isSuccess, CancellationToken ct = default)
     {
@@ -279,6 +314,8 @@ public sealed class AdvertisementService(
             .FirstOrDefaultAsync(t => t.ProviderOrderCode == providerOrderCode, ct);
 
         if (transaction == null || transaction.AdvertisementTransaction == null) return;
+        // Tránh chạy lại AI Review và reset thời gian nếu giao dịch đã được xác nhận trước đó
+        if (transaction.Status == PaymentStatus.Success) return;
 
         var campaign = await db.AdvertisementCampaigns
             .Include(c => c.Package)

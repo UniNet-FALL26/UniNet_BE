@@ -39,7 +39,9 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
     [HttpPost("campaigns/{campaignId:guid}/payments"), Authorize(Roles = "Partner")]
     public Task<TransactionResponse> CreateCampaignPayment(Guid campaignId, CancellationToken ct)
         => adService.CreateCampaignPaymentAsync(AccountId, campaignId, ct);
-
+    [HttpPost("payments/{orderCode}/sync"), Authorize(Roles = "Partner")]
+    public Task<CampaignResponse> SyncCampaignPayment(string orderCode, CancellationToken ct)
+    => adService.SyncCampaignPaymentStatusAsync(AccountId, orderCode, ct);
     // 4. Sửa campaign (Tự động chạy lại AI Review nếu bài viết đang ở trạng thái Rejected)
     [HttpPut("campaigns/{campaignId:guid}"), Authorize(Roles = "Partner")]
     // Lưu ý: Nếu UpdateCampaignRequest của bạn cũng dùng IFormFile để đổi ảnh, hãy đổi [FromBody] thành [FromForm] và thêm [Consumes("multipart/form-data")]
