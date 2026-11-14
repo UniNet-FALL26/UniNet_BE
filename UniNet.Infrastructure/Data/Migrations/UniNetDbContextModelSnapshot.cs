@@ -1067,9 +1067,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("ConfirmedProjectId")
                         .HasColumnType("uuid");
 
@@ -1088,15 +1085,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<string>("ExtractedDataJson")
                         .HasColumnType("jsonb");
-
-                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("LeaseToken")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("NextAttemptAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid");
@@ -1120,8 +1108,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("OwnerUserId", "Status", "CreatedAt");
 
-                    b.HasIndex("Status", "NextAttemptAt", "LeaseExpiresAt");
-
                     b.ToTable("ExternalProjectDrafts", null, t =>
                         {
                             t.HasCheckConstraint("CK_ExternalProjectDrafts_Confirmation", "(\"Status\" = 3 AND \"ConfirmedProjectId\" IS NOT NULL) OR (\"Status\" <> 3 AND \"ConfirmedProjectId\" IS NULL)");
@@ -1130,21 +1116,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_ExternalProjectDrafts_Version", "\"Version\" > 0");
                         });
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.ExternalProjectDraftFile", b =>
-                {
-                    b.Property<Guid>("DraftId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UploadedFileId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("DraftId", "UploadedFileId");
-
-                    b.HasIndex("UploadedFileId");
-
-                    b.ToTable("ExternalProjectDraftFiles", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
@@ -1604,31 +1575,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_Projects_Visibility", "\"Visibility\" BETWEEN 0 AND 1");
                         });
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceDocument", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UploadedFileId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UploadedFileId");
-
-                    b.HasIndex("ProjectId", "UploadedFileId")
-                        .IsUnique();
-
-                    b.ToTable("ProjectEvidenceDocuments", (string)null);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectInvitation", b =>
@@ -3817,25 +3763,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("OwnerUser");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.ExternalProjectDraftFile", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.ExternalProjectDraft", "Draft")
-                        .WithMany("Files")
-                        .HasForeignKey("DraftId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.Entities.UploadedFile", "UploadedFile")
-                        .WithMany("DraftFiles")
-                        .HasForeignKey("UploadedFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Draft");
-
-                    b.Navigation("UploadedFile");
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "Partner")
@@ -3943,25 +3870,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Creator");
 
                     b.Navigation("Specialization");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceDocument", b =>
-                {
-                    b.HasOne("UniNet.Domain.Entities.Project", "Project")
-                        .WithMany("EvidenceDocuments")
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("UniNet.Domain.Entities.UploadedFile", "UploadedFile")
-                        .WithMany()
-                        .HasForeignKey("UploadedFileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Project");
-
-                    b.Navigation("UploadedFile");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectInvitation", b =>
@@ -4752,11 +4660,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("History");
                 });
 
-            modelBuilder.Entity("UniNet.Domain.Entities.ExternalProjectDraft", b =>
-                {
-                    b.Navigation("Files");
-                });
-
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.Navigation("Applications");
@@ -4779,8 +4682,6 @@ namespace UniNet.Infrastructure.Data.Migrations
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>
                 {
                     b.Navigation("ContributionCycle");
-
-                    b.Navigation("EvidenceDocuments");
 
                     b.Navigation("Invitations");
 
@@ -4827,11 +4728,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("AdvertisementTransaction");
 
                     b.Navigation("RefundTransactions");
-                });
-
-            modelBuilder.Entity("UniNet.Domain.Entities.UploadedFile", b =>
-                {
-                    b.Navigation("DraftFiles");
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.VerificationAssignment", b =>

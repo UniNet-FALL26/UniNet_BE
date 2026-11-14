@@ -24,28 +24,19 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
     private async Task<ExternalProjectDraft> Owned(Guid id, Guid accountId, CancellationToken ct)
     {
         var actor = await Actor(accountId, ct);
-        return await db.ExternalProjectDrafts.Include(d => d.Files).ThenInclude(f => f.UploadedFile)
+        return await db.ExternalProjectDrafts
             .SingleOrDefaultAsync(d => d.Id == id && d.OwnerUserId == actor.Id, ct)
             ?? throw new ProjectException("DRAFT_NOT_FOUND", "Draft not found.", 404);
     }
 
-    public async Task<ExternalProjectDraftResponse> CreateAsync(Guid accountId, CreateExternalProjectDraftRequest request, CancellationToken ct)
+    public async Task<ExternalProjectDraftResponse> CreateAsync(Guid accountId, CancellationToken ct)
     {
         var actor = await Actor(accountId, ct);
-        if (request.FileIds == null || request.FileIds.Count is < 1 or > 10 || request.FileIds.Contains(Guid.Empty) ||
-            request.FileIds.Distinct().Count() != request.FileIds.Count)
-            throw new ProjectException("INVALID_FILE_IDS", "Provide 1 to 10 distinct uploaded file IDs.");
-        var files = await db.UploadedFiles.Where(f => request.FileIds.Contains(f.Id) && f.OwnerAccountId == accountId).ToListAsync(ct);
-        if (files.Count != request.FileIds.Count) throw new ProjectException("INVALID_FILE_IDS", "One or more uploaded files are unavailable.");
-        if (!files.Any(f => f.ResourceType == "raw" && (f.Format == "pdf" || f.Format == "docx" || f.Format == "txt")))
-            throw new ProjectException("DOCUMENT_REQUIRED", "Include at least one PDF, DOCX or TXT document.");
         var now = DateTimeOffset.UtcNow;
         var draft = new ExternalProjectDraft
         {
-            OwnerUser = actor, CreatedAt = now, UpdatedAt = now, ExpiresAt = now.AddDays(7), NextAttemptAt = now,
-            Files = files.Select(f => new ExternalProjectDraftFile { UploadedFile = f }).ToList()
+            OwnerUser = actor, CreatedAt = now, UpdatedAt = now, ExpiresAt = now.AddDays(7)
         };
-        // Processing + NextAttemptAt is a durable queue entry, committed with the draft and attachments.
         db.ExternalProjectDrafts.Add(draft);
         await db.SaveChangesAsync(ct);
         return Response(draft);
@@ -56,7 +47,7 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
         var draft = await Owned(id, accountId, ct);
         if (draft.Status is not (ExternalProjectDraftStatus.Confirmed or ExternalProjectDraftStatus.Expired) && draft.ExpiresAt <= DateTimeOffset.UtcNow)
         {
-            draft.Status = ExternalProjectDraftStatus.Expired; draft.LeaseToken = null; draft.LeaseExpiresAt = null;
+            draft.Status = ExternalProjectDraftStatus.Expired;
             draft.UpdatedAt = DateTimeOffset.UtcNow; draft.Version++;
             await Save(ct);
         }
@@ -70,7 +61,7 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
         if (request.Data == null) throw new ProjectException("INVALID_DRAFT_DATA", "Provide the editable data object.");
         var data = ExternalProjectDraftValidation.Validate(request.Data);
         await SpecializationService.ValidateProjectAsync(db, data.SpecializationId, ct);
-        await ValidateReferences(draft, data, accountId, ct);
+        await ValidateSkills(data, ct);
         draft.EditedDataJson = JsonSerializer.Serialize(data, Json);
         draft.Status = ExternalProjectDraftStatus.Ready;
         draft.UpdatedAt = DateTimeOffset.UtcNow; draft.Version++;
@@ -96,11 +87,11 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
         var draft = await Owned(id, accountId, ct);
         if (draft.Status == ExternalProjectDraftStatus.Confirmed) return await Confirmed(draft, ct);
         Editable(draft, request.Version);
-        if (!request.ConfirmSharingRights) throw new ProjectException("SHARING_RIGHTS_REQUIRED", "Confirm your right to share the project and evidence for assessment.");
+        if (!request.ConfirmSharingRights) throw new ProjectException("SHARING_RIGHTS_REQUIRED", "Confirm your right to share the project information for assessment.");
         var data = ExternalProjectDraftValidation.Validate(Data(draft));
         var missing = ExternalProjectDraftValidation.MissingFields(data);
         if (missing.Count > 0) throw new ProjectException("DRAFT_INCOMPLETE", "Missing fields: " + string.Join(", ", missing));
-        await ValidateReferences(draft, data, accountId, ct);
+        await ValidateSkills(data, ct);
         var now = DateTimeOffset.UtcNow;
         var specialization = await SpecializationService.ValidateProjectAsync(db, data.SpecializationId, ct, required: true);
         var project = new Project
@@ -115,12 +106,11 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
             Status = ProjectStatus.Completed, RecruitmentStatus = RecruitmentStatus.Closed, Visibility = ProjectVisibility.Private,
             MemberTarget = null, MinimumQuantity = null, RecruitmentDeadline = null, ExpectedOutput = null,
             CreatedAt = now, UpdatedAt = now, CompletedAt = now,
-            ProjectSkills = data.SkillIds.Select(s => new ProjectSkill { SkillId = s }).ToList(),
-            EvidenceDocuments = data.EvidenceFileIds.Select(f => new ProjectEvidenceDocument { UploadedFileId = f, CreatedAt = now }).ToList()
+            ProjectSkills = data.SkillIds.Select(s => new ProjectSkill { SkillId = s }).ToList()
         };
         db.Projects.Add(project);
         draft.Status = ExternalProjectDraftStatus.Confirmed; draft.ConfirmedProject = project;
-        draft.Version++; draft.UpdatedAt = now; draft.LeaseToken = null; draft.LeaseExpiresAt = null;
+        draft.Version++; draft.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new(draft.Id, project.Id, draft.Version);
@@ -129,10 +119,8 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
     private static Task<ConfirmExternalProjectDraftResponse> Confirmed(ExternalProjectDraft draft, CancellationToken ct) =>
         Task.FromResult(new ConfirmExternalProjectDraftResponse(draft.Id, draft.ConfirmedProjectId!.Value, draft.Version));
 
-    private async Task ValidateReferences(ExternalProjectDraft draft, ExternalProjectDraftData data, Guid accountId, CancellationToken ct)
+    private async Task ValidateSkills(ExternalProjectDraftData data, CancellationToken ct)
     {
-        if (data.EvidenceFileIds.Any(id => !draft.Files.Any(f => f.UploadedFileId == id && f.UploadedFile.OwnerAccountId == accountId)))
-            throw new ProjectException("INVALID_EVIDENCE_FILES", "Evidence must be selected from this draft's owned uploads.");
         if (await db.Skills.CountAsync(s => data.SkillIds.Contains(s.Id) && s.IsActive, ct) != data.SkillIds.Count)
             throw new ProjectException("INVALID_SKILL_IDS", "Select active catalog skills.");
     }
@@ -142,7 +130,7 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
         if (draft.Status == ExternalProjectDraftStatus.Expired || draft.ExpiresAt <= DateTimeOffset.UtcNow)
             throw new ProjectException("DRAFT_EXPIRED", "Draft has expired.", 410);
         if (draft.Status is not (ExternalProjectDraftStatus.Ready or ExternalProjectDraftStatus.Failed))
-            throw new ProjectException("DRAFT_LOCKED", "Wait for extraction to finish; confirmed drafts cannot be edited.", 409);
+            throw new ProjectException("DRAFT_LOCKED", "This draft cannot be edited in its current state.", 409);
         if (version < 1 || version != draft.Version)
             throw new ProjectException("DRAFT_VERSION_CONFLICT", "Draft version is stale. Reload before editing.", 409);
     }
@@ -158,7 +146,7 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
 
     private static ExternalProjectDraftData Data(ExternalProjectDraft d)
     {
-        if (d.EditedDataJson != null) return JsonSerializer.Deserialize<ExternalProjectDraftData>(d.EditedDataJson, Json)!;
+        if (d.EditedDataJson != null) return JsonSerializer.Deserialize<ExternalProjectDraftData>(d.EditedDataJson, Json)! with { EvidenceFileIds = [] };
         var extraction = Extraction(d)?.Information;
         return new()
         {
@@ -166,7 +154,6 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
             StartDate = extraction?.StartDate?.Value, EndDate = extraction?.EndDate?.Value,
             RepositoryUrl = extraction?.RepositoryUrl?.Value, DemoUrl = extraction?.DemoUrl?.Value,
             SkillIds = extraction?.Skills.Where(s => s.SkillId.HasValue).Select(s => s.SkillId!.Value).Distinct().ToList() ?? [],
-            EvidenceFileIds = d.Files.Select(f => f.UploadedFileId).ToList(),
             Features = extraction?.Features.Select(f => f.Value).ToList() ?? [],
             Members = extraction?.Members.Select(m => new DeclaredProjectMember(m.Name.Value, m.Role?.Value)).ToList() ?? []
         };
@@ -176,8 +163,6 @@ public sealed class ExternalProjectDraftService(UniNetDbContext db)
     {
         var data = Data(d);
         return new(d.Id, d.Status, d.Version, d.CreatedAt, d.UpdatedAt, d.ExpiresAt, d.ErrorCode, d.ConfirmedProjectId,
-            data, Extraction(d), ExternalProjectDraftValidation.MissingFields(data), d.Files.OrderBy(f => f.UploadedFileId)
-                .Select(f => new DraftUploadedFileResponse(f.UploadedFileId, f.UploadedFile.FileName, f.UploadedFile.Url,
-                    f.UploadedFile.Format, f.UploadedFile.ResourceType, f.UploadedFile.SizeBytes)).ToList());
+            data, null, ExternalProjectDraftValidation.MissingFields(data), []);
     }
 }

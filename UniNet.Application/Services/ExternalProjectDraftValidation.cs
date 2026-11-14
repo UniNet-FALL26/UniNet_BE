@@ -30,16 +30,17 @@ public static class ExternalProjectDraftValidation
                 throw Error("INVALID_DRAFT_URL", "Use an HTTP or HTTPS URL without credentials.");
             return value;
         }
-        if (d.SkillIds == null || d.EvidenceFileIds == null || d.Features == null || d.Members == null ||
-            d.SkillIds.Count > 30 || d.EvidenceFileIds.Count > 10 || d.Features.Count > 40 || d.Members.Count > 30 ||
-            d.SkillIds.Contains(Guid.Empty) || d.EvidenceFileIds.Contains(Guid.Empty) ||
-            d.SkillIds.Distinct().Count() != d.SkillIds.Count || d.EvidenceFileIds.Distinct().Count() != d.EvidenceFileIds.Count)
+        if (d.SkillIds == null || d.Features == null || d.Members == null ||
+            d.SkillIds.Count > 30 || d.Features.Count > 40 || d.Members.Count > 30 ||
+            d.SkillIds.Contains(Guid.Empty) ||
+            d.SkillIds.Distinct().Count() != d.SkillIds.Count)
             throw Error("INVALID_DRAFT_DATA", "Invalid project collections.");
         var result = d with
         {
             Title = Text(d.Title, 255), Description = Text(d.Description, 2000), ProjectField = Text(d.ProjectField, 150),
             StartDate = Date(d.StartDate), EndDate = Date(d.EndDate), RepositoryUrl = Url(d.RepositoryUrl), DemoUrl = Url(d.DemoUrl),
             SubmitterRole = Text(d.SubmitterRole, 255), SubmitterContribution = Text(d.SubmitterContribution, 4000), LeaderName = Text(d.LeaderName, 255),
+            EvidenceFileIds = [],
             Features = d.Features.Select(f => Text(f, 1000) ?? throw Error("INVALID_DRAFT_DATA", "Feature cannot be empty.")).ToList(),
             Members = d.Members.Select(m => m == null ? throw Error("INVALID_DRAFT_DATA", "Invalid member declaration.") :
                 new DeclaredProjectMember(Text(m.Name, 255) ?? throw Error("INVALID_DRAFT_DATA", "Member name cannot be empty."), Text(m.Role, 255))).ToList()
@@ -70,7 +71,6 @@ public static class ExternalProjectDraftValidation
         if (d.SubmitterIsLeader == null) missing.Add("submitterIsLeader");
         if (d.SubmitterIsLeader == false && string.IsNullOrWhiteSpace(d.LeaderName)) missing.Add("leaderName");
         if (d.SkillIds.Count == 0) missing.Add("skillIds");
-        if (d.EvidenceFileIds.Count == 0) missing.Add("evidenceFileIds");
         return missing;
     }
     private static ProjectException Error(string code, string message) => new(code, message);

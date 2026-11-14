@@ -15,10 +15,10 @@ public sealed class ExternalProjectDraftsController(ExternalProjectDraftService 
         ? id : throw new ProjectException("UNAUTHORIZED", "Invalid login session.", 401);
 
     [HttpPost]
-    public async Task<ActionResult<ExternalProjectDraftResponse>> Create(CreateExternalProjectDraftRequest request, CancellationToken ct)
+    public async Task<ActionResult<ExternalProjectDraftResponse>> Create(CancellationToken ct)
     {
-        var draft = await service.CreateAsync(AccountId, request, ct);
-        return AcceptedAtAction(nameof(Get), new { id = draft.DraftId }, draft);
+        var draft = await service.CreateAsync(AccountId, ct);
+        return CreatedAtAction(nameof(Get), new { id = draft.DraftId }, draft);
     }
     [HttpGet("{id:guid}")]
     public Task<ExternalProjectDraftResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, AccountId, ct);

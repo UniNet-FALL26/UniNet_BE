@@ -12,5 +12,4 @@ public sealed class UploadedFile
     public string ResourceType { get; set; } = null!;
     public long SizeBytes { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-    public List<ExternalProjectDraftFile> DraftFiles { get; set; } = [];
 }
