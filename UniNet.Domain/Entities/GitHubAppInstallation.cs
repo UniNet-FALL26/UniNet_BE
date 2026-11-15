@@ -11,6 +11,7 @@ public sealed class GitHubAppInstallation
     public string OwnerLogin { get; set; } = null!;
     public string OwnerType { get; set; } = null!;
     public GitHubAppInstallationStatus Status { get; set; }
+    public long AuthorizationGeneration { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastVerifiedAt { get; set; }
@@ -34,6 +35,7 @@ public sealed class GitHubAppRepositoryGrant
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid InstallationId { get; set; }
     public long ProviderRepositoryId { get; set; }
+    public long AuthorizationGeneration { get; set; } = 1;
     public DateTimeOffset GrantedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset VerifiedAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }

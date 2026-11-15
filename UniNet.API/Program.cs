@@ -103,6 +103,7 @@ builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
+builder.Services.AddGitExperimentalContributionServices();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectMemberService, ProjectMemberService>();

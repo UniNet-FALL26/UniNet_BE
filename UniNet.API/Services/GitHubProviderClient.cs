@@ -97,8 +97,11 @@ public sealed class GitHubProviderClient(HttpClient http, IOptions<GitHubIntegra
                 (string.IsNullOrWhiteSpace(scope) ? "" : $"?sha={Uri.EscapeDataString(scope)}"),
             "pull-requests" when scope is null => $"repos/{repositoryPath}/pulls?state=all",
             "pull-request-reviews" => $"repos/{repositoryPath}/pulls/{RequiredNumber(scope)}/reviews",
+            "pull-request-commits" => $"repos/{repositoryPath}/pulls/{RequiredNumber(scope)}/commits",
+            "pull-request-files" => $"repos/{repositoryPath}/pulls/{RequiredNumber(scope)}/files",
             "issues" when scope is null => $"repos/{repositoryPath}/issues?state=all&filter=all",
             "issue-comments" => $"repos/{repositoryPath}/issues/{RequiredNumber(scope)}/comments",
+            "issue-events" => $"repos/{repositoryPath}/issues/{RequiredNumber(scope)}/events",
             "pull-request-review-comments" => $"repos/{repositoryPath}/pulls/{RequiredNumber(scope)}/comments",
             "releases" when scope is null => $"repos/{repositoryPath}/releases",
             _ => throw new GitHubIntegrationException("GITHUB_INVALID_CATEGORY", "Unsupported synchronization category.", 400)

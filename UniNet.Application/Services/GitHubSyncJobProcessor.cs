@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Data;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using UniNet.Application.Common;
@@ -24,6 +26,14 @@ public sealed class GitHubSyncJobProcessor(
     public async Task ProcessAsync(GitSyncJob job, CancellationToken ct)
     {
         if (job.CredentialSource == GitRepositoryCredentialSource.GitHubApp) GitHubAppAvailability.Require(appOptions);
+        if (db.Database.IsNpgsql())
+        {
+            var applied = (await db.Database.GetAppliedMigrationsAsync(ct)).ToHashSet(StringComparer.Ordinal);
+            if (!applied.Contains("20261113165539_AddGitEvidenceVersioning") ||
+                !applied.Contains("20261113232726_HardenGitEvidenceCrossRepositoryIntegrity") ||
+                !applied.Contains("20261114070301_AddAppAuthorizationGeneration"))
+                throw Error("GITHUB_SYNC_EVIDENCE_SCHEMA_REQUIRED", "Git synchronization requires the evidence schema migrations.", 503);
+        }
         if (db.Database.IsNpgsql() && job.LeaseId is null)
             throw Error("GITHUB_SYNC_LEASE_LOST", "The synchronization job has no active lease.", 409);
         if (job.LeaseId is { } initialLease) await RequireLeaseAsync(job.Id, initialLease, false, ct);
@@ -61,6 +71,8 @@ public sealed class GitHubSyncJobProcessor(
         var pullRequests = await ReadObjectScopesAsync(link.Id, link.GitHubRepositoryId, "pull-requests", ct);
         foreach (var number in pullRequests)
         {
+            await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-request-commits", number, ct);
+            await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-request-files", number, ct);
             await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-request-reviews", number, ct);
             await ProcessCategoryAsync(job.Id, job.LeaseId, link, "pull-request-review-comments", number, ct);
         }
@@ -68,7 +80,10 @@ public sealed class GitHubSyncJobProcessor(
         await ProcessCategoryAsync(job.Id, job.LeaseId, link, "issues", null, ct);
         var issues = await ReadObjectScopesAsync(link.Id, link.GitHubRepositoryId, "issues", ct);
         foreach (var number in issues)
+        {
             await ProcessCategoryAsync(job.Id, job.LeaseId, link, "issue-comments", number, ct);
+            await ProcessCategoryAsync(job.Id, job.LeaseId, link, "issue-events", number, ct);
+        }
 
         await ProcessCategoryAsync(job.Id, job.LeaseId, link, "releases", null, ct);
     }
@@ -95,6 +110,7 @@ public sealed class GitHubSyncJobProcessor(
             ct.ThrowIfCancellationRequested();
             if (leaseId is { } currentLease) await RequireLeaseAsync(jobId, currentLease, false, ct);
             var eligible = await LoadEligibleLinkAsync(link.Id, ct);
+            var fetchAuthorization = eligible;
             if (eligible.GitHubRepositoryId != link.GitHubRepositoryId || eligible.Source != link.Source ||
                 eligible.OAuthConnectionId != link.OAuthConnectionId || eligible.AppGrantId != link.AppGrantId || eligible.InstallationId != link.InstallationId)
                 throw Error("GITHUB_SYNC_ASSOCIATION_CHANGED", "Repository authorization changed during synchronization.", 409);
@@ -164,14 +180,34 @@ public sealed class GitHubSyncJobProcessor(
             var observedAt = DateTimeOffset.UtcNow;
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
             if (leaseId is { } lockedLease) await RequireLeaseAsync(jobId, lockedLease, true, ct);
+            await LockAuthorizationRowsAsync(link, ct);
             eligible = await LoadEligibleLinkAsync(link.Id, ct);
-            if (eligible.AccessStatus != ProjectGitRepositoryAccessStatus.Active || eligible.Source != link.Source ||
+            if (eligible.Source == GitRepositoryCredentialSource.GitHubApp &&
+                (eligible.GrantGeneration != fetchAuthorization.GrantGeneration || eligible.InstallationGeneration != fetchAuthorization.InstallationGeneration))
+                throw Error("GITHUB_SYNC_AUTHORIZATION_CHANGED", "GitHub authorization changed during synchronization; retry.", 409);
+            if (eligible.Source == GitRepositoryCredentialSource.OAuth && eligible.CredentialVersion != link.CredentialVersion)
+                throw Error("GITHUB_SYNC_CREDENTIAL_CHANGED", "GitHub authorization changed during synchronization; retry.", 409);
+            if (eligible.GitHubRepositoryId != link.GitHubRepositoryId || eligible.AccessStatus != ProjectGitRepositoryAccessStatus.Active || eligible.Source != link.Source ||
                 eligible.AppGrantId != link.AppGrantId || eligible.InstallationId != link.InstallationId || eligible.OAuthConnectionId != link.OAuthConnectionId)
                 throw Error("GITHUB_REPOSITORY_NOT_AUTHORIZED", "Repository access changed during synchronization.", 409);
+            if (!await db.GitSyncJobs.AsNoTracking().AnyAsync(x => x.Id == jobId && x.ProjectGitRepositoryId == eligible.Id &&
+                x.GitHubRepositoryId == eligible.GitHubRepositoryId && x.CredentialSource == eligible.Source, ct))
+                throw Error("GITHUB_SYNC_ASSOCIATION_CHANGED", "Job repository association changed during synchronization.", 409);
 
             foreach (var item in result.Items)
-                await PersistItemAsync(eligible, category, item, observedAt,
+                await PersistItemAsync(jobId, pageNumber, eligible, category, item, observedAt,
                     scope, result.RateLimitRemaining, result.RateLimitResetAt, ct);
+
+            if (!result.HasMore)
+            {
+                await db.ProjectEvidenceObservations
+                    .Where(x => x.GitSyncJobId == jobId && x.Category == category && x.ScopeKey == checkpointScope)
+                    .ExecuteUpdateAsync(update => update.SetProperty(x => x.RetrievalCompleteness, "Complete"), ct);
+                foreach (var observation in db.ChangeTracker.Entries<ProjectEvidenceObservation>()
+                    .Where(x => x.State == EntityState.Added && x.Entity.GitSyncJobId == jobId &&
+                        x.Entity.Category == category && x.Entity.ScopeKey == checkpointScope))
+                    observation.Entity.RetrievalCompleteness = "Complete";
+            }
 
             var currentCheckpoint = await db.GitSyncCheckpoints.SingleOrDefaultAsync(
                 x => x.SyncJobId == jobId && x.Category == category && x.ScopeKey == checkpointScope, ct);
@@ -202,6 +238,31 @@ public sealed class GitHubSyncJobProcessor(
         }
     }
 
+    private async Task LockAuthorizationRowsAsync(EligibleLink link, CancellationToken ct)
+    {
+        if (!db.Database.IsNpgsql()) return;
+        // Keep the rows that authorize this page stable until commit. A concurrent
+        // revocation must either precede this lock or wait until the page commits.
+        var rows = link.Source == GitRepositoryCredentialSource.GitHubApp
+            ? await db.Database.SqlQuery<int>($"""
+                SELECT 1 AS "Value" FROM "ProjectGitRepositories" l
+                JOIN "GitHubRepositories" r ON r."Id" = l."GitHubRepositoryId"
+                JOIN "GitHubAppRepositoryGrants" g ON g."Id" = l."GitHubAppRepositoryGrantId"
+                JOIN "GitHubAppInstallations" i ON i."Id" = g."InstallationId"
+                WHERE l."Id" = {link.Id}
+                FOR SHARE OF l, r, g, i
+                """).ToListAsync(ct)
+            : await db.Database.SqlQuery<int>($"""
+                SELECT 1 AS "Value" FROM "ProjectGitRepositories" l
+                JOIN "GitHubRepositories" r ON r."Id" = l."GitHubRepositoryId"
+                JOIN "GitHubOAuthConnections" c ON c."Id" = l."OAuthConnectionId"
+                WHERE l."Id" = {link.Id}
+                FOR SHARE OF l, r, c
+                """).ToListAsync(ct);
+        if (rows.Count != 1)
+            throw Error("GITHUB_REPOSITORY_NOT_AUTHORIZED", "Repository access changed during synchronization.", 409);
+    }
+
     private async Task RequireLeaseAsync(Guid jobId, Guid leaseId, bool lockRow, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql()) return; // SQLite test provider has no durable worker claiming.
@@ -217,11 +278,12 @@ public sealed class GitHubSyncJobProcessor(
     }
 
     private async Task PersistItemAsync(
-        EligibleLink link, string category, JsonElement payload,
+        Guid jobId, int pageNumber, EligibleLink link, string category, JsonElement payload,
         DateTimeOffset observedAt, string? scope, int? rateLimitRemaining,
         DateTimeOffset? rateLimitResetAt, CancellationToken ct)
     {
-        if (!TryGetObjectId(category, payload, out var externalId)) return;
+        if (!TryGetObjectId(category, payload, scope, out var externalId))
+            throw Error("GITHUB_EVIDENCE_ID_MISSING", "A fetched item has no stable identity.", 503);
         var occurredAt = GetOccurredAt(category, payload);
         var providerObject = db.GitHubProviderObjects.Local.FirstOrDefault(x =>
             x.GitHubRepositoryId == link.GitHubRepositoryId &&
@@ -235,6 +297,7 @@ public sealed class GitHubSyncJobProcessor(
             rateLimitRemaining,
             rateLimitResetAt
         });
+        var storedPayload = GitEvidenceFactsExtractor.SanitizeFetchedPayload(category, payload);
         if (providerObject is null)
         {
             providerObject = new GitHubProviderObject
@@ -245,7 +308,7 @@ public sealed class GitHubSyncJobProcessor(
                 OccurredAt = occurredAt,
                 FirstObservedAt = observedAt,
                 LastObservedAt = observedAt,
-                PayloadJson = payload.GetRawText(),
+                PayloadJson = storedPayload,
                 RetrievalMetadataJson = retrievalMetadata
             };
             db.GitHubProviderObjects.Add(providerObject);
@@ -254,9 +317,40 @@ public sealed class GitHubSyncJobProcessor(
         {
             providerObject.OccurredAt = occurredAt ?? providerObject.OccurredAt;
             providerObject.LastObservedAt = observedAt;
-            providerObject.PayloadJson = payload.GetRawText();
+            providerObject.PayloadJson = storedPayload;
             providerObject.RetrievalMetadataJson = retrievalMetadata;
         }
+        var facts = category == "pull-request-files"
+            ? GitEvidenceFactsExtractor.ExtractV3(category, externalId, payload, scope)
+            : GitEvidenceFactsExtractor.ExtractV2(category, externalId, payload, scope);
+        var canonical = GitFrozenFactsCanonicalizer.Canonicalize(facts);
+        var version = db.GitEvidenceVersions.Local.FirstOrDefault(x => x.GitHubProviderObjectId == providerObject.Id && x.EvidenceSchemaVersion == facts.SchemaVersion && x.CanonicalizationVersion == GitFrozenFactsCanonicalizer.CanonicalizationVersion && x.ContentHash == canonical.Sha256)
+            ?? await db.GitEvidenceVersions.SingleOrDefaultAsync(x => x.GitHubProviderObjectId == providerObject.Id && x.EvidenceSchemaVersion == facts.SchemaVersion && x.CanonicalizationVersion == GitFrozenFactsCanonicalizer.CanonicalizationVersion && x.ContentHash == canonical.Sha256, ct);
+        if (version is not null)
+        {
+            try
+            {
+                var stored = JsonSerializer.Deserialize<GitFrozenFacts>(version.FrozenFactsJson, new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow });
+                if (stored is null || !GitFrozenFactsCanonicalizer.SameContent(canonical, GitFrozenFactsCanonicalizer.Canonicalize(stored)))
+                    throw Error("GITHUB_EVIDENCE_HASH_CONFLICT", "Evidence content does not match its identity.", 409);
+            }
+            catch (JsonException) { throw Error("GITHUB_EVIDENCE_HASH_CONFLICT", "Evidence content is invalid.", 409); }
+            catch (ArgumentException) { throw Error("GITHUB_EVIDENCE_HASH_CONFLICT", "Evidence content is invalid.", 409); }
+        }
+        else
+        {
+            version = new GitEvidenceVersion { GitHubProviderObjectId = providerObject.Id, GitHubRepositoryId = link.GitHubRepositoryId,
+                EvidenceSchemaVersion = facts.SchemaVersion, CanonicalizationVersion = GitFrozenFactsCanonicalizer.CanonicalizationVersion,
+                HashAlgorithm = "SHA-256", ContentHash = canonical.Sha256, FrozenFactsJson = Encoding.UTF8.GetString(canonical.Bytes), EvidenceStatus = facts.Completeness };
+            db.GitEvidenceVersions.Add(version);
+        }
+        var scopeKey = scope ?? "";
+        var seen = db.ProjectEvidenceObservations.Local.Any(x => x.ProjectGitRepositoryId == link.Id && x.GitSyncJobId == jobId && x.Category == category && x.ScopeKey == scopeKey && x.GitEvidenceVersionId == version.Id) ||
+            await db.ProjectEvidenceObservations.AnyAsync(x => x.ProjectGitRepositoryId == link.Id && x.GitSyncJobId == jobId && x.Category == category && x.ScopeKey == scopeKey && x.GitEvidenceVersionId == version.Id, ct);
+        if (!seen)
+            db.ProjectEvidenceObservations.Add(new ProjectEvidenceObservation { ProjectGitRepositoryId = link.Id, GitSyncJobId = jobId,
+                GitEvidenceVersionId = version.Id, GitHubRepositoryId = link.GitHubRepositoryId, Category = category, ScopeKey = scopeKey,
+                ObservedAt = observedAt, PageCursor = pageNumber.ToString(CultureInfo.InvariantCulture), AuthorizationSource = link.Source.ToString(), RetrievalCompleteness = "Incomplete" });
         if (category == "commits" && !string.IsNullOrWhiteSpace(scope))
         {
             var branchReferenceExists = db.GitCommitBranchReferences.Local.Any(x =>
@@ -379,7 +473,7 @@ public sealed class GitHubSyncJobProcessor(
             select new EligibleLink(
                 link.Id, link.GitHubRepositoryId, link.OAuthConnectionId!.Value,
                 link.LinkedByProfileId, connection.AccountId, repository.ProviderRepositoryId, repository.FullName,
-                link.AccessStatus, GitRepositoryCredentialSource.OAuth, null, null))
+                link.AccessStatus, GitRepositoryCredentialSource.OAuth, null, null, connection.Version, null, null))
             .SingleOrDefaultAsync(ct);
         if (oauth is not null) return oauth;
         var app = await (
@@ -392,7 +486,7 @@ public sealed class GitHubSyncJobProcessor(
                 grant.RevokedAt == null && grant.ProviderRepositoryId == repository.ProviderRepositoryId && installation.Status == GitHubAppInstallationStatus.Active && !installation.VerificationUnknown
             select new EligibleLink(link.Id, link.GitHubRepositoryId, Guid.Empty, link.LinkedByProfileId, Guid.Empty,
                 repository.ProviderRepositoryId, repository.FullName, link.AccessStatus, GitRepositoryCredentialSource.GitHubApp,
-                grant.Id, installation.ProviderInstallationId)).SingleOrDefaultAsync(ct);
+                grant.Id, installation.ProviderInstallationId, null, grant.AuthorizationGeneration, installation.AuthorizationGeneration)).SingleOrDefaultAsync(ct);
         if (app is not null) return app;
         if (await (from association in db.ProjectGitRepositories.AsNoTracking()
                    join grant in db.Set<GitHubAppRepositoryGrant>().AsNoTracking() on association.GitHubAppRepositoryGrantId equals grant.Id
@@ -533,11 +627,20 @@ public sealed class GitHubSyncJobProcessor(
         return link with { FullName = remote.FullName, AccessStatus = ProjectGitRepositoryAccessStatus.Active };
     }
 
-    private static bool TryGetObjectId(string category, JsonElement payload, out string id)
+    private static bool TryGetObjectId(string category, JsonElement payload, string? scope, out string id)
     {
         id = "";
+        if (category == "pull-request-files")
+        {
+            if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty("filename", out var filename) ||
+                filename.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(filename.GetString()) ||
+                filename.GetString()!.Length > 4096)
+                return false;
+            id = GitEvidenceFactsExtractor.GetPullRequestFileExternalId(filename.GetString()!, scope);
+            return true;
+        }
         var propertyName = category == "branches" ? "name" :
-            category == "commits" ? "sha" :
+            category is "commits" or "pull-request-commits" ? "sha" :
             category is "pull-requests" or "issues" ? "id" : "id";
         if (!payload.TryGetProperty(propertyName, out var value)) return false;
         id = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.ToString();
@@ -668,7 +771,8 @@ public sealed class GitHubSyncJobProcessor(
     private sealed record EligibleLink(
         Guid Id, Guid GitHubRepositoryId, Guid OAuthConnectionId, Guid LinkedByProfileId,
         Guid AccountId, long ProviderRepositoryId, string FullName, ProjectGitRepositoryAccessStatus AccessStatus,
-        GitRepositoryCredentialSource Source, Guid? AppGrantId, long? InstallationId);
+        GitRepositoryCredentialSource Source, Guid? AppGrantId, long? InstallationId, Guid? CredentialVersion,
+        long? GrantGeneration, long? InstallationGeneration);
     private sealed record ActivityActor(string Role, string? ExternalId, string? Login);
     private sealed record ActivityDefinition(
         string Type, DateTimeOffset OccurredAt, IReadOnlyList<ActivityActor> Actors);

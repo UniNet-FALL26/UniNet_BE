@@ -15,6 +15,12 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        if (ChangeTracker.Entries<GitEvidenceVersion>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Git evidence versions are immutable.");
+        if (ChangeTracker.Entries<GitContributionRun>().Any(e =>
+            (e.State is EntityState.Modified or EntityState.Deleted) &&
+            e.OriginalValues.GetValue<GitContributionRunStatus>(nameof(GitContributionRun.Status)) == GitContributionRunStatus.Finalized))
+            throw new InvalidOperationException("Finalized Git contribution runs are immutable.");
         if (ChangeTracker.Entries<WalletEntry>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Wallet ledger entries are immutable.");
 
@@ -124,6 +130,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<GitSyncJob> GitSyncJobs => Set<GitSyncJob>();
     public DbSet<GitSyncCheckpoint> GitSyncCheckpoints => Set<GitSyncCheckpoint>();
     public DbSet<GitHubProviderObject> GitHubProviderObjects => Set<GitHubProviderObject>();
+    public DbSet<GitEvidenceVersion> GitEvidenceVersions => Set<GitEvidenceVersion>();
+    public DbSet<GitContributionRun> GitContributionRuns => Set<GitContributionRun>();
+    public DbSet<ProjectEvidenceObservation> ProjectEvidenceObservations => Set<ProjectEvidenceObservation>();
     public DbSet<GitActivity> GitActivities => Set<GitActivity>();
     public DbSet<GitActivityActor> GitActivityActors => Set<GitActivityActor>();
     public DbSet<ProjectGitActivityGrant> ProjectGitActivityGrants => Set<ProjectGitActivityGrant>();
@@ -195,6 +204,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         ProjectGitMemberIdentityConfiguration.Configure(model);
         GitSyncConfiguration.Configure(model);
         GitActivityConfiguration.Configure(model);
+        GitEvidenceConfiguration.Configure(model);
+        ProjectGitEvidenceSnapshotConfiguration.Configure(model);
+        GitContributionConfiguration.Configure(model);
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);

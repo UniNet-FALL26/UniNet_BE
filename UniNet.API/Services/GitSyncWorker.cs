@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Application.Services;
@@ -149,7 +150,18 @@ public sealed class GitSyncWorker(
                         claimed.RetryCount, exception.Code, exception.Message, exception.RetryAfter,
                         exception.Code is not ("GITHUB_REPOSITORY_ACCESS_LOST" or
                             "GITHUB_REAUTH_REQUIRED" or "GITHUB_SYNC_ASSOCIATION_CHANGED" or
-                            "GITHUB_REPOSITORY_NOT_AUTHORIZED"), ct);
+                            "GITHUB_REPOSITORY_NOT_AUTHORIZED" or "GITHUB_SYNC_EVIDENCE_SCHEMA_REQUIRED" or
+                            "GITHUB_EVIDENCE_HASH_CONFLICT"), ct);
+                }
+                catch (Exception exception) when (exception.GetBaseException() is PostgresException
+                    { SqlState: "23503", ConstraintName: { } constraint } &&
+                    (constraint.StartsWith("FK_ProjectEvidenceObservations_", StringComparison.Ordinal) ||
+                     constraint.StartsWith("FK_GitEvidenceVersions_", StringComparison.Ordinal)))
+                {
+                    logger.LogError("Git sync job {JobId} failed evidence integrity validation.", claimed.Id);
+                    await ScheduleFailureAsync(jobs, claimed.Id, leaseId, claimed.RetryCount,
+                        "GITHUB_SYNC_EVIDENCE_INTEGRITY", "Synchronization failed evidence integrity validation.",
+                        null, false, ct);
                 }
                 catch (Exception)
                 {

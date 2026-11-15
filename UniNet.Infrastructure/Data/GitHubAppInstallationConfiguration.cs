@@ -34,6 +34,7 @@ public static class GitHubAppInstallationConfiguration
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.OwnerLogin).HasMaxLength(255).IsRequired();
+            e.Property(x => x.AuthorizationGeneration).HasDefaultValue(1L);
             e.Property(x => x.OwnerType).HasMaxLength(32).IsRequired();
             e.HasIndex(x => x.ProviderInstallationId).IsUnique();
             e.HasIndex(x => x.NextReconciliationAt);
@@ -50,6 +51,7 @@ public static class GitHubAppInstallationConfiguration
         {
             e.ToTable("GitHubAppRepositoryGrants", t => t.HasCheckConstraint("CK_GitHubAppRepositoryGrant_Repository", "\"ProviderRepositoryId\" > 0"));
             e.HasKey(x => x.Id);
+            e.Property(x => x.AuthorizationGeneration).HasDefaultValue(1L);
             e.HasOne<GitHubAppInstallation>().WithMany().HasForeignKey(x => x.InstallationId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new { x.InstallationId, x.ProviderRepositoryId }).IsUnique();
         });

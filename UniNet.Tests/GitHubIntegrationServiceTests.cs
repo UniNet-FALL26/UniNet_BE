@@ -944,23 +944,50 @@ public sealed class GitHubIntegrationServiceTests
         provider.SetSyncPage("commits", "main",
             """[{"sha":"abc123","commit":{"message":"change\n\nCo-authored-by: Pat Example <pat@example.test>","committer":{"date":"2026-11-04T10:00:00Z"}},"author":{"id":42,"login":"octocat"},"committer":{"id":43,"login":"octocat-ci"}}]""");
         provider.SetSyncPage("pull-requests", null,
-            """[{"id":7001,"number":7,"state":"open","updated_at":"2026-11-04T10:00:00Z","merged_at":null,"user":{"id":42,"login":"octocat"},"head":{"sha":"abc123"},"base":{"sha":"main"}}]""");
+            """[{"id":7001,"number":7,"state":"open","created_at":"2026-11-03T10:00:00Z","updated_at":"2026-11-04T10:00:00Z","merged_at":null,"user":{"id":42,"login":"octocat"},"head":{"sha":"abc123"},"base":{"sha":"main"}}]""");
+        provider.SetSyncPage("pull-request-files", "7",
+            """[{"filename":"src/a.cs","previous_filename":"src/old.cs","status":"renamed","additions":1,"deletions":1,"changes":2,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","patch":"@@ -1 +1 @@\n-old-source\n+new-source"}]""");
         var processor = new GitHubSyncJobProcessor(db, provider,
             new GitHubCredentialService(db, provider, new FakeTokenProtector()),
             Options.Create(new GitSyncOptions { BatchSize = 23 }));
 
         await processor.ProcessAsync(job, default);
 
-        Assert.Equal(new[] { "branches", "commits", "pull-requests" },
+        Assert.Equal(new[] { "branches", "commits", "pull-request-files", "pull-requests" },
             await db.GitHubProviderObjects.AsNoTracking().OrderBy(x => x.Category)
                 .Select(x => x.Category).ToArrayAsync());
+        var pullRequestFile = await db.GitHubProviderObjects.AsNoTracking()
+            .SingleAsync(x => x.Category == "pull-request-files");
+        Assert.DoesNotContain("old-source", pullRequestFile.PayloadJson);
+        Assert.DoesNotContain("\"patch\"", pullRequestFile.PayloadJson);
+        var pullRequestFileVersion = await db.GitEvidenceVersions.AsNoTracking()
+            .SingleAsync(x => x.GitHubProviderObjectId == pullRequestFile.Id);
+        var pullRequestFileFacts = System.Text.Json.JsonSerializer.Deserialize<GitFrozenFacts>(
+            pullRequestFileVersion.FrozenFactsJson)!;
+        Assert.Equal(3, pullRequestFileFacts.SchemaVersion);
+        Assert.Equal(7, pullRequestFileFacts.Details!.RelatedPullRequestNumber);
+        Assert.NotNull(pullRequestFileFacts.Details.PatchSha256);
+        Assert.Contains(("pull-request-files", "7", 1), provider.SyncRequests);
         Assert.Equal(1, await db.GitActivities.CountAsync(x => x.ActivityType == "commit.created"));
         Assert.Equal(3, await db.GitActivityActors.CountAsync(x => x.GitActivityId ==
             db.GitActivities.Where(a => a.ActivityType == "commit.created").Select(a => a.Id).Single()));
         Assert.Contains(await db.GitActivityActors.ToListAsync(), x =>
             x.Role == "co-author" && x.Login == "Pat Example" && x.ExternalAccountId == null);
         Assert.Single(await db.GitCommitBranchReferences.ToListAsync());
-        Assert.Equal(3, await db.ProjectGitActivityGrants.CountAsync(x => x.ProjectGitRepositoryId == link.Id));
+        Assert.Equal(4, await db.ProjectGitActivityGrants.CountAsync(x => x.ProjectGitRepositoryId == link.Id));
+        Assert.Equal(4, await db.ProjectEvidenceObservations.CountAsync(x => x.ProjectGitRepositoryId == link.Id));
+        Assert.Empty(await db.ProjectEvidenceObservations.Where(x => x.ProjectGitRepositoryId == secondLink.Id).ToListAsync());
+        Assert.Equal(4, await db.GitEvidenceVersions.CountAsync());
+        var syncObservations = await db.ProjectEvidenceObservations.AsNoTracking()
+            .Where(x => x.GitSyncJobId == job.Id)
+            .Join(db.GitEvidenceVersions.AsNoTracking(), x => x.GitEvidenceVersionId, x => x.Id,
+                (observation, version) => new { observation.Category, observation.RetrievalCompleteness, version.EvidenceStatus })
+            .ToArrayAsync();
+        Assert.All(syncObservations, x => Assert.Equal("Complete", x.RetrievalCompleteness));
+        Assert.Equal("Complete", syncObservations.Single(x => x.Category == "commits").EvidenceStatus);
+        Assert.Equal("Complete", syncObservations.Single(x => x.Category == "pull-requests").EvidenceStatus);
+        Assert.Equal("Complete", syncObservations.Single(x => x.Category == "pull-request-files").EvidenceStatus);
+        Assert.Equal("Incomplete", syncObservations.Single(x => x.Category == "branches").EvidenceStatus);
         Assert.Empty(await db.ProjectGitActivityGrants.Where(x => x.ProjectGitRepositoryId == secondLink.Id).ToListAsync());
         Assert.Equal(GitSyncCheckpointStatus.Completed,
             (await db.GitSyncCheckpoints.SingleAsync(x => x.Category == "commits")).Status);
@@ -1628,6 +1655,25 @@ public sealed class GitHubIntegrationServiceTests
         Assert.Contains("page=2", handler.RequestUri!.Query);
         Assert.Contains("sha=feature%2Fa%20b", handler.RequestUri.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
+    }
+
+    [Fact]
+    public async Task ProviderSyncPageRetrievesPullRequestFilesWithPagination()
+    {
+        var handler = new FakeHttpHandler("""[{"filename":"src/a.cs"}]""")
+        {
+            LinkHeader = "<https://api.github.com/repos/octocat/repo/pulls/42/files?page=3>; rel=\"next\""
+        };
+        using var http = new HttpClient(handler);
+        var provider = new GitHubProviderClient(http, Options.Create(new GitHubIntegrationOptions()));
+
+        var result = await provider.GetSyncPageAsync(
+            "access-token", "octocat/repo", "pull-request-files", "42", 2, 100, default);
+
+        Assert.Single(result.Items);
+        Assert.True(result.HasMore);
+        Assert.Equal("/repos/octocat/repo/pulls/42/files", handler.RequestUri!.AbsolutePath);
+        Assert.Contains("page=2", handler.RequestUri.Query);
     }
 
     [Fact]
