@@ -5,7 +5,7 @@ namespace UniNet.Application.Interfaces;
 
 public interface IStudentOpportunityService
 {
-    Task<OpportunityJobsResponse> ListAsync(Guid accountId, string? view, string? keyword, JobWorkType? workType, int page, int pageSize, CancellationToken ct);
+    Task<OpportunityJobsResponse> ListAsync(Guid accountId, string? view, string? keyword, JobWorkType? workType, int page, int pageSize, CancellationToken ct, string? sort = null);
     Task<OpportunityJobResponse> GetAsync(Guid accountId, Guid jobId, CancellationToken ct);
     Task<PublicPartnerProfileResponse> GetPartnerProfileAsync(Guid accountId, Guid jobId, CancellationToken ct);
     Task<IReadOnlyList<StudentSubmittedApplicationResponse>> GetOwnApplicationsAsync(Guid accountId, Guid jobId, CancellationToken ct);
