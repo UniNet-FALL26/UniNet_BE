@@ -81,20 +81,12 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
                 }
                 else if (await IsMemberAsync(projectVerification.ProjectId, profileId, ct)) url = $"/group/verification/{projectVerification.ProjectId}";
                 break;
-            case "EvidenceModeration": case "ProjectModeration":
-                var moderation = await db.ProjectModerations.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id, ct);
+            case "ProjectModeration":
+                var moderation = await db.ProjectModerations.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id &&
+                    m.Purpose == UniNet.Domain.Enums.ProjectModerationPurpose.ProjectSubmission, ct);
                 if (moderation == null) break;
-                var permission = n.TargetType == "EvidenceModeration" ? NotificationPermissionPolicy.EvidenceReview : NotificationPermissionPolicy.ProjectReview;
-                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, permission, ct))
-                {
-                    if (account.Role == AccountRole.Assessor)
-                    {
-                        var ownAssignment = await db.VerificationAssignments.AsNoTracking().Where(a => a.ProjectVerification.EvidenceModerationId == id && a.AssignedToUserId == profileId)
-                            .OrderByDescending(a => a.AssignedAt).ThenBy(a => a.Id).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
-                        url = ownAssignment is Guid ownId ? $"/assessor-assessments/{ownId}" : null;
-                    }
-                    else url = account.Role == AccountRole.Admin ? "/admin/projects" : "/moderator/projects";
-                }
+                if (staff && await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.ProjectReview, ct))
+                    url = account.Role == AccountRole.Admin ? "/admin/projects" : "/moderator/projects";
                 else if (await IsMemberAsync(moderation.ProjectId, profileId, ct)) url = $"/group/{moderation.ProjectId}";
                 break;
             case "Project":

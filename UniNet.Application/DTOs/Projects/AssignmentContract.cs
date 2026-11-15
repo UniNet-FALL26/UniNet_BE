@@ -15,10 +15,11 @@ public record AssignmentResponse(Guid Id, Guid ProjectVerificationId, Guid Assig
 public record AssignmentProjectResponse(Guid Id, string Title, string ProjectField, string Description,
     ProjectStatus Status, Guid? LeaderId, List<ProjectSkillInfo> Skills, List<ProjectMemberInfo> Members,
     ProjectLeaderInfo? Leader, ProjectOrigin Origin = ProjectOrigin.Internal, Guid? OwnerUserId = null,
-    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null);
+    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
+    SpecializationResponse? Specialization = null);
 public record AssignmentAssigneeResponse(Guid UserId, string FullName, string? AvatarUrl, string Nickname);
 public record AssignmentDetailResponse(AssignmentResponse Assignment, AssignmentProjectResponse Project,
-    UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration, VerificationReportResponse? Report,
+    VerificationReportResponse? Report,
     AssessmentRubric? AssessmentRubric = null, AssignmentAssigneeResponse? AssignedToUser = null);
 public record AssignmentsResponse(int Page, int PageSize, int TotalItems, int TotalPages,
     List<AssignmentResponse> Assignments);

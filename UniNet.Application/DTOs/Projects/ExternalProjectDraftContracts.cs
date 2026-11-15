@@ -2,7 +2,6 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application.DTOs.Projects;
 
-public sealed record CreateExternalProjectDraftRequest(List<Guid> FileIds);
 public sealed record UpdateExternalProjectDraftRequest(int Version, ExternalProjectDraftData Data);
 public sealed record ConfirmExternalProjectDraftRequest(int Version, bool ConfirmSharingRights);
 public sealed record DeclaredProjectMember(string Name, string? Role);
@@ -11,6 +10,7 @@ public sealed record ExternalProjectDraftData
     public string? Title { get; init; }
     public string? Description { get; init; }
     public string? ProjectField { get; init; }
+    public Guid? SpecializationId { get; init; }
     public string? StartDate { get; init; }
     public string? EndDate { get; init; }
     public string? RepositoryUrl { get; init; }
@@ -29,5 +29,5 @@ public sealed record ExternalProjectDraftResponse(Guid DraftId, ExternalProjectD
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset ExpiresAt, string? ErrorCode,
     Guid? ConfirmedProjectId, ExternalProjectDraftData Data, ProjectDraftExtractionResult? Extraction,
     List<string> MissingFields, List<DraftUploadedFileResponse> Files);
-public sealed record ConfirmExternalProjectDraftResponse(Guid DraftId, Guid ProjectId, Guid EvidenceModerationId,
+public sealed record ConfirmExternalProjectDraftResponse(Guid DraftId, Guid ProjectId,
     int Version, ProjectOrigin Origin = ProjectOrigin.External, ProjectStatus Status = ProjectStatus.Completed);

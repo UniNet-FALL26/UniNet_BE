@@ -109,17 +109,22 @@ public sealed class NotificationMigrationPostgresTests
         var project = new Project { Creator = account.Profile!, Title = "Project", Description = "Work", ProjectField = "IT", MemberTarget = 1, Status = ProjectStatus.Completed };
         var package = new Package { Id = Guid.NewGuid(), Code = "notice", Name = "Verification" };
         var verification = new UserVerification { User = account.Profile!, VerificationType = VerificationType.Student };
-        var evidence = new ProjectModeration { Project = project, Purpose = ProjectModerationPurpose.ProjectEvidence, Version = 1, SourceHash = new('A',64), PolicyHash = new('B',64), SnapshotJson = "{}", PolicyJson = "{}", CreatedAt = now, UpdatedAt = now };
+        var evidenceId = Guid.NewGuid();
         var projectVerification = new ProjectVerification { Id = Guid.NewGuid(), Project = project, RequestByUser = account.Profile!, Package = package, SubmittedAt = now, CreatedAt = now, UpdatedAt = now };
-        db.Accounts.Add(account); db.Projects.Add(project); db.Packages.Add(package); db.UserVerifications.Add(verification); db.ProjectModerations.Add(evidence); db.ProjectVerifications.Add(projectVerification);
+        db.Accounts.Add(account); db.Projects.Add(project); db.Packages.Add(package); db.UserVerifications.Add(verification); db.ProjectVerifications.Add(projectVerification);
         await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ProjectModerations" ("Id","ProjectId","Purpose","Status","ContentResult","LinkResult","ContentHash","AttemptNumber","RetryCount","CreatedAt","UpdatedAt","Version","SourceHash","PolicyHash","SnapshotJson","PolicyJson")
+            VALUES ({evidenceId},{project.Id},1,0,0,0,'',0,0,{now},{now},1,{new string('A',64)},{new string('B',64)},{"{}"}::jsonb,{"{}"}::jsonb);
+            """);
+
         var ids = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "VerificationNotification" ("Id","RecipientUserId","EventKey","Message","CreatedAt","UserVerificationId") VALUES ({ids[0]},{account.Profile!.Id},'legacy-user','unchanged-content',{now},{verification.Id});
             INSERT INTO "VerificationNotification" ("Id","RecipientUserId","EventKey","Message","CreatedAt","VerificationId") VALUES ({ids[1]},{account.Profile!.Id},'legacy-project','unchanged-content',{now},{projectVerification.Id});
-            INSERT INTO "VerificationNotification" ("Id","RecipientUserId","EventKey","Message","CreatedAt","EvidenceModerationId") VALUES ({ids[2]},{account.Profile!.Id},'legacy-evidence','unchanged-content',{now},{evidence.Id});
+            INSERT INTO "VerificationNotification" ("Id","RecipientUserId","EventKey","Message","CreatedAt","EvidenceModerationId") VALUES ({ids[2]},{account.Profile!.Id},'legacy-evidence','unchanged-content',{now},{evidenceId});
             """);
-        return (account.Id, account.Profile!.Id, ids, [verification.Id, projectVerification.Id, evidence.Id], now);
+        return (account.Id, account.Profile!.Id, ids, [verification.Id, projectVerification.Id, evidenceId], now);
     }
 
     private sealed class Store : IAsyncDisposable

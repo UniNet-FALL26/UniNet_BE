@@ -11,6 +11,11 @@ public sealed record PortfolioSkill
 }
 public sealed record PortfolioProject
 {
+    public Guid? ProjectId { get; init; }
+    public string? PersonalContribution { get; init; }
+    public string? Role { get; init; }
+    public DateTimeOffset? CompletedAt { get; init; }
+    public PortfolioProjectVerification? Verification { get; init; }
     public string Title { get; init; } = "";
     public string? Description { get; init; }
     public string? Type { get; init; }
@@ -96,3 +101,5 @@ public sealed record ProfileAppearanceSettings
     public string[] SectionOrder { get; init; } = ["featured-projects", "stats", "skills", "journey", "other-projects", "certificates", "activities", "languages", "articles"];
     public string[] HiddenSections { get; init; } = [];
 }
+
+public sealed record PortfolioProjectVerification(Guid Id, string Status, DateTimeOffset? FinalizedAt);

@@ -23,6 +23,8 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? SharingRightsConfirmedAt { get; set; }
         public string Title { get; set; } = null!;
         public string ProjectField { get; set; } = null!;
+        public Guid? SpecializationId { get; set; }
+        public Specialization? Specialization { get; set; }
         public string Description { get; set; } = null!;
         public int? MemberTarget { get; set; }
         // Legacy projects may have a single creator; creation requests require at least two.
@@ -51,6 +53,5 @@ namespace UniNet.Domain.Entities
         public List<ProjectVerification> Verifications { get; set; } = [];
         public List<WorkspaceChannel> WorkspaceChannels { get; set; } = [];
         public ContributionCycle? ContributionCycle { get; set; }
-        public List<ProjectEvidenceDocument> EvidenceDocuments { get; set; } = [];
     }
 }

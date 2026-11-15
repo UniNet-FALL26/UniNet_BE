@@ -1,0 +1,89 @@
+AUTH|Accounts and Profiles|Registration, authentication, identity verification, and career profiles.
+@Registration and authentication|An account or valid registration data is available.
+Student registration and login|Register with a new student email. Sign in with the same credentials and fetch the current profile.|One student account is created. The session resolves to that student's profile.
+Duplicate registration|Register again using an existing email.|Registration is rejected. No second account is created.
+Refresh token rotation|Refresh a valid session. Repeat using the original refresh token.|The first refresh issues replacement tokens. The original refresh token is rejected on reuse.
+Suspended account sign-in|Suspend a student test account through Admin. Attempt to sign in again.|The suspended account cannot obtain a new session.
+Partner registration|Register as a Partner with valid organization and contact names. Fetch the account profile.|The Partner profile keeps organization and personal names in their respective fields.
+@Identity verification|A Student or Partner account and valid test documents are available.
+Student document review|Submit a student document. Open the submission as authorized staff and approve it. Reload the student's verification status.|The submission appears in the review queue and the student sees the approved status.
+Partner document rejection|Submit Partner documents. Reject the request with a reason and fetch its status as the Partner.|The Partner sees a rejected verification request and the recorded reason.
+@Career profile|Completed and active projects are available for the student.
+Link a completed project as a member|As an active member of a completed project, add its ProjectId to the career profile and reload.|The profile contains the referenced project for the member.
+Reject a project that is still active|Try to save a project reference for an active project in the career profile.|The request is rejected. The profile does not gain the reference.
+Reject a project outside the student's team|Try linking a completed project the student never created or joined.|The request is rejected and the existing career profile stays intact.
+PROJ|Projects and Recruitment|Project lifecycle, submission moderation, recruitment, and membership.
+@Project creation and management|A signed-in Student and valid project data are available.
+Create a valid project|Submit valid project details, skills, and recruitment settings. Fetch the new project by ID.|The creator can retrieve the stored project with the submitted details and moderation state.
+Enforce the concurrent project limit|With the default limit of three, prepare three projects counted toward the student's limit. Attempt to create a fourth.|The fourth creation is rejected and the existing projects are retained.
+Edit a project as its creator|Open a project created by the signed-in student. Update its details and fetch it again.|The updated values are persisted for the existing project.
+Reject a non-owner project edit|Use a different student account to update the same project's details.|The update is denied. The project retains its original details.
+Reject invalid recruitment target|Submit project creation with a minimum-member target outside the supported range.|Validation rejects creation and no project is added.
+@Submission moderation and discovery|The project moderation workflow is configured and the reviewer has the appropriate role.
+Approve a pending project submission|Open the pending queue as Admin or Moderator. Approve a pending submission. Check public discovery.|The decision is stored and the approved project is eligible for discovery.
+Reject a pending project submission|Reject another pending project with a reason. Fetch its status and search discovery.|The rejection reason is stored and the rejected submission is excluded from discovery.
+@Invitations and join requests|Recruitment is open and eligible test accounts are available.
+Invite a student and accept|As creator, invite an eligible student. Sign in as the invitee, open the invitation and accept.|The invitee is notified, the invitation is accepted and project membership is active.
+Reject a duplicate open invitation|Invite the same student twice while the first invitation is open.|The second invitation is rejected and the original remains available.
+Submit and accept a join request|As a student, request to join an open project. As creator, accept the pending request.|The request is accepted and an active membership exists for the applicant.
+Prevent recruitment after expiry|Attempt an invitation and a new join request after the project's recruitment deadline.|Both requests are rejected and no new invitation or join request is stored.
+Recommend members for required skills|Create a project with required skills. Request member recommendations as the creator and compare returned ranks and skill matches.|Recommendations expose matching skills and are ordered by the service's score.
+WORK|Workspace and Contribution|Task assignment, evidence, team chat, peer evaluation, and completion.
+@Tasks and task reports|An active project has a creator, active members, and an outsider account.
+Assign a project task|As creator, create a valid task and assign an active member. Retrieve task details as that member.|The task is saved and the correct member appears in the assignment list.
+Reject assignment outside the team|Attempt to assign an unrelated student to the task.|The assignment is rejected and the current assignment list stays intact.
+Start an assigned task|As an assigned active member, move a To Do task to In Progress and reload.|The task status changes to In Progress. Its other fields retain their values.
+Submit and review task evidence|As an assignee, submit a task report with valid evidence. Review the report as creator and reload it.|The submission and review decision persist with the report.
+Reject task access by an outsider|Request another project's task list as a student with no membership.|The request is denied and project task data is withheld.
+@Workspace chat|The project has a channel visible to the test member.
+Send and retrieve a team message|Post a message as an authorized member. Reload the channel history as another authorized member.|The message is visible with the correct content and sender.
+@Contribution and completion|The project is collecting contribution and has eligible participants.
+Require complete peer evaluation|Leave a required peer evaluation missing. Request contribution calculation as the creator.|Calculation is rejected until the required peer evaluations are complete.
+Calculate and confirm contribution|Complete required evaluations and prepare approved task reports. Calculate as creator, then confirm the run.|The calculation is stored and confirmation publishes the final contribution results.
+Request a contribution revision|Calculate contribution, request revision, change eligible inputs and recalculate.|A new run is produced and prior calculation history remains available.
+VER|Project Verification|Eligibility, booking, payment, staff assignment, interview, result, and overdue handling.
+@Verification request and booking|A completed project, its creator, and bookable verification slots are available.
+Create verification for a completed project|As the creator, open verification for a completed project without a task-evidence review. Fetch the request.|The request can be opened and retrieved without requiring the retired evidence-review workflow.
+Reject verification for an incomplete project|Request project verification while the project is still active.|The request is rejected and no new verification case is created.
+Hold a meeting slot|Choose a currently available slot. Query availability again before the hold expires.|The slot is held and conflicting booking capacity is unavailable while the hold is active.
+Release expired capacity|Let an unpaid hold expire. Query availability and reserve the released capacity using an eligible test case.|The expired hold no longer consumes capacity and its history is retained.
+@Payment and assignment|An eligible booking and controlled PayOS integration or test provider are available.
+Confirm payment and assign staff|Start checkout for the reservation. Confirm the payment through the configured provider and assign eligible staff from the Admin queue.|The payment and booking are confirmed and the assigned assessor can retrieve the case.
+Cancel an unpaid checkout|Cancel a pending checkout and query the same meeting slot again.|The pending hold is released and the verification is not marked paid.
+@Interview and verification report|A paid booking has an assigned Assessor and a meeting.
+Start and join a verification meeting|Start the meeting as the assigned Assessor. Join as the authorized project participant.|The authorized participant can join the meeting associated with the assignment.
+Reject a premature report|Before the meeting starts, submit the final rubric report as the assigned Assessor.|Submission is rejected and no final report is recorded.
+Finalize the case through one report|After the meeting has started, submit a valid final report. Fetch the case result and repeat the submission.|The first report finalizes the case. The duplicate is rejected and the original report stays intact.
+Escalate overdue verification|Advance an eligible unfinished case past its configured deadline, run the background workflow and review the overdue queue.|The case is flagged for overdue handling and eligible replacement staff can be assigned.
+JOBS|Career Opportunities|Partner job listings and student applications.
+@Job listing management|An eligible Partner account and valid job data are available.
+Publish a job listing|Create a job as a Partner and publish it through the status action if needed. Search student opportunities.|The published job is returned in eligible student searches with the correct details.
+Update an owned job|Change details on a job owned by the signed-in Partner. Retrieve it again.|The revised job details are persisted.
+Reject another Partner's job update|Sign in as a different Partner and attempt to update the listing.|The request is denied and job details stay intact.
+@Student applications|An open listing and an eligible Student profile are available.
+Save and unsave a job|Save an opportunity as a Student. Reload the saved opportunities, remove the saved entry, and reload again.|The opportunity appears after saving and is removed from saved results after unsaving.
+Submit a job application|Apply to an open job using valid application data. Open applications as the owning Partner.|The application appears for the owning Partner and is linked to the correct Student and job.
+Update application status|As the job owner, update an existing application to an allowed next status. Retrieve it again.|The application shows the persisted status for the correct job.
+COMM|Community and Ads|Community content and advertising campaign lifecycle.
+@Posts and engagement|A signed-in user and another eligible user are available.
+Publish and update a post|Create a community post. Edit it as the author and retrieve the feed.|The feed returns the post with updated content.
+React, bookmark and comment|As a second user, react to and bookmark a post, then add a comment and a reply.|The interaction state and comment thread are retrievable for the correct post.
+Reject an unauthorized post edit|Try to edit another user's post through the community update action.|The request is denied and the post keeps its original content.
+Report a community post|Submit a valid report against an existing post.|The report is accepted for the specified post.
+@Advertising campaigns|A Partner, active advertising package and controlled payment integration are available.
+Create and pay for a campaign|Create a campaign, select an available package and start its payment. Confirm payment through the configured provider.|The campaign is associated with the selected package and confirmed payment.
+Approve and display a campaign|Approve a paid campaign as Admin and load the public feed during its active period.|The eligible campaign is returned in the feed.
+Capture ad impressions and clicks|Load an eligible campaign, send an impression and a click, then inspect campaign statistics.|The events are attributed to the selected campaign.
+ADMIN|Administration and Finance|Admin accounts, permissions, catalog, assessor onboarding, notifications, and finance controls.
+@Accounts and permissions|An Admin and separate student, staff and Partner test accounts are available.
+Suspend and unlock a user|Suspend a signed-in Student from Admin. Attempt session refresh, unlock the account and attempt a fresh sign-in.|Suspension revokes the old session. Unlock allows fresh authentication without restoring the revoked refresh token.
+Create a staff account|As an authorized Admin, create a staff account using a supported staff role and inspect the staff list.|The new staff account appears with the intended role.
+Deny permission escalation|Attempt to grant a permission the acting account cannot delegate.|The permission update is rejected and the target account gains no access.
+@Catalog and notifications|An authorized Admin account and test audience are available.
+Maintain skills catalog|Create a skill with valid data, update its details, and retrieve it from the catalog.|The catalog returns the updated skill under its existing identifier.
+Send a targeted broadcast|Send a broadcast to a configured test audience and check an eligible recipient's notifications.|The broadcast reaches an eligible recipient with the expected content.
+@Assessor onboarding|An Assessor onboarding record and a valid activation flow are available.
+Activate an invited Assessor|Inspect a valid activation token and complete activation using accepted credentials.|The Assessor account is activated and eligible to authenticate.
+@Finance operations|Test payment, wallet and staff permission fixtures are available.
+Prevent withdrawal above available balance|Reserve a valid withdrawal. Attempt another withdrawal that exceeds remaining available balance.|The second withdrawal is rejected and existing reservations are preserved.
+Review and confirm a refund|Create a refund against an eligible paid transaction. Review it as another authorized user and confirm payout.|The refund follows the configured workflow and records the confirmed payout against the correct payment.

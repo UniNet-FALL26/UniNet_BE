@@ -41,6 +41,10 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
     {
         Require(!string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 255, "INVALID_NAME", "Name must be between 1 and 255 characters.");
         Require(ValidEmail(email), "INVALID_EMAIL", "Email is invalid.");
+        ValidatePassword(password, confirmation);
+    }
+    internal static void ValidatePassword(string password, string confirmation)
+    {
         Require(password.Length is >= 8 and <= 1024 && password.Any(char.IsLetter) && password.Any(char.IsDigit), "INVALID_PASSWORD", "Password must be between 8 and 1024 characters, and contain both letters and digits.");
         Require(password == confirmation, "PASSWORD_MISMATCH", "Password confirmation does not match.");
     }

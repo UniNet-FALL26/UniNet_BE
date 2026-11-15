@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,23 +38,6 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? ReviewAt { get; set; }
         public int AttemptNumber { get; set; }
         public int RetryCount { get; set; }
-
-        // Evidence source version and provider attempts are independent of submission attempts.
-        public int Version { get; set; }
-        public string? SourceHash { get; set; }
-        public string? SnapshotJson { get; set; }
-        public string? PolicyHash { get; set; }
-        public string? PolicyJson { get; set; }
-        public DateTimeOffset? SupersededAt { get; set; }
-        public DateTimeOffset? CompletedAt { get; set; }
-        public DateTimeOffset? LeaseExpiresAt { get; set; }
-        public Guid? LeaseToken { get; set; }
-        public DateTimeOffset? NextRetryAt { get; set; }
-        public int AttemptCount { get; set; }
-        public string? LastErrorCode { get; set; }
-        public string? LastError { get; set; }
-        public string? Summary { get; set; }
-        public List<EvidenceModerationAttempt> Attempts { get; set; } = [];
 
         // Navigation property
 

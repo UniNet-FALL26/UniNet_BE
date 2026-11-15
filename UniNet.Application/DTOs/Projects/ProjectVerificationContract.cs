@@ -16,7 +16,15 @@ public record ProjectVerificationsResponse(int Page, int PageSize, int TotalItem
 public record VerificationProjectResponse(Guid Id, string Title, string ProjectField, string Description,
     ProjectStatus Status, Guid? LeaderId, ProjectOrigin Origin = ProjectOrigin.Internal, Guid? OwnerUserId = null,
     ProjectLeaderInfo? Leader = null,
-    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null);
+    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
+    SpecializationResponse? Specialization = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ProjectSkillInfo>? Skills { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ProjectMemberInfo>? Members { get; init; }
+}
 public record VerificationReportResponse(Guid Id, Guid AssignmentId, string Summary, string? Findings,
     string? Recommendations, DateTimeOffset SubmittedAt,
     ProjectVerificationStatus? Outcome = null, ProjectAssessmentResult? Assessment = null);
@@ -32,7 +40,6 @@ public record VerificationFinalResultResponse(ProjectVerificationStatus Status, 
     Guid? FinalizedByUserId, List<VerificationReportResponse> Reports);
 public record ProjectVerificationDetailResponse(ProjectVerificationResponse Verification,
     VerificationProjectResponse Project, Guid PackageId,
-    UniNet.Application.DTOs.Projects.EvidenceModerationResponse? EvidenceModeration,
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt,
     List<VerificationAssignmentResponse> Assignments, List<VerificationPaymentResponse> Payments,
     VerificationFinalResultResponse? FinalResult, string? CancellationReason, DateTimeOffset? CancelledAt,

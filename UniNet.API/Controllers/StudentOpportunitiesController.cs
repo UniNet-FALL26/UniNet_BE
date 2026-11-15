@@ -21,8 +21,9 @@ public sealed class StudentOpportunitiesController(IStudentOpportunityService op
         [FromQuery] JobWorkType? workType = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken ct = default)
-        => opportunities.ListAsync(AccountId, view, keyword, workType, page, pageSize, ct);
+        CancellationToken ct = default,
+        [FromQuery] string? sort = null)
+        => opportunities.ListAsync(AccountId, view, keyword, workType, page, pageSize, ct, sort);
 
     [HttpGet("{jobId:guid}")]
     public Task<OpportunityJobResponse> Get(Guid jobId, CancellationToken ct)

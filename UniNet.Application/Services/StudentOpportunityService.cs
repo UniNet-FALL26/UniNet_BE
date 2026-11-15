@@ -17,11 +17,13 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<OpportunityJobsResponse> ListAsync(Guid accountId, string? view, string? keyword,
-        JobWorkType? workType, int page, int pageSize, CancellationToken ct)
+        JobWorkType? workType, int page, int pageSize, CancellationToken ct, string? sort = null)
     {
         var student = await GetStudentAsync(accountId, ct);
         view = string.IsNullOrWhiteSpace(view) ? "all" : view.Trim().ToLowerInvariant();
         Require(view is "all" or "saved" or "applied", "INVALID_VIEW", "View must be all, saved, or applied.");
+        sort = string.IsNullOrWhiteSpace(sort) ? "deadline" : sort.Trim().ToLowerInvariant();
+        Require(sort is "deadline" or "newest", "INVALID_SORT", "Sort must be deadline or newest.");
         Require(page >= 1, "INVALID_PAGE", "Page must be greater than or equal to 1.");
         Require(pageSize is >= 1 and <= 50, "INVALID_PAGE_SIZE", "Page size must be between 1 and 50.");
         Require(workType is null || Enum.IsDefined(workType.Value), "INVALID_WORK_TYPE", "Work type is invalid.");
@@ -45,7 +47,10 @@ public sealed class StudentOpportunityService(UniNetDbContext db, PortfolioServi
         if (view == "applied") query = query.Where(x => db.JobApplications.Any(app => app.StudentUserId == student.Id && app.JobId == x.Id));
 
         var totalItems = await query.CountAsync(ct);
-        var jobs = await query.OrderBy(x => x.Deadline == null).ThenBy(x => x.Deadline).ThenByDescending(x => x.CreatedAt)
+        var ordered = sort == "newest"
+            ? query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id)
+            : query.OrderBy(x => x.Deadline == null).ThenBy(x => x.Deadline).ThenByDescending(x => x.CreatedAt);
+        var jobs = await ordered
             .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue)).Take(pageSize)
             .Include(x => x.Partner).Include(x => x.JobSkills).ThenInclude(x => x.Skill).ToListAsync(ct);
         var ids = jobs.Select(x => x.Id).ToArray();

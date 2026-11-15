@@ -24,15 +24,15 @@ public sealed partial class TransactionTests
         f.Provider.OnCreate = async request =>
         {
             await using var observer = new UniNetDbContext(f.Options);
-            var stored = await observer.Transactions.AsNoTracking().Include(t => t.VerificationTransaction).SingleAsync();
+            var stored = await observer.Transactions.AsNoTracking().SingleAsync();
             Assert.Equal(PaymentStatus.Pending, stored.Status);
-            Assert.Equal(f.Verification.Id, stored.VerificationTransaction!.VerificationId);
+            Assert.Equal(f.Verification.Id, stored.VerificationId);
             Assert.Equal(37000, request.AmountVnd);
             return FakeProvider.Result(request.OrderCode, request.AmountVnd) with { QrCode = "000201-test-payload" };
         };
         var result = await f.CheckoutAsync();
         Assert.Equal(37000, result.AmountVnd);
-        Assert.Equal("https://pay.payos.vn/web/test", result.CheckoutUrl);
+        Assert.Null(result.CheckoutUrl);
         Assert.Equal("000201-test-payload", result.QrCode);
         Assert.False(result.ReconciliationRequired);
         f.Package.Price = 42000;
@@ -65,10 +65,22 @@ public sealed partial class TransactionTests
         Assert.Equal(0, f.Provider.CreateCalls);
     }
 
-    [Fact]
-    public async Task OwnershipAndAssociationAreEnforcedForEveryUserOperation()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Developer")]
+    [InlineData("Leader")]
+    public async Task OwnershipAndAssociationAreEnforcedForEveryUserOperation(string? memberRole)
     {
         await using var f = await Fixture.CreateAsync();
+        if (memberRole != null)
+        {
+            f.Db.ProjectMembers.Add(new ProjectMember
+            {
+                ProjectId = f.Project.Id, UserId = f.Other.Profile!.Id,
+                Role = memberRole, Status = ProjectMemberStatus.Active
+            });
+            await f.Db.SaveChangesAsync();
+        }
         await Error("FORBIDDEN", () => f.Service.CreateAsync(f.Verification.Id, f.Other.Id));
         var result = await f.CheckoutAsync();
         await Error("FORBIDDEN", () => f.Service.GetHistoryAsync(f.Verification.Id, f.Other.Id));
@@ -273,7 +285,7 @@ public sealed partial class TransactionTests
         {
             Id = Guid.NewGuid(), UserId = f.Owner.Profile!.Id, PackageId = f.Package.Id, Amount = 37000,
             PaymentMethod = "PayOS", ProviderOrderCode = "second", CreatedAt = DateTimeOffset.UtcNow,
-            VerificationTransaction = new() { VerificationId = f.Verification.Id }
+            VerificationId = f.Verification.Id
         };
         f.Db.Transactions.Add(second);
         await f.Db.SaveChangesAsync();
@@ -367,7 +379,7 @@ public sealed partial class TransactionTests
         public FakeProvider Provider { get; } = new();
         public TransactionService Service => new(Db, Provider, Configuration, NullLogger<TransactionService>.Instance);
         public Task<TransactionResponse> CheckoutAsync() => Service.CreateAsync(Verification.Id, Owner.Id);
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool includeLegacyEvidence = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -407,16 +419,6 @@ public sealed partial class TransactionTests
                 ["Payments:ReturnUrl"] = "https://frontend.test/paid",
                 ["Payments:CancelUrl"] = "https://frontend.test/cancel"
             }).Build();
-            var source = new EvidenceModerationSource(db, configuration);
-            var snapshot = JsonSerializer.Serialize(await source.CaptureAsync(project.Id, default));
-            var policy = JsonSerializer.Serialize(source.CapturePolicy());
-            var review = new ProjectModeration { Purpose = ProjectModerationPurpose.ProjectEvidence, ProjectId = project.Id, Version = 1,
-                SnapshotJson = snapshot, SourceHash = EvidenceModerationSource.Hash(snapshot),
-                PolicyJson = policy, PolicyHash = EvidenceModerationSource.Hash(policy),
-                Status = ProjectModerationStatus.Passed, CreatedAt = DateTimeOffset.UtcNow };
-            verification.EvidenceModeration = review;
-            db.ProjectModerations.Add(review);
-            await db.SaveChangesAsync();
             return new(connection, db, options, configuration, owner, other, project, package, verification);
         }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await connection.DisposeAsync(); }

@@ -20,7 +20,8 @@ public record CreateProjectRequest(
     DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
     List<RoleRequirementRequest>? RoleRequirements = null,
-    List<Guid>? SkillIds = null
+    List<Guid>? SkillIds = null,
+    Guid? SpecializationId = null
 
 );
 
@@ -31,7 +32,8 @@ public record UpdateProjectRequest(
     string? ProjectField = null,
     string? Description = null,
     DateTimeOffset? RecruitmentDeadline = null,
-    DateTimeOffset? ExpectedOutput = null
+    DateTimeOffset? ExpectedOutput = null,
+    Guid? SpecializationId = null
 
 );
 
@@ -61,7 +63,8 @@ public record ProjectDetailResponse(
     List<ProjectJoinRequestResponse>? JoinRequests = null,
     ProjectOrigin Origin = ProjectOrigin.Internal,
     ProjectLeaderInfo? Leader = null,
-    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null
+    UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
+    SpecializationResponse? Specialization = null
     );
 
 public record CreatorInfo(
@@ -105,7 +108,8 @@ public record ProjectListItemResponse(
     CreatorInfo Creator,
     List<ProjectSkillInfo> Skills,
     ProjectOrigin Origin = ProjectOrigin.Internal,
-    ProjectLeaderInfo? Leader = null
+    ProjectLeaderInfo? Leader = null,
+    SpecializationResponse? Specialization = null
 );
 
 // ============ PROJECT MEMBER RESPONSE ============
@@ -140,7 +144,8 @@ public record DiscoveryProjectResponse(
     RecruitmentStatus RecruitmentStatus,
     DateTimeOffset CreatedAt,
     CreatorInfo Creator,
-    List<ProjectSkillInfo> Skills
+    List<ProjectSkillInfo> Skills,
+    SpecializationResponse? Specialization = null
 );
 
 public record DiscoveryProjectsResponse(

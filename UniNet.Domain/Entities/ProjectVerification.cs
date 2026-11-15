@@ -13,9 +13,6 @@ namespace UniNet.Domain.Entities
         public Guid ProjectId { get; set; }
         // Immutable rubric snapshot for this case. Null only on historical cases.
         public string? AssessmentRubricJson { get; set; }
-        // Nullable only for legacy cases. New cases pin a passed level-1 decision.
-        public Guid? EvidenceModerationId { get; set; }
-        public ProjectModeration? EvidenceModeration { get; set; }
         public Guid RequestByUserId { get; set; }
         public ProjectVerificationStatus Status { get; set; }
         public string? AiSummary { get; set; }
@@ -50,8 +47,7 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset? AiNextRetryAt { get; set; }
         public string? AiLastError { get; set; }
         public string AiAdditionalEvidenceJson { get; set; } = "[]";
-        public List<ProjectVerificationEvidence> EvidenceSubmissions { get; set; } = [];
         public List<VerificationAssignment> Assignments { get; set; } = [];
-        public List<VerificationTransaction> VerificationTransactions { get; set; } = [];
+        public List<Transaction> Transactions { get; set; } = [];
     }
 }

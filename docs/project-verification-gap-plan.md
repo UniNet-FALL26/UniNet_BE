@@ -1,5 +1,8 @@
 # Kế hoạch bổ sung luồng xác thực dự án
 
+Scope update 8 November 2026: Level 1 evidence review has been retired. Any L1 endpoints, fields, workers or planned prerequisites below are historical and must not be implemented. Current API changes are documented in [Level 1 removal](handoffs/remove-verification-l1-prerequisite.md). Project creation content moderation remains active.
+
+
 Ngày lập: 17/10/2026. Trạng thái: kế hoạch, chưa triển khai code.
 
 ## 1. Mục tiêu và phạm vi đã thống nhất

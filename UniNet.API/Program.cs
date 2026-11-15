@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.DataProtection;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -57,6 +59,49 @@ var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationExceptio
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AssessorOnboardingService>();
+builder.Services.AddScoped<AssessorContractService>();
+builder.Services.AddScoped<AssessorActivationService>();
+builder.Services.AddScoped<AssessorOnboardingEmailQueue>();
+builder.Services.AddScoped<AssessorContractTasks>();
+builder.Services.AddSingleton<AssessorContractSecrets>();
+builder.Services.AddScoped<IAssessorContractFiles, AssessorContractFiles>();
+builder.Services.AddScoped<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorSmtpSender>();
+builder.Services.AddHostedService<UniNet.API.Services.AssessorContractWorker>();
+builder.Services.AddOptions<AssessorContractOptions>()
+    .Bind(builder.Configuration.GetSection("AssessorOnboarding"))
+    .Validate(o => !o.Enabled || (
+        Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == "https" || (builder.Environment.IsDevelopment() && uri.IsLoopback && uri.Scheme == "http")) &&
+        string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment) && uri.AbsolutePath == "/" &&
+        Path.IsPathFullyQualified(o.StoragePath) && File.Exists(o.TemplatePath) && File.Exists(o.FontPath) &&
+        !string.IsNullOrWhiteSpace(o.TemplateVersion) && !string.IsNullOrWhiteSpace(o.SignatureStatement) &&
+        (builder.Environment.IsDevelopment() ||
+         !string.IsNullOrWhiteSpace(builder.Configuration["AssessorOnboarding:KeyRingPath"]))),
+        "Enabled assessor contracts require a public origin, private storage, template, Unicode font, template version, signature statement and a persistent key ring outside Development.")
+    .Validate(o => !o.Enabled || !Path.GetFullPath(o.StoragePath).StartsWith(
+        Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "wwwroot")), StringComparison.OrdinalIgnoreCase),
+        "Assessor contracts must be stored outside wwwroot.")
+    .ValidateOnStart();
+builder.Services.AddOptions<UniNet.API.Services.AssessorSmtpOptions>()
+    .Bind(builder.Configuration.GetSection("AssessorOnboarding:Smtp"))
+    .Validate(o => !builder.Configuration.GetValue<bool>("AssessorOnboarding:Enabled") ||
+        (System.Net.Mail.MailAddress.TryCreate(o.From, out _) &&
+        ((!string.IsNullOrWhiteSpace(o.Host) && o.Port > 0 && o.Port <= 65535) ||
+         (builder.Environment.IsDevelopment() && Path.IsPathFullyQualified(o.PickupDirectory ?? "")))),
+        "Configure SMTP or a Development-only pickup directory.")
+    .ValidateOnStart();
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("AssessorContracts", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
+var onboardingProtection = builder.Services.AddDataProtection();
+var onboardingKeyRing = builder.Configuration["AssessorOnboarding:KeyRingPath"];
+if (!string.IsNullOrWhiteSpace(onboardingKeyRing))
+    onboardingProtection.PersistKeysToFileSystem(new DirectoryInfo(onboardingKeyRing)).SetApplicationName("UniNet");
 builder.Services.AddScoped<AdminUsersService>();
 builder.Services.AddScoped<AdminSkillsService>();
 builder.Services.AddScoped<AdminPermissionService>();
@@ -74,24 +119,10 @@ builder.Services.AddScoped<VerificationDeadlineTasks>();
 builder.Services.AddScoped<ProjectRecruitmentTasks>();
 builder.Services.AddScoped<VerificationReservationTasks>();
 builder.Services.AddScoped<VerificationRefundTasks>();
-builder.Services.AddScoped<EvidenceModerationTasks>();
-builder.Services.AddScoped<EvidenceModerationService>();
-builder.Services.AddScoped<EvidenceModerationChecks>();
-builder.Services.AddSingleton<IProjectDocumentTextReader, ProjectDocumentTextReader>();
-builder.Services.AddHttpClient<IUploadedDocumentContentReader, UploadedDocumentContentReader>(client => client.Timeout = TimeSpan.FromSeconds(35))
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-builder.Services.AddHttpClient<IProjectInformationExtractor, GeminiProjectInformationExtractor>(client => client.Timeout = TimeSpan.FromSeconds(65))
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-builder.Services.AddScoped<ExternalProjectDraftExtractionService>();
 builder.Services.AddScoped<ExternalProjectDraftService>();
 builder.Services.AddScoped<ExternalProjectDraftTasks>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
-builder.Services.AddHttpClient<GeminiVerificationAiReviewer>(client => client.Timeout = TimeSpan.FromSeconds(35))
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-builder.Services.AddTransient<IEvidenceContentReviewer>(s => s.GetRequiredService<GeminiVerificationAiReviewer>());
-builder.Services.AddHttpClient<IEvidenceUrlChecker, GoogleSafeBrowsingUrlChecker>(client => client.Timeout = TimeSpan.FromSeconds(35))
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 if (!disableUnrelatedWorkers)
     builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
@@ -102,6 +133,7 @@ builder.Services.AddScoped<StudentVerificationService>();
 builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
+builder.Services.AddScoped<SpecializationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
 builder.Services.AddGitExperimentalContributionServices();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
@@ -418,6 +450,7 @@ app.Use(async (context, next) =>
     }
     await next();
 });
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
@@ -434,6 +467,7 @@ app.MapHealthChecks("/health/github/queue", new Microsoft.AspNetCore.Diagnostics
 {
     Predicate = check => check.Name == "github-queue"
 });
+app.UseStaticFiles();
 app.MapControllers();
 app.MapHub<UniNet.API.Hubs.WorkspaceChatHub>(
     "/hubs/workspace",

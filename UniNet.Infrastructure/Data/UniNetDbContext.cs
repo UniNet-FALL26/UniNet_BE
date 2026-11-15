@@ -51,17 +51,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 Set<NotificationDelivery>().Add(new() { AccountId = entry.Entity.RecipientUserId, NotificationId = entry.Entity.Id });
         }
         foreach (var entry in ChangeTracker.Entries<ProjectModeration>())
-        {
             if (entry.State == EntityState.Modified && entry.Property(x => x.Purpose).IsModified)
                 throw new InvalidOperationException("Moderation purpose cannot be changed.");
-            if (entry.Entity.Purpose != ProjectModerationPurpose.ProjectEvidence) continue;
-            if (entry.State == EntityState.Deleted)
-                throw new InvalidOperationException("Evidence moderation history cannot be deleted.");
-            if (entry.State == EntityState.Modified && new[] { nameof(ProjectModeration.ProjectId), nameof(ProjectModeration.Version),
-                nameof(ProjectModeration.SourceHash), nameof(ProjectModeration.SnapshotJson), nameof(ProjectModeration.PolicyHash),
-                nameof(ProjectModeration.PolicyJson), nameof(ProjectModeration.CreatedAt) }.Any(p => entry.Property(p).IsModified))
-                throw new InvalidOperationException("Evidence moderation snapshots cannot be changed.");
-        }
         if (ChangeTracker.Entries<VerificationReport>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Submitted verification reports cannot be changed or deleted.");
     }
@@ -104,9 +95,9 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
-    public DbSet<ProjectEvidenceDocument> ProjectEvidenceDocuments => Set<ProjectEvidenceDocument>();
     public DbSet<ExternalProjectDraft> ExternalProjectDrafts => Set<ExternalProjectDraft>();
-    public DbSet<ExternalProjectDraftFile> ExternalProjectDraftFiles => Set<ExternalProjectDraftFile>();
+    public DbSet<AssessorOnboarding> AssessorOnboardings => Set<AssessorOnboarding>();
+    public DbSet<AssessorOnboardingEmail> AssessorOnboardingEmails => Set<AssessorOnboardingEmail>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -116,6 +107,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<Specialization> Specializations => Set<Specialization>();
+    public DbSet<AssessorSpecialization> AssessorSpecializations => Set<AssessorSpecialization>();
     public DbSet<ProjectRoleRequirement> ProjectRoleRequirements => Set<ProjectRoleRequirement>();
     public DbSet<ProjectSkill> ProjectSkills => Set<ProjectSkill>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
@@ -157,7 +150,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<ContributionResult> ContributionResults => Set<ContributionResult>();
     public DbSet<ContributionReview> ContributionReviews => Set<ContributionReview>();
     public DbSet<ProjectModeration> ProjectModerations => Set<ProjectModeration>();
-    public DbSet<EvidenceModerationAttempt> EvidenceModerationAttempts => Set<EvidenceModerationAttempt>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<JobSkill> JobSkills => Set<JobSkill>();
@@ -165,14 +157,12 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<StudentSavedJob> StudentSavedJobs => Set<StudentSavedJob>();
     public DbSet<JobApplication> JobApplications => Set<JobApplication>();
     public DbSet<ProjectVerification> ProjectVerifications => Set<ProjectVerification>();
-    public DbSet<ProjectVerificationEvidence> ProjectVerificationEvidence => Set<ProjectVerificationEvidence>();
     public DbSet<VerificationAssignment> VerificationAssignments => Set<VerificationAssignment>();
     public DbSet<VerificationReport> VerificationReports => Set<VerificationReport>();
     public DbSet<ReportAuditLog> ReportAuditLogs => Set<ReportAuditLog>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<RefundTransaction> RefundTransactions => Set<RefundTransaction>();
-    public DbSet<VerificationTransaction> VerificationTransactions => Set<VerificationTransaction>();
     public DbSet<CommunityPost> CommunityPosts => Set<CommunityPost>();
     public DbSet<CommunityPostMedia> CommunityPostMedia => Set<CommunityPostMedia>();
     public DbSet<CommunityPostComment> CommunityPostComments => Set<CommunityPostComment>();
@@ -183,22 +173,15 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        SpecializationConfiguration.Configure(model);
+        AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
         model.ApplyConfiguration(new ExternalProjectDraftConfiguration());
-        model.ApplyConfiguration(new ExternalProjectDraftFileConfiguration());
-        model.Entity<ProjectEvidenceDocument>(e =>
-        {
-            e.ToTable("ProjectEvidenceDocuments"); e.HasKey(x => x.Id);
-            e.HasOne(x => x.Project).WithMany(x => x.EvidenceDocuments).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.UploadedFile).WithMany().HasForeignKey(x => x.UploadedFileId).OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => new { x.ProjectId, x.UploadedFileId }).IsUnique();
-        });
         AdminManagementConfiguration.Configure(model);
         FinanceConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         NotificationConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
-        model.ApplyConfiguration(new EvidenceModerationAttemptConfiguration());
         GitHubIntegrationConfiguration.Configure(model);
         GitHubAppInstallationConfiguration.Configure(model);
         ProjectGitMemberIdentityConfiguration.Configure(model);
@@ -1127,12 +1110,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             });
             e.HasKey(x => x.Id);
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
-            e.Property<ProjectModerationPurpose?>("EvidenceModerationPurpose").IsRequired().HasConversion<short>()
-                .HasDefaultValue(ProjectModerationPurpose.ProjectEvidence).HasSentinel(null);
-            e.HasOne(x => x.EvidenceModeration).WithMany()
-                .HasForeignKey("EvidenceModerationId", "EvidenceModerationPurpose")
-                .HasPrincipalKey(x => new { x.Id, x.Purpose }).OnDelete(DeleteBehavior.Restrict);
-            e.ToTable("ProjectVerifications", t => t.HasCheckConstraint("CK_ProjectVerifications_EvidencePurpose", "\"EvidenceModerationPurpose\" = 1"));
             e.Property(x => x.BookingStatus).HasConversion<short>();
             e.Property(x => x.MeetingRoomName).HasMaxLength(200);
             e.HasIndex(x => x.MeetingRoomName).IsUnique();
@@ -1161,19 +1138,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"Status\" = 0")
                 .HasDatabaseName("IX_ProjectVerifications_PendingProject");
             e.HasIndex(x => new { x.RequestByUserId, x.SubmittedAt });
-        });
-        model.Entity<ProjectVerificationEvidence>(e =>
-        {
-            e.ToTable("ProjectVerificationEvidence", t =>
-                t.HasCheckConstraint("CK_ProjectVerificationEvidence_Version", "\"Version\" > 0"));
-            e.HasKey(x => x.Id);
-            e.Property(x => x.EvidenceJson).HasColumnType("jsonb").IsRequired();
-            e.Property(x => x.SubmittedAt).IsRequired();
-            e.HasOne(x => x.ProjectVerification).WithMany(x => x.EvidenceSubmissions)
-                .HasForeignKey(x => x.ProjectVerificationId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.SubmittedByUser).WithMany()
-                .HasForeignKey(x => x.SubmittedByUserId).OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => new { x.ProjectVerificationId, x.Version }).IsUnique();
         });
         model.Entity<VerificationAssignment>(e =>
         {
@@ -1269,7 +1233,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.Status).HasConversion<short>().IsRequired();
             e.Property(x => x.Amount).HasPrecision(18, 2).IsRequired();
             e.Property(x => x.PaymentRef).HasMaxLength(255);
-            e.Property(x => x.PaymentUrl).HasMaxLength(2048);
             e.Property(x => x.PaymentQrCode).HasMaxLength(4096);
             e.Property(x => x.PaymentMethod).HasMaxLength(100);
             e.Property(x => x.ProviderOrderCode).HasMaxLength(255);
@@ -1291,17 +1254,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.HasIndex(x => new { x.PaymentMethod, x.ProviderPaymentLinkId }).IsUnique()
                 .HasFilter("\"PaymentMethod\" = 'PayOS' AND \"ProviderPaymentLinkId\" IS NOT NULL");
             e.HasIndex(x => new { x.Status, x.ExpiredAt });
-        });
-        model.Entity<VerificationTransaction>(e =>
-        {
-            e.ToTable("VerificationTransactions");
-            e.HasKey(x => x.TransactionId);
-            e.Property(x => x.CreatedAt).IsRequired();
-            e.Property(x => x.UpdatedAt).IsRequired();
-
-            e.HasOne(x => x.Transaction).WithOne(x => x.VerificationTransaction)
-                .HasForeignKey<VerificationTransaction>(x => x.TransactionId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Verification).WithMany(x => x.VerificationTransactions)
+            e.HasOne(x => x.Verification).WithMany(x => x.Transactions)
                 .HasForeignKey(x => x.VerificationId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.VerificationId);
         });

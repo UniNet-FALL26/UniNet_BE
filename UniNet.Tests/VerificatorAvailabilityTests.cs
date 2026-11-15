@@ -136,7 +136,6 @@ public sealed partial class ProjectVerificationTests
         var staff = await f.Db.UserProfiles.SingleAsync(p => p.Account.Role == AccountRole.Assessor);
         f.Db.ProjectMembers.Add(new() { Id = Guid.NewGuid(), ProjectId = f.Project.Id, UserId = staff.Id, Role = "Member" });
         await f.Db.SaveChangesAsync();
-        await f.SeedPassedAsync(f.Project.Id);
         var id = (await f.CreateVerificationAsync()).Verification.Id;
         var slot = Fixture.Slot();
         Assert.Empty((await f.Service.GetAvailableMeetingSlotsAsync(id, f.Owner.Id, slot.StartAt, slot.EndAt)).Slots);

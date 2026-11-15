@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Xác nhận hợp đồng UniNet</title>
+  <style>
+    body { font: 1rem system-ui, sans-serif; margin: 2rem auto; max-width: 48rem; padding: 0 1rem; }
+    label { display: block; margin: 1rem 0; }
+    input[type=text] { font: inherit; padding: .5rem; max-width: 95%; }
+    button { font: inherit; padding: .5rem 1rem; margin: .3rem 0; }
+    iframe { width: 100%; height: 36rem; border: 1px solid #aaa; }
+  </style>
+  <script src="./contract.js" defer></script>
+</head>
+<body>
+<main>
+  <h1>Hợp đồng thẩm định viên</h1>
+  <p id="message" role="status">Xác thực email để mở hợp đồng của bạn.</p>
+  <section id="read">
+    <button id="read-otp" type="button">Gửi OTP mở hợp đồng</button>
+    <form id="verify">
+      <label>OTP từ email <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6"></label>
+      <button>Xác thực và mở hợp đồng</button>
+    </form>
+  </section>
+  <section id="contract" hidden>
+    <p id="version"></p>
+    <iframe id="pdf" title="Nội dung hợp đồng"></iframe>
+    <p><a id="download" target="_blank" rel="noopener noreferrer">Mở hoặc tải PDF</a></p>
+    <button id="sign-otp" type="button">Gửi OTP xác nhận ký</button>
+    <form id="sign">
+      <label>Họ tên ký xác nhận <input name="signedName" type="text" required maxlength="255" autocomplete="name"></label>
+      <label>OTP ký từ email <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6"></label>
+      <label><input name="accepted" type="checkbox" required> <span id="statement"></span></label>
+      <button>Ký xác nhận hợp đồng</button>
+    </form>
+  </section>
+</main>
+</body>
+</html>

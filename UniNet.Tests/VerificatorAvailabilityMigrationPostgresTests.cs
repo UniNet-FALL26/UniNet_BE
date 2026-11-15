@@ -14,7 +14,7 @@ namespace UniNet.Tests;
 
 public sealed class VerificatorAvailabilityMigrationPostgresTests
 {
-    [EvidencePostgresFact]
+    [IsolatedPostgresFact]
     public async Task MigrationRoundTripPreservesExistingAssignmentAndBackfillsReservedResource()
     {
         var connection = Environment.GetEnvironmentVariable("UNINET_TEST_POSTGRES")!;

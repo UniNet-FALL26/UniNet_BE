@@ -1,5 +1,8 @@
 # Đợt D + E — Report một lần, bỏ Admin review, audit refund
 
+Scope update 8 November 2026: Level 1 evidence review has been retired. Any L1 endpoints, fields, workers or planned prerequisites below are historical and must not be implemented. Current API changes are documented in [Level 1 removal](handoffs/remove-verification-l1-prerequisite.md). Project creation content moderation remains active.
+
+
 > Cập nhật 01/11/2026: cách nhập outcome trực tiếp đã được thay bằng chấm theo
 > tiêu chí, snapshot phiên bản và kết quả InsufficientEvidence. Xem hợp đồng
 > hiện hành tại [project-assessment-api.md](frontend-integration/project-assessment-api.md).

@@ -1,3 +1,7 @@
+# Retired external project extraction
+
+The external project form now uses [manual draft entry](external-project-draft-api.md). The following notes describe the old extraction flow.
+
 # External project document extraction
 
 These services process an existing `Processing` external-project draft.

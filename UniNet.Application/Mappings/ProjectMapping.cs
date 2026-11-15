@@ -53,7 +53,7 @@ public static class ProjectMapping
             isCreator,
             isMember,
             members,
-            Origin: project.Origin, Leader: ProjectIdentityMapping.Leader(project), ExternalDetails: ProjectIdentityMapping.ExternalDetails(project)
+            Origin: project.Origin, Leader: ProjectIdentityMapping.Leader(project), ExternalDetails: ProjectIdentityMapping.ExternalDetails(project), Specialization: SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -74,7 +74,7 @@ public static class ProjectMapping
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
             project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project)
+            project.Origin, ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -103,7 +103,7 @@ public static class ProjectMapping
             project.RecruitmentStatus,
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
-            skills
+            skills, SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 }

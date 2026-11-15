@@ -15,7 +15,6 @@ namespace UniNet.Domain.Entities
         public PaymentStatus Status { get; set; }
         public decimal Amount { get; set; }
         public string? PaymentRef { get; set; }
-        public string? PaymentUrl { get; set; }
         public string? PaymentQrCode { get; set; }
         public string? PaymentMethod { get; set; }
         public string? ProviderOrderCode { get; set; }
@@ -29,7 +28,10 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset UpdatedAt { get; set; }
         public UserProfile User { get; set; } = null!;
         public Package Package { get; set; } = null!;
-        public VerificationTransaction? VerificationTransaction { get; set; }
+        public Guid? VerificationId { get; set; }
+        // The reservation for which this payment was created.
+        public Guid? VerificationReservationId { get; set; }
+        public ProjectVerification? Verification { get; set; }
         public AdvertisementTransaction? AdvertisementTransaction { get; set; }
         public List<RefundTransaction> RefundTransactions { get; set; } = [];
     }

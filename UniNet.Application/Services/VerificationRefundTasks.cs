@@ -13,7 +13,7 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
     public async Task RunAsync(DateTimeOffset now, CancellationToken ct)
     {
         var ids = await db.RefundTransactions.AsNoTracking().Where(r => r.Status == PaymentStatus.Pending && (r.Approval == RefundApproval.NotRequired || r.Approval == RefundApproval.Approved) &&
-            r.Transaction.VerificationTransaction != null && (r.NextReconciliationAt == null || r.NextReconciliationAt <= now))
+            r.Transaction.VerificationId.HasValue && (r.NextReconciliationAt == null || r.NextReconciliationAt <= now))
             .OrderBy(r => r.UpdatedAt).Select(r => r.Id).Take(50).ToListAsync(ct);
         foreach (var id in ids) await ProcessAsync(id, now, ct);
     }
@@ -25,9 +25,9 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
         bool lookup;
         await using (var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct))
         {
-            var refund = await db.RefundTransactions.Include(r => r.Transaction).ThenInclude(p => p.VerificationTransaction)
+            var refund = await db.RefundTransactions.Include(r => r.Transaction)
                 .SingleAsync(r => r.Id == id, ct);
-            if (refund.Approval is not (RefundApproval.NotRequired or RefundApproval.Approved) || refund.Status != PaymentStatus.Pending || refund.NextReconciliationAt > now || refund.Transaction.VerificationTransaction == null) return;
+            if (refund.Approval is not (RefundApproval.NotRequired or RefundApproval.Approved) || refund.Status != PaymentStatus.Pending || refund.NextReconciliationAt > now || refund.Transaction.VerificationId == null) return;
             if (refund.Transaction.Status != PaymentStatus.Success)
                 throw new InvalidOperationException("A refund cannot be dispatched for an unsuccessful payment.");
             if (!provider.Supports(refund.PaymentProvider))
@@ -64,7 +64,7 @@ public sealed class VerificationRefundTasks(UniNetDbContext db, IRefundProvider 
         // If the process stops after dispatch, the persisted DispatchStartedAt forces lookup on restart.
         db.ChangeTracker.Clear();
         await using var persistence = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var current = await db.RefundTransactions.Include(r => r.Transaction).ThenInclude(p => p.VerificationTransaction).SingleAsync(r => r.Id == id, ct);
+        var current = await db.RefundTransactions.Include(r => r.Transaction).SingleAsync(r => r.Id == id, ct);
         if (current.Status != PaymentStatus.Pending) return;
         current.UpdatedAt = now;
         current.FailureReason = error;

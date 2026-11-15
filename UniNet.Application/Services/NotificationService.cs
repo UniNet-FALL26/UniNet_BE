@@ -64,12 +64,13 @@ public sealed class NotificationService(UniNetDbContext db)
             (n.ExpiresAt == null || n.ExpiresAt > now) && (n.RequiredPermission == null || allowed.Contains(n.RequiredPermission)));
     }
 
-    public async Task<NotificationPage> GetMineAsync(Guid id, int page = 1, int pageSize = 20, bool unreadOnly = false, string? category = null, CancellationToken ct = default)
+    public async Task<NotificationPage> GetMineAsync(Guid id, int page = 1, int pageSize = 20, bool unreadOnly = false, string? category = null, CancellationToken ct = default, bool readOnly = false)
     {
         page = Math.Clamp(page, 1, 100000); pageSize = Math.Clamp(pageSize, 1, 100);
         var mine = await MineAsync(id, ct);
         var unread = await mine.CountAsync(n => n.ReadAt == null, ct);
         if (unreadOnly) mine = mine.Where(n => n.ReadAt == null);
+        if (readOnly) mine = mine.Where(n => n.ReadAt != null);
         if (!string.IsNullOrWhiteSpace(category)) { category = category.ToLowerInvariant(); mine = mine.Where(n => n.Category == category); }
         var total = await mine.CountAsync(ct);
         var rows = await mine.AsNoTracking().OrderByDescending(n => n.CreatedAt).ThenByDescending(n => n.Id)
