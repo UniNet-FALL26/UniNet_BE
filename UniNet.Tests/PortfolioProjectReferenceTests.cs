@@ -27,7 +27,7 @@ public sealed class PortfolioProjectReferenceTests
         var member = new Account { Email = "member@example.com", Role = AccountRole.Student, Profile = new UserProfile { FullName = "Member", Nickname = "Member" } };
         var outsider = new Account { Email = "outsider@example.com", Role = AccountRole.Student, Profile = new UserProfile { FullName = "Outsider", Nickname = "Outsider" } };
         db.Accounts.AddRange(owner, member, outsider);
-        var project = new Project { Creator = owner.Profile!, Title = "Source title", Description = "Source description", ProjectField = "Software", MemberTarget = 2, Status = status, CompletedAt = DateTimeOffset.UtcNow };
+        var project = new Project { Creator = owner.Profile!, Title = "Source title", Description = "Source description", LogoUrl = "https://example.test/project-before.png", ProjectField = "Software", MemberTarget = 2, Status = status, CompletedAt = DateTimeOffset.UtcNow };
         project.Members.Add(new ProjectMember { Id = Guid.NewGuid(), User = member.Profile!, Role = "Developer", Status = ProjectMemberStatus.Active });
         db.Projects.Add(project);
         await db.SaveChangesAsync();
@@ -44,6 +44,7 @@ public sealed class PortfolioProjectReferenceTests
         var saved = await service.Save(account.Id, request, default);
         var item = Assert.Single(saved.Portfolio.Projects);
         Assert.Equal("Source title", item.Title);
+        Assert.Equal(project.LogoUrl, item.CoverUrl);
         Assert.Equal("Built APIs", item.PersonalContribution);
         Assert.Null(item.Verification);
         Assert.DoesNotContain("Spoofed title", account.Profile!.CareerProfile!.ProjectsJson!);
@@ -69,8 +70,10 @@ public sealed class PortfolioProjectReferenceTests
             await db.SaveChangesAsync();
         }
         project.Title = "Updated source";
+        project.LogoUrl = "https://example.test/project-after.png";
         await db.SaveChangesAsync();
         Assert.Equal("Updated source", Assert.Single((await service.Me(account.Id, default)).Portfolio.Projects).Title);
+        Assert.Equal(project.LogoUrl, Assert.Single((await service.Me(account.Id, default)).Portfolio.Projects).CoverUrl);
         project.Status = ProjectStatus.Active;
         await db.SaveChangesAsync();
         Assert.Empty((await service.Me(account.Id, default)).Portfolio.Projects);

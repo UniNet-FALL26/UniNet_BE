@@ -200,7 +200,7 @@ public sealed class PortfolioService(UniNetDbContext db)
                 .OrderByDescending(v => v.FinalizedAt).ThenByDescending(v => v.CreatedAt).ThenBy(v => v.Id).FirstOrDefault();
             return new PortfolioProject
             {
-                ProjectId = x.Id, Title = x.Title, Description = x.Description, Type = x.ProjectField,
+                ProjectId = x.Id, Title = x.Title, Description = x.Description, CoverUrl = x.LogoUrl, Type = x.ProjectField,
                 Technologies = x.ProjectSkills.Select(s => s.Skill.Name).Distinct().OrderBy(n => n).ToArray(),
                 Role = x.Members.FirstOrDefault(m => m.UserId == userId && m.Status == ProjectMemberStatus.Active)?.Role ?? x.SubmitterRole,
                 CompletedAt = x.CompletedAt,

@@ -46,6 +46,24 @@ public sealed class ProjectHubTests
     }
 
     [Fact]
+    public async Task OwnerCanPatchOnlyTheImageAndItPersistsWithoutChangingProjectContent()
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        const string url = "https://res.cloudinary.com/test/image/upload/project.png";
+        var denied = await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(project.Id, f.Other.Id,
+            new() { LogoUrl = url }, default));
+        Assert.Equal(403, denied.Status);
+        var saved = await f.Service.UpdateAsync(project.Id, f.Owner.Id, new() { LogoUrl = url }, default);
+        Assert.Equal(project.Title, saved.Title);
+        Assert.Equal(project.Description, saved.Description);
+        Assert.Equal(project.Status, saved.Status);
+        f.Db.ChangeTracker.Clear();
+        var reloaded = await f.Service.GetAsync(project.Id, f.Owner.Id, default);
+        Assert.Equal(url, reloaded.LogoUrl);
+    }
+
+    [Fact]
     public async Task DetailsAndOwnReviewRoundTripAndDoNotLeakPrivateReview()
     {
         await using var f = await Fixture.Create();
