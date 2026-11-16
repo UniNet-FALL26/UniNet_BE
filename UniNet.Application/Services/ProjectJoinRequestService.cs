@@ -24,7 +24,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == student.Id &&
             m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
-        Require(!await db.ProjectJoinRequests.AnyAsync(r => r.ProjectId == projectId && r.UserId == student.Id &&
+        Require(!await db.ProjectJoinRequests.AnyAsync(r => r.RequestType == ProjectRequestType.Apply && r.ProjectId == projectId && r.UserId == student.Id &&
             r.Status == ProjectJoinRequestStatus.Pending, ct), "JOIN_REQUEST_EXISTS", "You already have a pending request.", 409);
 
         var now = DateTimeOffset.UtcNow;
@@ -100,6 +100,8 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
                 };
                 db.ProjectMembers.Add(member);
             }
+            member.JoinRequestId = request.Id;
+            member.PositionId = request.PositionId;
             member.Role = request.Role;
             member.Status = ProjectMemberStatus.Active;
             member.JoinedAt = now;
@@ -109,15 +111,17 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
                 request.Project.RecruitmentStatus = RecruitmentStatus.Full;
             request.Project.UpdatedAt = now;
 
-            var invitations = await db.ProjectInvitations.Where(i =>
-                i.ProjectId == request.ProjectId && i.InviteeId == request.UserId &&
-                i.Status == ProjectInvitationStatus.Sent).ToListAsync(ct);
+            var invitations = await db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).Where(i =>
+                i.ProjectId == request.ProjectId && i.UserId == request.UserId &&
+                i.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
             foreach (var invitation in invitations)
             {
-                invitation.Status = ProjectInvitationStatus.Cancelled;
+                invitation.Status = ProjectJoinRequestStatus.Cancelled;
                 invitation.UpdatedAt = now;
             }
         }
+        request.ReviewedBy = actor.Id;
+        request.ReviewedAt = now;
         request.Status = decision;
         request.UpdatedAt = now;
         if (decision is ProjectJoinRequestStatus.Accepted or ProjectJoinRequestStatus.Rejected)
@@ -130,7 +134,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         return request;
     }, ct);
 
-    private IQueryable<ProjectJoinRequest> Requests() => db.ProjectJoinRequests
+    private IQueryable<ProjectJoinRequest> Requests() => db.ProjectJoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply)
         .Include(r => r.Project).Include(r => r.User);
 
     private async Task<ProjectJoinRequestsResponse> ListAsync(IQueryable<ProjectJoinRequest> query,

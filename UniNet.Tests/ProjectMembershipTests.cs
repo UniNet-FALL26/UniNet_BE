@@ -18,12 +18,12 @@ public sealed class ProjectMembershipTests
         await using var f = await Fixture.CreateAsync();
         var invitation = await f.Invite(" Developer ", " Welcome ");
         f.Db.ChangeTracker.Clear();
-        var stored = await f.Db.ProjectInvitations.SingleAsync();
+        var stored = await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).SingleAsync();
         Assert.Equal(invitation.Id, stored.Id);
         Assert.Equal(f.Project.Id, stored.ProjectId);
         Assert.Equal(f.Owner.Profile!.Id, stored.InviterId);
-        Assert.Equal(f.Student.Profile!.Id, stored.InviteeId);
-        Assert.Equal(ProjectInvitationStatus.Sent, stored.Status);
+        Assert.Equal(f.Student.Profile!.Id, stored.UserId);
+        Assert.Equal(ProjectJoinRequestStatus.Pending, stored.Status);
         Assert.Equal("Developer", stored.Role);
         Assert.Equal("Welcome", stored.Message);
         await f.AssertNotice("project.invitation.received", f.Student.Id, invitation.Id);
@@ -67,7 +67,7 @@ public sealed class ProjectMembershipTests
 
         await AssertError(invitation, "INVALID_ROLE", 400,
             () => invitation ? (Task)f.Invite(role) : f.Apply(role));
-        Assert.Empty(await f.Db.ProjectInvitations.ToListAsync());
+        Assert.Empty(await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).ToListAsync());
         Assert.Empty(await f.Db.ProjectJoinRequests.ToListAsync());
         Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
     }
@@ -84,7 +84,7 @@ public sealed class ProjectMembershipTests
                 f.Invitations.SendAsync(f.Project.Id, f.Other.Id, new(f.Student.Profile!.Id, "Developer")));
             await f.Invite();
             await AssertError(true, "INVITATION_EXISTS", 409, () => f.Invite());
-            Assert.Single(await f.Db.ProjectInvitations.ToListAsync());
+            Assert.Single(await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).ToListAsync());
             Assert.Single(await f.Db.Set<VerificationNotification>().ToListAsync());
         }
         else
@@ -109,7 +109,7 @@ public sealed class ProjectMembershipTests
         await f.Db.SaveChangesAsync();
         await AssertError(invitation, "RECRUITMENT_CLOSED", 409,
             () => invitation ? (Task)f.Invite() : f.Apply());
-        Assert.Empty(await f.Db.ProjectInvitations.ToListAsync());
+        Assert.Empty(await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).ToListAsync());
         Assert.Empty(await f.Db.ProjectJoinRequests.ToListAsync());
         Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
     }
@@ -133,12 +133,12 @@ public sealed class ProjectMembershipTests
 
         var wrongActor = decision == "cancel" ? f.Student : f.Owner;
         await AssertError(true, "FORBIDDEN", 403, () => Decide(wrongActor.Id));
-        Assert.Equal(ProjectInvitationStatus.Sent, (await f.Db.ProjectInvitations.SingleAsync()).Status);
+        Assert.Equal(ProjectJoinRequestStatus.Pending, (await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).SingleAsync()).Status);
         Assert.Empty(await f.Db.ProjectMembers.ToListAsync());
         Assert.Equal(expected, (await Decide(actor.Id)).Status);
         await AssertError(true, "INVALID_INVITATION_STATE", 409, () => Decide(actor.Id));
         f.Db.ChangeTracker.Clear();
-        Assert.Equal(expected, (await f.Db.ProjectInvitations.SingleAsync()).Status);
+        Assert.Equal((ProjectJoinRequestStatus)(short)expected, (await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).SingleAsync()).Status);
         await f.AssertMembership(decision == "accept");
         await f.AssertNotice("project.invitation.updated",
             decision == "cancel" ? f.Student.Id : f.Owner.Id, item.Id);
@@ -167,7 +167,7 @@ public sealed class ProjectMembershipTests
         Assert.Equal(expected, (await Decide(actor.Id)).Status);
         await AssertError(false, "INVALID_JOIN_REQUEST_STATE", 409, () => Decide(actor.Id));
         f.Db.ChangeTracker.Clear();
-        Assert.Equal(expected, (await f.Db.ProjectJoinRequests.SingleAsync()).Status);
+        Assert.Equal((ProjectJoinRequestStatus)(short)expected, (await f.Db.ProjectJoinRequests.SingleAsync()).Status);
         await f.AssertMembership(decision == "accept");
         if (decision == "cancel") Assert.Empty(await f.Db.Set<VerificationNotification>().ToListAsync());
         else await f.AssertNotice("project.join-request.reviewed", f.Student.Id, f.Project.Id);
@@ -190,18 +190,19 @@ public sealed class ProjectMembershipTests
         if (invitation)
         {
             await f.Invitations.AcceptAsync(invite.Id, f.Student.Id);
-            Assert.Equal(ProjectJoinRequestStatus.Cancelled, (await f.Db.ProjectJoinRequests.SingleAsync()).Status);
+            Assert.Equal(ProjectJoinRequestStatus.Cancelled, (await f.Db.ProjectJoinRequests.SingleAsync(r => r.RequestType == ProjectRequestType.Apply)).Status);
         }
         else
         {
             await f.Requests.AcceptAsync(request.Id, f.Owner.Id);
-            Assert.Equal(ProjectInvitationStatus.Cancelled, (await f.Db.ProjectInvitations.SingleAsync()).Status);
+            Assert.Equal(ProjectJoinRequestStatus.Cancelled, (await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).SingleAsync()).Status);
         }
 
         f.Db.ChangeTracker.Clear();
         await f.AssertMembership(true);
         var stored = await f.Db.ProjectMembers.SingleAsync();
         Assert.Equal(member.Id, stored.Id);
+        Assert.Equal(invitation ? invite.Id : request.Id, stored.JoinRequestId);
         Assert.Null(stored.LeftAt);
         Assert.Equal(RecruitmentStatus.Full, (await f.Db.Projects.SingleAsync()).RecruitmentStatus);
     }

@@ -10,7 +10,7 @@ namespace UniNet.Tests;
 public sealed partial class ProjectVerificationTests
 {
     [Fact]
-    public async Task CompletionAndTaskChangesDoNotCreateEvidenceReviews()
+    public async Task CompletionAndRetiredTaskRequestsDoNotCreateEvidenceReviews()
     {
         await using var f = await Fixture.CreateAsync();
         f.Project.Status = ProjectStatus.Active;
@@ -18,9 +18,9 @@ public sealed partial class ProjectVerificationTests
         await new ProjectService(f.Db, null!, f.Configuration).UpdateStatusAsync(f.Owner.Id,
             new(f.Project.Id, ProjectStatus.Completed), default);
         var tasks = new ProjectTaskService(f.Db, f.Configuration);
-        var task = await tasks.CreateProjectTaskAsync(f.Project.Id, f.Owner.Id,
-            new("Retained task", "Task changes must not queue retired L1 work.", DateTimeOffset.UtcNow.AddDays(3)));
-        await tasks.UpdateProjectTaskAsync(f.Project.Id, task.Id, f.Owner.Id, new(Title: "Updated task"));
+        var error = await Assert.ThrowsAsync<ProjectException>(() => tasks.CreateProjectTaskAsync(f.Project.Id, f.Owner.Id,
+            new("Retired task", "Task storage was removed.", DateTimeOffset.UtcNow.AddDays(3))));
+        Assert.Equal(410, error.Status);
         Assert.Empty(await f.Db.ProjectModerations.ToListAsync());
     }
 

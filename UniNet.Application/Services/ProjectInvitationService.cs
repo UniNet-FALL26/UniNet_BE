@@ -29,18 +29,18 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == invitee.Id &&
             m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
-        Require(!await db.ProjectInvitations.AnyAsync(i => i.ProjectId == projectId && i.InviteeId == invitee.Id &&
-            i.Status == ProjectInvitationStatus.Sent, ct), "INVITATION_EXISTS", "The invitee already has a pending invitation to this project.", 409);
+        Require(!await db.ProjectJoinRequests.AnyAsync(i => i.RequestType == ProjectRequestType.Invite && i.ProjectId == projectId && i.UserId == invitee.Id &&
+            i.Status == ProjectJoinRequestStatus.Pending, ct), "INVITATION_EXISTS", "The invitee already has a pending invitation to this project.", 409);
 
         var now = DateTimeOffset.UtcNow;
-        var invitation = new ProjectInvitation
+        var invitation = new ProjectJoinRequest
         {
             Id = Guid.NewGuid(), ProjectId = project.Id, Project = project,
-            InviterId = inviter.Id, Inviter = inviter, InviteeId = invitee.Id, Invitee = invitee,
+            RequestType = ProjectRequestType.Invite, InviterId = inviter.Id, Inviter = inviter, UserId = invitee.Id, User = invitee,
             Role = request.Role.Trim(), Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
-            Status = ProjectInvitationStatus.Sent, CreatedAt = now, UpdatedAt = now
+            Status = ProjectJoinRequestStatus.Pending, CreatedAt = now, UpdatedAt = now
         };
-        db.ProjectInvitations.Add(invitation);
+        db.ProjectJoinRequests.Add(invitation);
         await NotificationService.EnqueueAsync(db, [invitee.AccountId],
             new("project.invitation.received", "Project", "Lời mời tham gia dự án",
                 $"{inviter.FullName} mời bạn tham gia dự án {project.Title} với vai trò {invitation.Role}.",
@@ -61,7 +61,7 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         ProjectInvitationStatus? status = null, int page = 1, int pageSize = 10, CancellationToken ct = default)
     {
         var invitee = await GetStudentAsync(accountId, ct);
-        return await ListAsync(Invitations().Where(i => i.InviteeId == invitee.Id), status, page, pageSize, ct);
+        return await ListAsync(Invitations().Where(i => i.UserId == invitee.Id), status, page, pageSize, ct);
     }
 
     public Task<ProjectInvitationResponse> CancelAsync(Guid invitationId, Guid accountId, CancellationToken ct = default)
@@ -82,8 +82,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         if (decision == ProjectInvitationStatus.Cancelled)
             RequireCreator(invitation.Project, actor.Id);
         else
-            Require(invitation.InviteeId == actor.Id, "FORBIDDEN", "Only the invitee can accept or decline this invitation.", 403);
-        Require(invitation.Status == ProjectInvitationStatus.Sent,
+            Require(invitation.UserId == actor.Id, "FORBIDDEN", "Only the invitee can accept or decline this invitation.", 403);
+        Require(invitation.Status == ProjectJoinRequestStatus.Pending,
             "INVALID_INVITATION_STATE", "Only sent invitations can be processed.", 409);
 
         var now = DateTimeOffset.UtcNow;
@@ -105,6 +105,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
                 };
                 db.ProjectMembers.Add(member);
             }
+            member.JoinRequestId = invitation.Id;
+            member.PositionId = invitation.PositionId;
             member.Role = invitation.Role;
             member.Status = ProjectMemberStatus.Active;
             member.JoinedAt = now;
@@ -115,7 +117,7 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             invitation.Project.UpdatedAt = now;
 
             var requests = await db.ProjectJoinRequests.Where(r =>
-                r.ProjectId == invitation.ProjectId && r.UserId == invitation.InviteeId &&
+                r.Id != invitation.Id && r.ProjectId == invitation.ProjectId && r.UserId == invitation.UserId &&
                 r.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
             foreach (var request in requests)
             {
@@ -123,9 +125,13 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
                 request.UpdatedAt = now;
             }
         }
-        invitation.Status = decision;
+        invitation.Status = (ProjectJoinRequestStatus)(short)decision;
+        invitation.ReviewedBy = actor.Id;
+        invitation.ReviewedAt = now;
         invitation.UpdatedAt = now;
-        var recipientAccountId = decision == ProjectInvitationStatus.Cancelled ? invitation.Invitee.AccountId : invitation.Inviter.AccountId;
+        var recipientAccountId = decision == ProjectInvitationStatus.Cancelled ? invitation.User.AccountId
+            : invitation.Inviter?.AccountId ?? throw new ProjectInvitationException(
+                "INVALID_INVITATION", "The invitation has no inviter profile.", 409);
         await NotificationService.EnqueueAsync(db, [recipientAccountId],
             new("project.invitation.updated", "Project", "Cập nhật lời mời dự án",
                 decision switch
@@ -137,14 +143,14 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         return invitation;
     }, ct);
 
-    private IQueryable<ProjectInvitation> Invitations() => db.ProjectInvitations
-        .Include(i => i.Project).Include(i => i.Inviter).Include(i => i.Invitee);
+    private IQueryable<ProjectJoinRequest> Invitations() => db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite)
+        .Include(i => i.Project).Include(i => i.Inviter).Include(i => i.User);
 
-    private async Task<ProjectInvitationsResponse> ListAsync(IQueryable<ProjectInvitation> query,
+    private async Task<ProjectInvitationsResponse> ListAsync(IQueryable<ProjectJoinRequest> query,
         ProjectInvitationStatus? status, int page, int pageSize, CancellationToken ct)
     {
         Require(!status.HasValue || Enum.IsDefined(status.Value), "INVALID_STATUS", "Invalid invitation status.");
-        if (status.HasValue) query = query.Where(i => i.Status == status.Value);
+        if (status.HasValue) query = query.Where(i => i.Status == (ProjectJoinRequestStatus)(short)status.Value);
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
         var total = await query.CountAsync(ct);
@@ -190,7 +196,7 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         await db.ProjectMembers.CountAsync(m => m.ProjectId == project.Id && m.UserId != project.CreatorId &&
             m.Status == ProjectMemberStatus.Active, ct);
 
-    private async Task<ProjectInvitationResponse> MutateAsync(Func<Task<ProjectInvitation>> action, CancellationToken ct)
+    private async Task<ProjectInvitationResponse> MutateAsync(Func<Task<ProjectJoinRequest>> action, CancellationToken ct)
     {
         try
         {

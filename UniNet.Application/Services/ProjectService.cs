@@ -171,14 +171,15 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             UpdatedAt = DateTimeOffset.UtcNow
         };
 
+        var positions = new List<ProjectPosition>();
         // Add role requirements
         if (request.RoleRequirements?.Count > 0)
         {
             foreach (var roleReq in request.RoleRequirements)
             {
-                project.RoleRequirements.Add(new ProjectRoleRequirement
+                positions.Add(new ProjectPosition
                 {
-                    Id = Guid.NewGuid(),
+                    Id = Guid.NewGuid().ToString(),
                     ProjectId = project.Id,
                     Role = roleReq.Role.Trim(),
                     Quantity = roleReq.Quantity,
@@ -189,15 +190,18 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             }
         }
 
+        if (positions.Count > 0) project.RoleRequirements = positions;
+        var technologies = new List<ProjectTechnology>();
         // Add skills
         if (request.SkillIds?.Count > 0)
         {
             var skills = await db.Skills.Where(s => request.SkillIds.Contains(s.Id) && s.IsActive).ToListAsync(cancellationToken: ct);
             foreach (var skill in skills)
             {
-                project.ProjectSkills.Add(new ProjectSkill { ProjectId = project.Id, SkillId = skill.Id });
+                technologies.Add(new ProjectTechnology { ProjectId = project.Id, Skill = skill });
             }
         }
+        project.ProjectSkills = technologies;
         var projectLimit = configuration.GetValue<int>("Projects:MaxOngoingProjectsPerStudent", 3);
         if (projectLimit <= 0)
             throw new InvalidOperationException("Projects:MaxOngoingProjectsPerStudent must be greater than 0.");
@@ -235,12 +239,12 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     {
         var project = await db.Projects
             .Include(p => p.Creator)
-            .Include(p => p.RoleRequirements)
-            .Include(p => p.Invitations).ThenInclude(i => i.Inviter)
-            .Include(p => p.Invitations).ThenInclude(i => i.Invitee)
+
+            .Include(p => p.JoinRequests).ThenInclude(i => i.Inviter)
+            .Include(p => p.JoinRequests).ThenInclude(i => i.User)
             .Include(p => p.JoinRequests).ThenInclude(r => r.User)
             .AsSplitQuery()
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
 
             .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
@@ -255,8 +259,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     {
         var project = await db.Projects
             .Include(p => p.Creator)
-            .Include(p => p.RoleRequirements)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
+
             .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
@@ -368,8 +372,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Require(!await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
             "MODERATION_IN_PROGRESS", "Cannot delete project while it is under moderation.", 409);
-        db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
-        db.ProjectSkills.RemoveRange(project.ProjectSkills);
         db.ProjectMembers.RemoveRange(project.Members);
         db.ProjectModerations.RemoveRange(await db.ProjectModerations
             .Where(m => m.ProjectId == projectId && m.Purpose == ProjectModerationPurpose.ProjectSubmission).ToListAsync(ct));
@@ -392,7 +394,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var query = db.Projects
             .Include(p => p.Creator)
             .Include(p => p.Members)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
             .Where(p => p.CreatorId == userProfile.Id || p.Members.Any(m => m.UserId == userProfile.Id && m.Status == ProjectMemberStatus.Active))
             .OrderByDescending(p => p.CreatedAt);
 
@@ -418,7 +420,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var total = await query.CountAsync(ct);
         Require(total > 0, "PROJECT_NOT_FOUND", "Project not found.", 404);
         var projects = await query.Include(p => p.Creator)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
             .Include(p => p.Members).AsSplitQuery()
             .OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
             .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue))
@@ -446,7 +448,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var query = db.Projects
             .AsNoTracking()
             .Include(p => p.Creator)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
             .Include(p => p.Members)
             .AsQueryable();
 
@@ -483,7 +485,14 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(name => name.Trim().ToLowerInvariant()).Distinct().ToList();
         if (normalizedSkillNames?.Count > 0)
         {
-            query = query.Where(p => p.ProjectSkills.Any(ps => normalizedSkillNames.Contains(ps.Skill.Name.ToLower())));
+            var catalogNames = await db.Skills.Where(s => normalizedSkillNames.Contains(s.Name.ToLower())).Select(s => s.Name).ToArrayAsync(ct);
+            var matching = query.Where(p => false).Select(p => p.Id);
+            foreach (var name in catalogNames)
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(new[] { new { name } });
+                matching = matching.Union(query.Where(p => p.Technologies != null && EF.Functions.JsonContains(p.Technologies, json)).Select(p => p.Id));
+            }
+            query = query.Where(p => matching.Contains(p.Id));
         }
 
         var total = await query.CountAsync(cancellationToken: ct);
@@ -564,7 +573,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             isMember,
             members,
             project.Invitations.Select(ProjectInvitationMapping.ToResponse).ToList(),
-            project.JoinRequests.Select(ProjectJoinRequestMapping.ToResponse).ToList(),
+            project.JoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply).Select(ProjectJoinRequestMapping.ToResponse).ToList(),
             project.Origin, ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }

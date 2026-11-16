@@ -83,7 +83,6 @@ builder.Services.AddScoped<ProjectRecruitmentTasks>();
 builder.Services.AddScoped<VerificationReservationTasks>();
 builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<ExternalProjectDraftService>();
-builder.Services.AddScoped<ExternalProjectDraftTasks>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
 builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
@@ -96,6 +95,7 @@ builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<SpecializationService>();
+builder.Services.AddScoped<ProjectHubService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectInvitationService, ProjectInvitationService>();
@@ -158,6 +158,7 @@ builder.Services.AddCors(options =>
     {
         policy
             .WithOrigins(allowedOrigins)
+            .AllowCredentials()
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

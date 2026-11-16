@@ -41,7 +41,7 @@ public sealed class ProjectRecruitmentTests
                 Status = i < activeMembers ? ProjectMemberStatus.Active : i == activeMembers ? ProjectMemberStatus.Left : ProjectMemberStatus.Kicked });
         }
         project.JoinRequests.Add(new() { User = owner.Profile!, Role = "Tester", Status = ProjectJoinRequestStatus.Pending });
-        project.Invitations.Add(new() { Inviter = owner.Profile!, Invitee = owner.Profile!, Role = "Tester", Status = ProjectInvitationStatus.Sent });
+        project.JoinRequests.Add(new() { RequestType = ProjectRequestType.Invite, Inviter = owner.Profile!, User = owner.Profile!, Role = "Tester", Status = ProjectJoinRequestStatus.Pending });
         var future = new Project { Creator = owner.Profile!, Title = "Future", Description = "Test", ProjectField = "IT",
             MemberTarget = 5, MinimumQuantity = 3, Status = ProjectStatus.Active,
             RecruitmentDeadline = now.AddDays(1), RecruitmentStatus = RecruitmentStatus.Open };
@@ -52,8 +52,8 @@ public sealed class ProjectRecruitmentTests
         Assert.Equal(expected, project.RecruitmentStatus);
         Assert.Equal(ProjectStatus.Active, project.Status);
         Assert.Equal(RecruitmentStatus.Open, future.RecruitmentStatus);
-        Assert.Equal(ProjectJoinRequestStatus.Cancelled, project.JoinRequests.Single().Status);
-        Assert.Equal(ProjectInvitationStatus.Cancelled, project.Invitations.Single().Status);
+        Assert.Equal(ProjectJoinRequestStatus.Cancelled, project.JoinRequests.Single(r => r.RequestType == ProjectRequestType.Apply).Status);
+        Assert.Equal(ProjectJoinRequestStatus.Cancelled, project.Invitations.Single().Status);
         await tasks.RunAsync(now.AddMinutes(1));
         Assert.Equal(now, project.UpdatedAt);
         Assert.Equal(3, ProjectMapping.ToDetailResponse(project, null).MinimumQuantity);
@@ -81,6 +81,9 @@ public sealed class ProjectRecruitmentTests
         {
             base.Customize(modelBuilder, context);
             modelBuilder.Entity<Project>().Property(p => p.RecruitmentDeadline)
+                .HasConversion(value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? (DateTimeOffset?)new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+            modelBuilder.Entity<ProjectRecruitment>().Property(p => p.Deadline)
                 .HasConversion(value => value.HasValue ? (long?)value.Value.UtcTicks : null,
                     value => value.HasValue ? (DateTimeOffset?)new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
         }

@@ -32,8 +32,6 @@ public sealed class UserProfile
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<UserVerification> Verifications { get; set; } = [];
     public List<ProjectMember> Members { get; set; }= [];
-    public List<ProjectInvitation> SentInvitations { get; set; } = [];
-    public List<ProjectInvitation> ReceivedInvitations { get; set; } = [];
     public List<ProjectJoinRequest> JoinRequests { get; set; } = [];
     public List<UserSkill> UserSkills { get; set; } = [];
     public CareerProfile? CareerProfile { get; set; }

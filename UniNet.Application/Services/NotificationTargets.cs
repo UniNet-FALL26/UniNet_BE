@@ -59,12 +59,11 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
                     url = account.Role == AccountRole.Admin ? "/admin/job-postings" : "/moderator/job-postings";
                 break;
             case "ProjectInvitation":
-                var invitation = await db.ProjectInvitations.AsNoTracking().SingleOrDefaultAsync(i => i.Id == id && (i.InviteeId == profileId || i.InviterId == profileId), ct);
+                var invitation = await db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).AsNoTracking().SingleOrDefaultAsync(i => i.Id == id && (i.UserId == profileId || i.InviterId == profileId), ct);
                 if (invitation != null && await db.Projects.AnyAsync(p => p.Id == invitation.ProjectId, ct)) url = $"/group/{invitation.ProjectId}";
                 break;
             case "Task":
-                var task = await db.ProjectTasks.AsNoTracking().SingleOrDefaultAsync(t => t.Id == id, ct);
-                if (task != null && await IsMemberAsync(task.ProjectId, profileId, ct)) url = $"/workspace/{task.ProjectId}?taskId={id}";
+                // Task storage has been retired; historical notifications remain readable.
                 break;
             case "ProjectVerification":
                 var projectVerification = await db.ProjectVerifications.AsNoTracking().SingleOrDefaultAsync(v => v.Id == id, ct);

@@ -27,7 +27,7 @@ public sealed class PortfolioProjectReferenceTests
         var member = new Account { Email = "member@example.com", Role = AccountRole.Student, Profile = new UserProfile { FullName = "Member", Nickname = "Member" } };
         var outsider = new Account { Email = "outsider@example.com", Role = AccountRole.Student, Profile = new UserProfile { FullName = "Outsider", Nickname = "Outsider" } };
         db.Accounts.AddRange(owner, member, outsider);
-        var project = new Project { Creator = owner.Profile!, Title = "Source title", Description = "Source description", ProjectField = "Software", Status = status, CompletedAt = DateTimeOffset.UtcNow };
+        var project = new Project { Creator = owner.Profile!, Title = "Source title", Description = "Source description", ProjectField = "Software", MemberTarget = 2, Status = status, CompletedAt = DateTimeOffset.UtcNow };
         project.Members.Add(new ProjectMember { Id = Guid.NewGuid(), User = member.Profile!, Role = "Developer", Status = ProjectMemberStatus.Active });
         db.Projects.Add(project);
         await db.SaveChangesAsync();

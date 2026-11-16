@@ -75,7 +75,7 @@ public record CreatorInfo(
 );
 
 public record RoleRequirementInfo(
-    Guid Id,
+    string Id,
     string RoleName,
     int Quantity,
     string Requirements

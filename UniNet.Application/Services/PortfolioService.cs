@@ -192,7 +192,7 @@ public sealed class PortfolioService(UniNetDbContext db)
     {
         var query = EligibleProjects(userId);
         if (ids is not null) query = query.Where(x => ids.Contains(x.Id));
-        var projects = await query.Include(x => x.ProjectSkills).ThenInclude(x => x.Skill)
+        var projects = await query
             .Include(x => x.Members).Include(x => x.Verifications).AsSplitQuery().ToListAsync(ct);
         return projects.OrderByDescending(x => x.CompletedAt).ThenBy(x => x.Id).ToDictionary(x => x.Id, x =>
         {

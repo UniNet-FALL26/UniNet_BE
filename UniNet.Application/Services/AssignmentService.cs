@@ -23,7 +23,7 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
             .Include(a => a.AssignedToUser)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project).ThenInclude(p => p.Creator)
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
-                .ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+
             .Include(a => a.ProjectVerification).ThenInclude(v => v.Project)
                 .ThenInclude(p => p.Members).ThenInclude(m => m.User)
             .Include(a => a.Report).AsSplitQuery()
