@@ -13,6 +13,36 @@ namespace UniNet.Tests;
 public sealed class ProjectMembershipTests
 {
     [Fact]
+    public async Task LegacyApplicationAcceptsOpenRecruitmentWithoutDeadline()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Project.RecruitmentDeadline = null;
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(ProjectJoinRequestStatus.Pending, (await f.Apply()).Status);
+        f.Project.RecruitmentStatus = RecruitmentStatus.Closed;
+        await f.Db.SaveChangesAsync();
+        await AssertError(false, "RECRUITMENT_CLOSED", 409, () => f.Apply("Tester"));
+    }
+
+    [Fact]
+    public async Task LegacyInvitationRequiresFriendshipAndWorksWithoutRecruitment()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Db.Friendships.Remove(await f.Db.Friendships.SingleAsync());
+        await f.Db.SaveChangesAsync();
+        await AssertError(true, "FRIENDSHIP_REQUIRED", 409, () => f.Invite());
+        f.Db.Friendships.Add(new() { RequesterAccountId = f.Owner.Id, ReceiverAccountId = f.Student.Id, Status = FriendshipStatus.Accepted });
+        f.Project.RecruitmentStatus = RecruitmentStatus.Closed;
+        f.Project.RecruitmentDeadline = null;
+        await f.Db.SaveChangesAsync();
+        var invite = await f.Invite("Researcher");
+        Assert.Empty(await f.Db.ProjectMembers.ToListAsync());
+        await f.Invitations.AcceptAsync(invite.Id, f.Student.Id);
+        Assert.Equal("Researcher", (await f.Db.ProjectMembers.SingleAsync()).Role);
+        Assert.Equal(RecruitmentStatus.Closed, f.Project.RecruitmentStatus);
+    }
+
+    [Fact]
     public async Task InviteStudentStoresSentInvitationAndNotifiesInvitee()
     {
         await using var f = await Fixture.CreateAsync();
@@ -107,6 +137,11 @@ public sealed class ProjectMembershipTests
         await using var f = await Fixture.CreateAsync();
         f.Project.RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(-1);
         await f.Db.SaveChangesAsync();
+        if (invitation)
+        {
+            Assert.Equal(ProjectInvitationStatus.Sent, (await f.Invite()).Status);
+            return;
+        }
         await AssertError(invitation, "RECRUITMENT_CLOSED", 409,
             () => invitation ? (Task)f.Invite() : f.Apply());
         Assert.Empty(await f.Db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).ToListAsync());
@@ -204,7 +239,7 @@ public sealed class ProjectMembershipTests
         Assert.Equal(member.Id, stored.Id);
         Assert.Equal(invitation ? invite.Id : request.Id, stored.JoinRequestId);
         Assert.Null(stored.LeftAt);
-        Assert.Equal(RecruitmentStatus.Full, (await f.Db.Projects.SingleAsync()).RecruitmentStatus);
+        Assert.Equal(invitation ? RecruitmentStatus.Open : RecruitmentStatus.Full, (await f.Db.Projects.SingleAsync()).RecruitmentStatus);
     }
 
     private static async Task AssertError(bool invitation, string code, int status, Func<Task> operation)
@@ -256,6 +291,7 @@ public sealed class ProjectMembershipTests
             };
             db.Accounts.AddRange(owner, student, other);
             db.Projects.Add(project);
+            db.Friendships.Add(new() { RequesterAccountId = owner.Id, ReceiverAccountId = student.Id, Status = FriendshipStatus.Accepted });
             await db.SaveChangesAsync();
             return new(connection, db, project, owner, student, other);
         }

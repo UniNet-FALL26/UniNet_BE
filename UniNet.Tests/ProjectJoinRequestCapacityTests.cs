@@ -38,6 +38,10 @@ public sealed class ProjectJoinRequestCapacityTests
                 new() { Id = Guid.NewGuid().ToString(), Role = "Tester", Quantity = 1, Requirements = "Test" }] };
         db.Projects.Add(project);
         await db.SaveChangesAsync();
+        db.Friendships.AddRange(
+            new() { RequesterAccountId = owner.Id, ReceiverAccountId = selected.Id, Status = FriendshipStatus.Accepted },
+            new() { RequesterAccountId = owner.Id, ReceiverAccountId = applicant.Id, Status = FriendshipStatus.Accepted });
+        await db.SaveChangesAsync();
         var joins = new ProjectJoinRequestService(db);
         var invites = new ProjectInvitationService(db);
         var competing = await joins.SendAsync(project.Id, applicant.Id, new(" developer "));
@@ -58,9 +62,9 @@ public sealed class ProjectJoinRequestCapacityTests
             Assert.Equal("project.join-request.reviewed", acceptedNotice.Type);
             Assert.Equal(project.Id, acceptedNotice.TargetId);
         }
-        Assert.Equal(quantity == 1 ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
+        Assert.Equal(quantity == 1 && !viaInvitation ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
             (await db.ProjectJoinRequests.FindAsync(competing.Id))!.Status);
-        Assert.Equal(quantity == 1 ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
+        Assert.Equal(ProjectJoinRequestStatus.Pending,
             (await db.ProjectJoinRequests.SingleAsync(i => i.Id == competingInvite.Id))!.Status);
         if (quantity == 1)
         {
@@ -75,7 +79,7 @@ public sealed class ProjectJoinRequestCapacityTests
             Assert.Equal("JOIN_REQUEST_EXISTS", duplicate.Code);
             var blocked = await Assert.ThrowsAsync<ProjectInvitationException>(() =>
                 invites.SendAsync(project.Id, owner.Id, new(applicant.Profile.Id, "Developer")));
-            Assert.Equal("PROJECT_ROLE_FULL", blocked.Code);
+            Assert.Equal("INVITATION_EXISTS", blocked.Code);
         }
     }
 

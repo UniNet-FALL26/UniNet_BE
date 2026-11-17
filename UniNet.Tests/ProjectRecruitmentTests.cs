@@ -53,7 +53,7 @@ public sealed class ProjectRecruitmentTests
         Assert.Equal(ProjectStatus.Active, project.Status);
         Assert.Equal(RecruitmentStatus.Open, future.RecruitmentStatus);
         Assert.Equal(ProjectJoinRequestStatus.Cancelled, project.JoinRequests.Single(r => r.RequestType == ProjectRequestType.Apply).Status);
-        Assert.Equal(ProjectJoinRequestStatus.Cancelled, project.Invitations.Single().Status);
+        Assert.Equal(ProjectJoinRequestStatus.Pending, project.Invitations.Single().Status);
         await tasks.RunAsync(now.AddMinutes(1));
         Assert.Equal(now, project.UpdatedAt);
         Assert.Equal(3, ProjectMapping.ToDetailResponse(project, null).MinimumQuantity);

@@ -43,16 +43,18 @@ Profile header gains Bạn bè beside Dự án. Friends panel lists accepted/inc
 outgoing/search with avatar/name/nickname and relationship-specific actions.
 Public profile action fetches relationship by profile ID, reconciles after errors,
 and confirms before unfriend. Refresh on focus and notification revisions.
-Project invitation picker defaults to friends, searches friends/users, selects
-multiple with separate position/role per person. Existing individual invitation
-endpoint remains authoritative. Partial successes are removed from selection;
-failed recipients remain visible for retry. Invitation acceptance remains separate.
+Project invitation picker searches eligible friends, selects one and requires
+only a position name. Direct invitations do not require recruitment; applications
+still require open recruitment and a valid available position. Existing invitation
+endpoints remain authoritative. Only recipient acceptance creates ProjectMembers,
+copying the invitation role and linking JoinRequestId. Closing recruitment does
+not expire direct invitations. Project completion expires all pending requests.
 
 ## Ordered implementation / verification
 1. Domain + EF configuration + migration, invariant/authorization/service tests.
 2. API + notifications/target + paged candidate filtering. Check concurrency on PG.
 3. Shared client contracts/actions + friends page/profile tab and profile button.
-4. Friend-first multi-recipient invite picker and existing request acceptance.
+4. Single friend invitation picker and explicit recipient acceptance.
 5. Backend build/tests, frontend typecheck/web export, fixture browser flows,
    independent review, concise handoff. Do not apply migration to shared DB.
 

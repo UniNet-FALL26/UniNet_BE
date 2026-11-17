@@ -18,7 +18,7 @@ public sealed partial class ProjectHubService
         var p = new Project { CreatorId = actor.Id, Creator = actor,
             Title = Text(request.Title, 200, true)!, Description = Text(request.Description, 500, true)!,
             LogoUrl = Url(request.LogoUrl), Technologies = JsonSerializer.Serialize(Strings(request.Technologies), Json),
-            Origin = (ProjectOrigin)request.Origin, Status = (ProjectStatus)request.Status, Visibility = (ProjectVisibility)request.Visibility,
+            Origin = (ProjectOrigin)request.Origin, Status = (ProjectStatus)request.Status, Visibility = ProjectVisibility.Public,
             ProjectField = "Khác", MemberTarget = null, MinimumQuantity = null, RecruitmentDeadline = null, ExpectedOutput = null,
             RecruitmentStatus = RecruitmentStatus.Closed, CreatedAt = now, UpdatedAt = now, SubmitterRole = role,
             CompletedAt = request.Status == 2 ? now : null };
@@ -43,13 +43,7 @@ public sealed partial class ProjectHubService
         if (request.Description != null) p.Description = Text(request.Description, 500, true)!;
         if (request.LogoUrl != null) p.LogoUrl = Url(request.LogoUrl);
         if (request.Technologies != null) p.Technologies = JsonSerializer.Serialize(Strings(request.Technologies), Json);
-        if (request.Visibility.HasValue)
-        {
-            Require(request.Visibility is 0 or 1, "INVALID_PROJECT_INPUT", "Quyền riêng tư không hợp lệ.");
-            Require(request.Visibility != 0 || p.Recruitment?.Status != ProjectRecruitmentStatus.Open,
-                "CLOSE_RECRUITMENT_FIRST", "Hãy đóng tuyển thành viên trước khi đặt dự án riêng tư.", 409);
-            p.Visibility = (ProjectVisibility)request.Visibility.Value;
-        }
+        p.Visibility = ProjectVisibility.Public;
         var now = DateTimeOffset.UtcNow;
         if (request.Status.HasValue)
         {

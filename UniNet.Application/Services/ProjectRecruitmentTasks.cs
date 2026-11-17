@@ -31,7 +31,7 @@ public sealed class ProjectRecruitmentTasks(UniNetDbContext db)
                 recruitment.Status = ProjectRecruitmentStatus.Closed;
                 recruitment.UpdatedAt = now;
             }
-            foreach (var request in project.JoinRequests.Where(r => r.Status == ProjectJoinRequestStatus.Pending))
+            foreach (var request in project.JoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply && r.Status == ProjectJoinRequestStatus.Pending))
             {
                 request.Status = modern ? ProjectJoinRequestStatus.Expired : ProjectJoinRequestStatus.Cancelled;
                 request.UpdatedAt = now;

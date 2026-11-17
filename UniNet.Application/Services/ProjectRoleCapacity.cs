@@ -19,7 +19,7 @@ internal static class ProjectRoleCapacity
             m.Status == ProjectMemberStatus.Active).Select(m => m.UserId).ToListAsync(ct);
         var full = 1 + members.Count(id => id != project.CreatorId) >= project.MemberTarget;
         var unavailable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var role in requests.Select(r => r.Role).Concat(invitations.Select(i => i.Role))
+        foreach (var role in requests.Select(r => r.Role)
                      .Select(r => r.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
             if (full || await CheckAsync(db, project, role, ct) != null)
                 unavailable.Add(role);
@@ -30,7 +30,7 @@ internal static class ProjectRoleCapacity
             request.Status = ProjectJoinRequestStatus.Cancelled;
             request.UpdatedAt = now;
         }
-        foreach (var invitation in invitations.Where(i => unavailable.Contains(i.Role.Trim()) || members.Contains(i.UserId)))
+        foreach (var invitation in invitations.Where(i => members.Contains(i.UserId)))
         {
             invitation.Status = ProjectJoinRequestStatus.Cancelled;
             invitation.UpdatedAt = now;

@@ -34,6 +34,13 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                     .SetProperty(p => p.CompletedAt, now), ct);
             Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
 
+            await db.ProjectJoinRequests.Where(r => r.ProjectId == request.ProjectId && r.Status == ProjectJoinRequestStatus.Pending)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, ProjectJoinRequestStatus.Expired)
+                    .SetProperty(r => r.UpdatedAt, now), ct);
+            await db.ProjectRecruitments.Where(r => r.ProjectId == request.ProjectId)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, ProjectRecruitmentStatus.Closed)
+                    .SetProperty(r => r.UpdatedAt, now), ct);
+
             var members = await db.ProjectMembers.AsNoTracking()
                 .Where(m => m.ProjectId == request.ProjectId &&
                     m.JoinedAt <= now &&
@@ -164,7 +171,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             MinimumQuantity = request.MinimumQuantity,
             RecruitmentDeadline = request.RecruitmentDeadline.ToUniversalTime(),
             ExpectedOutput = request.ExpectedOutput?.ToUniversalTime(),
-            Visibility = request.Visibility,
+            Visibility = ProjectVisibility.Public,
             Status = ProjectStatus.Pending,
             RecruitmentStatus = RecruitmentStatus.Open,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -453,7 +460,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .AsQueryable();
 
         // Apply every eligibility filter before counting or paginating.
-        query = query.Where(p => p.Visibility == ProjectVisibility.Public && p.Status == ProjectStatus.Active);
+        query = query.Where(p => p.Status == ProjectStatus.Active);
         query = query.Where(p => p.Moderations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission)
             .OrderByDescending(m => m.AttemptNumber)
             .Select(m => (ProjectModerationStatus?)m.Status)

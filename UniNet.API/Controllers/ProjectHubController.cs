@@ -42,7 +42,7 @@ public sealed class ProjectHubController(ProjectHubService projects) : Controlle
     [HttpGet("{id:guid}/requests")]
     public Task<HubItems<HubRequest>> Requests(Guid id, CancellationToken ct) => projects.RequestsAsync(id, AccountId, ct);
     [HttpGet("requests/mine")]
-    public Task<HubItems<HubRequest>> MineRequests(CancellationToken ct) => projects.MyRequestsAsync(AccountId, ct);
+    public Task<HubItems<HubRequest>> MineRequests(CancellationToken ct, [FromQuery] Guid? projectId = null) => projects.MyRequestsAsync(AccountId, ct, projectId);
     [HttpPost("{id:guid}/requests")]
     public Task<HubRequest> SendRequest(Guid id, CreateHubRequest request, CancellationToken ct)
         => projects.RequestAsync(id, AccountId, request, ct);

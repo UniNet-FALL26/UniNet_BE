@@ -31,14 +31,17 @@ public sealed class ProjectHubTests
     }
 
     [Fact]
-    public async Task PrivateProjectsAreScopedToOwnerAndActiveMembers()
+    public async Task LegacyPrivateProjectsAreReadableWithoutGrantingMembershipOrEditRights()
     {
         await using var f = await Fixture.Create();
         var project = await f.Internal();
         Assert.True(project.IsOwner);
         Assert.Equal("Leader", Assert.Single(project.Members).Role);
-        var denial = await Assert.ThrowsAsync<ProjectException>(() => f.Service.GetAsync(project.Id, f.Other.Id, default));
-        Assert.Equal(404, denial.Status);
+        (await f.Db.Projects.SingleAsync()).Visibility = ProjectVisibility.Private;
+        await f.Db.SaveChangesAsync();
+        var viewed = await f.Service.GetAsync(project.Id, f.Other.Id, default);
+        Assert.False(viewed.IsOwner);
+        Assert.False(viewed.IsMember);
         Assert.Empty((await f.Service.MineAsync(f.Other.Id, 1, 12, null, default)).Items);
         var forbidden = await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(project.Id, f.Other.Id,
             new() { Title = "Hijack" }, default));
@@ -113,6 +116,7 @@ public sealed class ProjectHubTests
     {
         await using var f = await Fixture.Create();
         var p = await f.Internal();
+        await f.Befriend(f.Other);
         await f.Service.RecruitmentAsync(p.Id, f.Owner.Id, new() { Status = 1,
             Positions = [new() { Id = "design", Name = "Designer", Quantity = 1 }] }, default);
         var invite = await f.Service.RequestAsync(p.Id, f.Owner.Id,
@@ -123,6 +127,56 @@ public sealed class ProjectHubTests
             new() { PositionId = "design" }, default));
         Assert.Equal("POSITION_FULL", competing.Code);
         Assert.Equal(2, await f.Db.ProjectMembers.CountAsync());
+    }
+
+    [Fact]
+    public async Task FriendInvitationNeedsNoRecruitmentAndOnlyRecipientAcceptanceCreatesMembership()
+    {
+        await using var f = await Fixture.Create();
+        var p = await f.Internal();
+        var denied = await Assert.ThrowsAsync<ProjectException>(() => f.Service.RequestAsync(p.Id, f.Owner.Id,
+            new() { RequestType = 1, InvitedUserId = f.Other.Profile!.Id, Role = "UX researcher" }, default));
+        Assert.Equal("FRIENDSHIP_REQUIRED", denied.Code);
+        await f.Befriend(f.Other);
+        var invite = await f.Service.RequestAsync(p.Id, f.Owner.Id,
+            new() { RequestType = 1, InvitedUserId = f.Other.Profile!.Id, Role = " UX researcher " }, default);
+        Assert.Null(invite.PositionId);
+        Assert.Equal("UX researcher", invite.Role);
+        Assert.Single(await f.Db.ProjectMembers.ToListAsync());
+        Assert.Empty((await f.Service.MyRequestsAsync(f.Third.Id, default, p.Id)).Items);
+        Assert.Single((await f.Service.MyRequestsAsync(f.Other.Id, default, p.Id)).Items);
+        await Assert.ThrowsAsync<ProjectException>(() => f.Service.DecideAsync(invite.Id, f.Owner.Id, new("accept"), default));
+        var apply = await Assert.ThrowsAsync<ProjectException>(() => f.Service.RequestAsync(p.Id, f.Third.Id,
+            new() { PositionId = "anything" }, default));
+        Assert.Equal("RECRUITMENT_CLOSED", apply.Code);
+        (await f.Db.Friendships.SingleAsync()).Status = FriendshipStatus.Removed;
+        await f.Db.SaveChangesAsync();
+        await f.Service.DecideAsync(invite.Id, f.Other.Id, new("accept"), default);
+        var member = await f.Db.ProjectMembers.SingleAsync(m => m.UserId == f.Other.Profile!.Id);
+        Assert.Equal("UX researcher", member.Role);
+        Assert.Null(member.PositionId);
+        Assert.Equal("community", (await f.Service.GetAsync(p.Id, f.Owner.Id, default)).Mode);
+    }
+
+    [Fact]
+    public async Task FriendInvitationsSurviveRecruitmentClosureAndDeadlineButNotCompletion()
+    {
+        await using var f = await Fixture.Create();
+        var p = await f.Internal();
+        await f.Befriend(f.Other);
+        var recruitment = new SaveHubRecruitmentRequest { Status = 1, Deadline = DateTimeOffset.UtcNow.AddHours(1),
+            Positions = [new() { Id = "dev", Name = "Developer", Quantity = 1 }] };
+        await f.Service.RecruitmentAsync(p.Id, f.Owner.Id, recruitment, default);
+        var invite = await f.Service.RequestAsync(p.Id, f.Owner.Id,
+            new() { RequestType = 1, InvitedUserId = f.Other.Profile!.Id, Role = "Mentor" }, default);
+        await f.Service.RecruitmentAsync(p.Id, f.Owner.Id, recruitment with { Status = 2 }, default);
+        Assert.Equal(ProjectJoinRequestStatus.Pending, (await f.Db.ProjectJoinRequests.SingleAsync()).Status);
+        await f.Service.RecruitmentAsync(p.Id, f.Owner.Id, recruitment, default);
+        await new ProjectRecruitmentTasks(f.Db).RunAsync(DateTimeOffset.UtcNow.AddHours(2));
+        Assert.Equal(ProjectJoinRequestStatus.Pending, (await f.Db.ProjectJoinRequests.SingleAsync()).Status);
+        await f.Service.CompleteAsync(p.Id, f.Owner.Id, default);
+        Assert.Equal(ProjectJoinRequestStatus.Expired, (await f.Db.ProjectJoinRequests.SingleAsync()).Status);
+        await Assert.ThrowsAsync<ProjectException>(() => f.Service.DecideAsync(invite.Id, f.Other.Id, new("accept"), default));
     }
 
     [Fact]
@@ -155,6 +209,7 @@ public sealed class ProjectHubTests
         var accepted = await f.Service.RequestAsync(project.Id, f.Other.Id, new() { PositionId = "developer" }, default);
         await f.Service.DecideAsync(accepted.Id, f.Owner.Id, new("accept"), default);
         var pending = await f.Service.RequestAsync(project.Id, f.Third.Id, new() { PositionId = "developer" }, default);
+        f.Db.ChangeTracker.Clear();
         await new ProjectRecruitmentTasks(f.Db).RunAsync(now.AddHours(2));
         f.Db.ChangeTracker.Clear();
         Assert.Equal(ProjectJoinRequestStatus.Accepted, (await f.Db.ProjectJoinRequests.SingleAsync(r => r.Id == accepted.Id)).Status);
@@ -184,6 +239,11 @@ public sealed class ProjectHubTests
         public Account Other => other;
         public Account Third => third;
         public ProjectHubService Service { get; } = new(db);
+        public async Task Befriend(Account other)
+        {
+            db.Friendships.Add(new() { RequesterAccountId = owner.Id, ReceiverAccountId = other.Id, Status = FriendshipStatus.Accepted });
+            await db.SaveChangesAsync();
+        }
         public Task<HubProject> Internal() => Service.CreateAsync(owner.Id,
             new() { Title = "Personal", Description = "My project", Origin = 0, Status = 1 }, default);
         public static async Task<Fixture> Create()

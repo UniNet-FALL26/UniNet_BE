@@ -63,7 +63,7 @@ public sealed partial class ProjectHubService
             recruitment.Deadline = request.Deadline?.ToUniversalTime(); recruitment.Status = (ProjectRecruitmentStatus)request.Status;
             if (request.Status == 1) { recruitment.PublishedAt ??= now; p.Visibility = ProjectVisibility.Public; }
             recruitment.UpdatedAt = now; p.UpdatedAt = now;
-            if (request.Status != 1) await ExpirePending(p.Id, now, ct);
+            if (request.Status != 1) await ExpirePending(p.Id, now, ct, applicationsOnly: true);
             // Keep legacy readers coherent during their remaining transition.
             p.MemberTarget = 1 + positions.Sum(x => x.Quantity); p.MinimumQuantity = 1;
             p.RecruitmentDeadline = recruitment.Deadline;
@@ -119,8 +119,9 @@ public sealed partial class ProjectHubService
         Require(request.RequestType is 0 or 1, "INVALID_REQUEST_TYPE", "Loại yêu cầu không hợp lệ.");
         var message = Text(request.Message, 4000);
         return await Transaction(async () => {
-            var p = await Locked(id, ct); Recruiting(p);
-            var position = Position(p, request.PositionId); await Capacity(p.Id, position, ct);
+            var p = await Locked(id, ct);
+            HubPosition? position = null;
+            string role;
             var recipient = actor;
             if (request.RequestType == 1)
             {
@@ -129,7 +130,23 @@ public sealed partial class ProjectHubService
                     u.Account.Status == AccountStatus.Active && u.Account.Role == AccountRole.Student, ct)
                     ?? throw new ProjectException("USER_NOT_FOUND", "Không tìm thấy sinh viên đang hoạt động.", 404);
             }
-            else Require(p.Visibility == ProjectVisibility.Public, "RECRUITMENT_CLOSED", "Dự án hiện không mở ứng tuyển.", 409);
+            else
+            {
+                Recruiting(p);
+                position = Position(p, request.PositionId); await Capacity(p.Id, position, ct);
+            }
+            if (request.RequestType == 1)
+            {
+                Require(p.Status is ProjectStatus.Pending or ProjectStatus.Active,
+                    "PROJECT_COMPLETED", "Dự án hiện không nhận thêm thành viên.", 409);
+                Require(await db.Friendships.AnyAsync(f => f.Status == FriendshipStatus.Accepted &&
+                    ((f.RequesterAccountId == accountId && f.ReceiverAccountId == recipient.AccountId) ||
+                     (f.ReceiverAccountId == accountId && f.RequesterAccountId == recipient.AccountId)), ct),
+                    "FRIENDSHIP_REQUIRED", "Chỉ có thể mời sinh viên trong danh sách bạn bè.", 409);
+                // Accept the old position-only payload, but direct invitations do not reserve recruitment slots.
+                role = Text(request.Role, 150) ?? Position(p, request.PositionId).Name;
+            }
+            else role = position!.Name;
             Require(recipient.Id != p.CreatorId, "CANNOT_JOIN_OWN_PROJECT", "Chủ dự án không thể tự ứng tuyển hoặc tự mời mình.", 409);
             Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == id && m.UserId == recipient.Id && m.Status == ProjectMemberStatus.Active, ct),
                 "ALREADY_PROJECT_MEMBER", "Người dùng đã là thành viên dự án.", 409);
@@ -139,7 +156,7 @@ public sealed partial class ProjectHubService
             var now = DateTimeOffset.UtcNow;
             var r = new ProjectJoinRequest { Id = Guid.NewGuid(), ProjectId = id, UserId = recipient.Id,
                 RequestType = (ProjectRequestType)request.RequestType, InviterId = request.RequestType == 1 ? actor.Id : null,
-                PositionId = position.Id, Role = position.Name, Message = message, Status = ProjectJoinRequestStatus.Pending,
+                PositionId = position?.Id, Role = role, Message = message, Status = ProjectJoinRequestStatus.Pending,
                 CreatedAt = now, UpdatedAt = now };
             db.ProjectJoinRequests.Add(r); await db.SaveChangesAsync(ct);
             var noticeRecipient = request.RequestType == 1 ? recipient.AccountId : p.Creator.AccountId;
@@ -159,10 +176,12 @@ public sealed partial class ProjectHubService
         return await RequestPage(db.ProjectJoinRequests.Where(r => r.ProjectId == id), ct);
     }
 
-    public async Task<HubItems<HubRequest>> MyRequestsAsync(Guid accountId, CancellationToken ct)
+    public async Task<HubItems<HubRequest>> MyRequestsAsync(Guid accountId, CancellationToken ct, Guid? projectId = null)
     {
         var actor = await Actor(accountId, ct);
-        return await RequestPage(db.ProjectJoinRequests.Where(r => r.UserId == actor.Id || r.InviterId == actor.Id), ct);
+        var query = db.ProjectJoinRequests.Where(r => r.UserId == actor.Id || r.InviterId == actor.Id);
+        if (projectId.HasValue) query = query.Where(r => r.ProjectId == projectId.Value);
+        return await RequestPage(query, ct);
     }
 
     private async Task<HubItems<HubRequest>> RequestPage(IQueryable<ProjectJoinRequest> query, CancellationToken ct)
@@ -177,9 +196,10 @@ public sealed partial class ProjectHubService
         new(r.Id, r.ProjectId, p.Title, r.UserId, user.FullName, user.AvatarUrl, (short)r.RequestType, r.InviterId,
             r.PositionId, r.Role, r.Message, (short)r.Status, r.CreatedAt, r.ReviewedAt);
 
-    private async Task ExpirePending(Guid projectId, DateTimeOffset now, CancellationToken ct)
+    private async Task ExpirePending(Guid projectId, DateTimeOffset now, CancellationToken ct, bool applicationsOnly = false)
     {
-        var pending = await db.ProjectJoinRequests.Where(r => r.ProjectId == projectId && r.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
+        var pending = await db.ProjectJoinRequests.Where(r => r.ProjectId == projectId && r.Status == ProjectJoinRequestStatus.Pending &&
+            (!applicationsOnly || r.RequestType == ProjectRequestType.Apply)).ToListAsync(ct);
         foreach (var r in pending) { r.Status = ProjectJoinRequestStatus.Expired; r.UpdatedAt = now; }
     }
 
@@ -201,10 +221,16 @@ public sealed partial class ProjectHubService
             var now = DateTimeOffset.UtcNow;
             if (decision == "accept")
             {
-                Recruiting(p);
+                Require(p.Status is ProjectStatus.Pending or ProjectStatus.Active,
+                    "PROJECT_COMPLETED", "Dự án hiện không nhận thêm thành viên.", 409);
                 Require(r.User.Account.Status == AccountStatus.Active && r.User.Account.Role == AccountRole.Student,
                     "USER_INACTIVE", "Người nhận không còn tài khoản sinh viên đang hoạt động.", 409);
-                var position = Position(p, r.PositionId); await Capacity(p.Id, position, ct);
+                HubPosition? position = null;
+                if (r.RequestType == ProjectRequestType.Apply)
+                {
+                    Recruiting(p);
+                    position = Position(p, r.PositionId); await Capacity(p.Id, position, ct);
+                }
                 var member = await db.ProjectMembers.SingleOrDefaultAsync(m => m.ProjectId == p.Id && m.UserId == r.UserId, ct);
                 Require(member?.Status != ProjectMemberStatus.Active, "ALREADY_PROJECT_MEMBER", "Người dùng đã là thành viên dự án.", 409);
                 if (member == null)
@@ -212,7 +238,7 @@ public sealed partial class ProjectHubService
                     member = new() { Id = Guid.NewGuid(), ProjectId = p.Id, UserId = r.UserId, CreatedAt = now };
                     db.ProjectMembers.Add(member);
                 }
-                member.Role = position.Name; member.PositionId = position.Id; member.JoinRequestId = r.Id;
+                member.Role = position?.Name ?? r.Role; member.PositionId = position?.Id; member.JoinRequestId = r.Id;
                 member.Status = ProjectMemberStatus.Active; member.JoinedAt = now; member.LeftAt = null; member.UpdatedAt = now;
                 var competing = await db.ProjectJoinRequests.Where(other => other.ProjectId == p.Id && other.UserId == r.UserId &&
                     other.Id != r.Id && other.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
