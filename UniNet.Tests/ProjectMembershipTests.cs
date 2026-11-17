@@ -12,6 +12,23 @@ namespace UniNet.Tests;
 
 public sealed class ProjectMembershipTests
 {
+    [Theory]
+    [InlineData(ProjectStatus.Completed, true)]
+    [InlineData(ProjectStatus.Rejected, false)]
+    public async Task LegacyProjectInvitationUsesStatusOnly(ProjectStatus status, bool allowed)
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Project.Status = status;
+        f.Project.RecruitmentStatus = RecruitmentStatus.Closed;
+        await f.Db.SaveChangesAsync();
+        if (!allowed) { await AssertError(true, "INVALID_PROJECT_STATE", 409, () => f.Invite()); return; }
+        var invite = await f.Invite("Designer");
+        Assert.Empty(await f.Db.ProjectMembers.ToListAsync());
+        await f.Invitations.AcceptAsync(invite.Id, f.Student.Id);
+        Assert.Equal("Designer", (await f.Db.ProjectMembers.SingleAsync()).Role);
+        Assert.Equal(ProjectStatus.Completed, f.Project.Status);
+    }
+
     [Fact]
     public async Task LegacyApplicationAcceptsOpenRecruitmentWithoutDeadline()
     {

@@ -11,21 +11,21 @@ public sealed partial class ProjectHubService
     public async Task<HubProject> CreateAsync(Guid accountId, CreateHubProjectRequest request, CancellationToken ct)
     {
         var actor = await Actor(accountId, ct);
-        Require(request.Origin is 0 or 1 && request.Status is >= 0 and <= 2 && request.Visibility is 0 or 1,
-            "INVALID_PROJECT_INPUT", "Loại, trạng thái hoặc quyền riêng tư không hợp lệ.");
+        Require(request.Status is >= 0 and <= 2 && request.Visibility is 0 or 1,
+            "INVALID_PROJECT_INPUT", "Trạng thái hoặc quyền riêng tư không hợp lệ.");
         var now = DateTimeOffset.UtcNow;
         var role = Text(request.SubmitterRole, 150);
         var p = new Project { CreatorId = actor.Id, Creator = actor,
             Title = Text(request.Title, 200, true)!, Description = Text(request.Description, 500, true)!,
             LogoUrl = Url(request.LogoUrl), Technologies = JsonSerializer.Serialize(Strings(request.Technologies), Json),
-            Origin = (ProjectOrigin)request.Origin, Status = (ProjectStatus)request.Status, Visibility = ProjectVisibility.Public,
+            Status = (ProjectStatus)request.Status, Visibility = ProjectVisibility.Public,
             ProjectField = "Khác", MemberTarget = null, MinimumQuantity = null, RecruitmentDeadline = null, ExpectedOutput = null,
             RecruitmentStatus = RecruitmentStatus.Closed, CreatedAt = now, UpdatedAt = now, SubmitterRole = role,
             CompletedAt = request.Status == 2 ? now : null };
-        if (request.Origin == 0 || role != null)
-            p.Members.Add(new() { Id = Guid.NewGuid(), UserId = actor.Id, User = actor,
-                Role = request.Origin == 0 ? "Leader" : role!, Status = ProjectMemberStatus.Active,
-                JoinedAt = now, CreatedAt = now, UpdatedAt = now });
+        p.SubmitterIsLeader = true;
+        p.Members.Add(new() { Id = Guid.NewGuid(), UserId = actor.Id, User = actor,
+            Role = role ?? "Leader", Status = ProjectMemberStatus.Active,
+            JoinedAt = now, CreatedAt = now, UpdatedAt = now });
         if (p.CompletedAt != null)
             p.Details = new() { ProjectId = p.Id, CompletedAt = p.CompletedAt, UpdatedAt = now };
         db.Projects.Add(p); await db.SaveChangesAsync(ct);
@@ -37,8 +37,6 @@ public sealed partial class ProjectHubService
         var actor = await Actor(accountId, ct);
         var p = await Transaction(async () => {
         var p = await Locked(id, ct); Own(p, actor);
-        if (request.Origin.HasValue) Require(request.Origin.Value == (short)p.Origin,
-            "PROJECT_ORIGIN_IMMUTABLE", "Không thể đổi nguồn gốc của dự án đã tạo.", 409);
         if (request.Title != null) p.Title = Text(request.Title, 200, true)!;
         if (request.Description != null) p.Description = Text(request.Description, 500, true)!;
         if (request.LogoUrl != null) p.LogoUrl = Url(request.LogoUrl);
@@ -51,7 +49,7 @@ public sealed partial class ProjectHubService
             Require(p.Status != ProjectStatus.Completed || request.Status == 2,
                 "PROJECT_COMPLETED", "Dự án đã hoàn thành không thể mở lại qua thao tác này.", 409);
             p.Status = (ProjectStatus)request.Status.Value;
-            if (p.Status == ProjectStatus.Completed) { StampCompletion(p, now); await ExpirePending(p.Id, now, ct); }
+            if (p.Status == ProjectStatus.Completed) { StampCompletion(p, now); await ExpirePending(p.Id, now, ct, applicationsOnly: true); }
         }
         if (request.Details != null) SaveDetails(p, request.Details, now);
         p.UpdatedAt = now;
@@ -124,7 +122,7 @@ public sealed partial class ProjectHubService
         Require(p.Status != ProjectStatus.Rejected, "INVALID_PROJECT_STATUS", "Dự án cũ bị từ chối cần được xử lý trước.", 409);
         var now = DateTimeOffset.UtcNow;
         p.Status = ProjectStatus.Completed; StampCompletion(p, now); p.UpdatedAt = now;
-        await ExpirePending(id, now, ct);
+        await ExpirePending(id, now, ct, applicationsOnly: true);
         await db.SaveChangesAsync(ct); return p;
         }, ct);
         return await Response(p, actor.Id, ct);

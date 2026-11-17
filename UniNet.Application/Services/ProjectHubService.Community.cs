@@ -41,7 +41,6 @@ public sealed partial class ProjectHubService
             "INVALID_RECRUITMENT_DEADLINE", "Hạn tuyển thành viên phải ở tương lai.");
         await Transaction(async () => {
             var p = await Locked(id, ct); Own(p, actor);
-            Require(p.Origin == ProjectOrigin.Internal, "EXTERNAL_PROJECT_COMMUNITY", "Dự án bên ngoài không thể mở tuyển thành viên cộng đồng.", 409);
             Require(request.Status != 1 || p.Status is ProjectStatus.Pending or ProjectStatus.Active,
                 "PROJECT_COMPLETED", "Chỉ dự án chưa bắt đầu hoặc đang thực hiện mới được mở tuyển.", 409);
             var stableIds = positions.Select(x => x.Id).ToArray();
@@ -91,7 +90,7 @@ public sealed partial class ProjectHubService
 
     private static void Recruiting(Project p)
     {
-        Require(p.Origin == ProjectOrigin.Internal && p.Status is ProjectStatus.Pending or ProjectStatus.Active &&
+        Require(p.Status is ProjectStatus.Pending or ProjectStatus.Active &&
             p.Recruitment is { Status: ProjectRecruitmentStatus.Open } &&
             (p.Recruitment.Deadline == null || p.Recruitment.Deadline > DateTimeOffset.UtcNow),
             "RECRUITMENT_CLOSED", "Dự án hiện không mở tuyển thành viên.", 409);
@@ -137,7 +136,7 @@ public sealed partial class ProjectHubService
             }
             if (request.RequestType == 1)
             {
-                Require(p.Status is ProjectStatus.Pending or ProjectStatus.Active,
+                Require(AllowsFriendInvitations(p),
                     "PROJECT_COMPLETED", "Dự án hiện không nhận thêm thành viên.", 409);
                 Require(await db.Friendships.AnyAsync(f => f.Status == FriendshipStatus.Accepted &&
                     ((f.RequesterAccountId == accountId && f.ReceiverAccountId == recipient.AccountId) ||
@@ -221,7 +220,7 @@ public sealed partial class ProjectHubService
             var now = DateTimeOffset.UtcNow;
             if (decision == "accept")
             {
-                Require(p.Status is ProjectStatus.Pending or ProjectStatus.Active,
+                Require(r.RequestType == ProjectRequestType.Invite ? AllowsFriendInvitations(p) : p.Status is ProjectStatus.Pending or ProjectStatus.Active,
                     "PROJECT_COMPLETED", "Dự án hiện không nhận thêm thành viên.", 409);
                 Require(r.User.Account.Status == AccountStatus.Active && r.User.Account.Role == AccountRole.Student,
                     "USER_INACTIVE", "Người nhận không còn tài khoản sinh viên đang hoạt động.", 409);

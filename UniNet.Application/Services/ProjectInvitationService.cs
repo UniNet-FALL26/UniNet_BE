@@ -24,8 +24,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             ?? throw new ProjectInvitationException("INVITEE_NOT_FOUND", "Invitee profile not found.", 404);
         RequireActiveStudent(invitee);
         Require(invitee.Id != project.CreatorId, "CANNOT_INVITE_SELF", "You cannot invite yourself to your own project.", 409);
-        Require(project.Status is ProjectStatus.Pending or ProjectStatus.Active,
-            "INVALID_PROJECT_STATE", "Project must be Pending or Active.", 409);
+        Require(ProjectHubService.AllowsFriendInvitations(project),
+            "INVALID_PROJECT_STATE", "Project cannot receive friend invitations.", 409);
         Require(await db.Friendships.AnyAsync(f => f.Status == FriendshipStatus.Accepted &&
             ((f.RequesterAccountId == accountId && f.ReceiverAccountId == invitee.AccountId) ||
              (f.ReceiverAccountId == accountId && f.RequesterAccountId == invitee.AccountId)), ct),
@@ -94,8 +94,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         {
             Require(actor.Id != invitation.Project.CreatorId,
                 "CANNOT_JOIN_OWN_PROJECT", "You cannot join your own project through an invitation.", 409);
-            Require(invitation.Project.Status is ProjectStatus.Pending or ProjectStatus.Active,
-                "INVALID_PROJECT_STATE", "Project must be Pending or Active.", 409);
+            Require(ProjectHubService.AllowsFriendInvitations(invitation.Project),
+                "INVALID_PROJECT_STATE", "Project cannot receive friend invitations.", 409);
             var member = await db.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == invitation.ProjectId &&
                 m.UserId == actor.Id, ct);
             Require(member?.Status != ProjectMemberStatus.Active,

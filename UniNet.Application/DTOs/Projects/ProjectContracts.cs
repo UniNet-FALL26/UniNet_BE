@@ -61,7 +61,6 @@ public record ProjectDetailResponse(
     List<ProjectMemberInfo>? Members = null,
     List<ProjectInvitationResponse>? Invitations = null,
     List<ProjectJoinRequestResponse>? JoinRequests = null,
-    ProjectOrigin Origin = ProjectOrigin.Internal,
     ProjectLeaderInfo? Leader = null,
     UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
     SpecializationResponse? Specialization = null
@@ -107,7 +106,6 @@ public record ProjectListItemResponse(
     DateTimeOffset CreatedAt,
     CreatorInfo Creator,
     List<ProjectSkillInfo> Skills,
-    ProjectOrigin Origin = ProjectOrigin.Internal,
     ProjectLeaderInfo? Leader = null,
     SpecializationResponse? Specialization = null
 );

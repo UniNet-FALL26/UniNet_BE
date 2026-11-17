@@ -13,6 +13,9 @@ public sealed class ProjectRefactorSchemaTests
         using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
             .UseNpgsql("Host=localhost;Database=model_only").Options);
         var entities = db.Model.GetEntityTypes().ToList();
+        var project = db.Model.FindEntityType(typeof(Project))!;
+        Assert.Null(project.FindProperty("Origin"));
+        Assert.Null(project.FindProperty("Mode"));
         foreach (var table in new[] { "ProjectDetails", "ProjectRecruitments", "ProjectPersonalReviews" })
             Assert.Contains(entities, e => e.GetTableName() == table);
         var details = entities.Single(e => e.GetTableName() == "ProjectDetails");

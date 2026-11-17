@@ -34,7 +34,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                     .SetProperty(p => p.CompletedAt, now), ct);
             Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
 
-            await db.ProjectJoinRequests.Where(r => r.ProjectId == request.ProjectId && r.Status == ProjectJoinRequestStatus.Pending)
+            await db.ProjectJoinRequests.Where(r => r.ProjectId == request.ProjectId && r.Status == ProjectJoinRequestStatus.Pending &&
+                    r.RequestType == ProjectRequestType.Apply)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, ProjectJoinRequestStatus.Expired)
                     .SetProperty(r => r.UpdatedAt, now), ct);
             await db.ProjectRecruitments.Where(r => r.ProjectId == request.ProjectId)
@@ -581,7 +582,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             members,
             project.Invitations.Select(ProjectInvitationMapping.ToResponse).ToList(),
             project.JoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply).Select(ProjectJoinRequestMapping.ToResponse).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project), SpecializationMapping.ToResponse(project.Specialization)
+            ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -602,7 +603,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
             project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
+            ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 

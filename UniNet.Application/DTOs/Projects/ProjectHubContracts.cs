@@ -42,7 +42,7 @@ public sealed record HubPosition
 public sealed record HubRecruitment(Guid Id, string? Description, HubPosition[] Positions,
     DateTimeOffset? Deadline, short Status, DateTimeOffset? PublishedAt);
 public sealed record HubProject(Guid Id, string Title, string? LogoUrl, string Description,
-    string[] Technologies, short Origin, short Status, short Visibility, string Mode,
+    string[] Technologies, short Status, short Visibility,
     bool IsOwner, bool IsMember, HubPerson Creator, HubDetails Details, HubRecruitment? Recruitment,
     HubMember[] Members, HubPersonalReview? MyReview, Guid? ChatRoomId,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
@@ -58,7 +58,6 @@ public sealed record CreateHubProjectRequest
     public string Description { get; init; } = "";
     public string? LogoUrl { get; init; }
     public string[] Technologies { get; init; } = [];
-    public short Origin { get; init; } = 1;
     public short Status { get; init; } = 1;
     public short Visibility { get; init; }
     public string? SubmitterRole { get; init; }
@@ -70,7 +69,6 @@ public sealed record UpdateHubProjectRequest
     // Omitted/null preserves the current logo. Empty string explicitly removes it.
     public string? LogoUrl { get; init; }
     public string[]? Technologies { get; init; }
-    public short? Origin { get; init; }
     public short? Status { get; init; }
     public short? Visibility { get; init; }
     public HubDetails? Details { get; init; }

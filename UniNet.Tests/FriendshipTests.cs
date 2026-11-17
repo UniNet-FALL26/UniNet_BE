@@ -139,7 +139,7 @@ public sealed class FriendshipTests
         Account User(string name, AccountRole role = AccountRole.Student) => new() { Email = name + "@candidate.test", Role = role, Profile = new() { FullName = name, Nickname = name } };
         var invited = User("Invited"); var partner = User("Partner", AccountRole.Partner);
         f.Db.Accounts.AddRange(invited, partner);
-        var project = new Project { CreatorId = f.A.Profile!.Id, Title = "Project", Description = "Test", ProjectField = "IT", Origin = ProjectOrigin.Internal, Status = ProjectStatus.Active };
+        var project = new Project { CreatorId = f.A.Profile!.Id, Title = "Project", Description = "Test", ProjectField = "IT", Status = ProjectStatus.Active };
         f.Db.Projects.Add(project);
         f.Db.ProjectMembers.Add(new() { Project = project, UserId = f.C.Profile!.Id, Role = "Developer", Status = ProjectMemberStatus.Active });
         f.Db.ProjectJoinRequests.Add(new() { Project = project, User = invited.Profile!, RequestType = ProjectRequestType.Invite, Status = ProjectJoinRequestStatus.Pending, Role = "Developer", InviterId = f.A.Profile.Id });

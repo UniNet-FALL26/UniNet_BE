@@ -21,7 +21,7 @@ public static class AssignmentMapping
             a.ProjectVerification.Project.Members.OrderBy(m => m.JoinedAt).ThenBy(m => m.UserId)
                 .Select(m => new ProjectMemberInfo(m.UserId, m.User.FullName, m.User.Nickname,
                     m.User.AvatarUrl, m.Role, m.Status, m.JoinedAt)).ToList(),
-            ProjectIdentityMapping.Leader(a.ProjectVerification.Project), a.ProjectVerification.Project.Origin,
+            ProjectIdentityMapping.Leader(a.ProjectVerification.Project),
             a.ProjectVerification.Project.CreatorId, ProjectIdentityMapping.ExternalDetails(a.ProjectVerification.Project), SpecializationMapping.ToResponse(a.ProjectVerification.Project.Specialization)),
         a.Report == null ? null : ProjectVerificationMapping.ToReportResponse(a.Report),
         Services.ProjectAssessmentPolicy.ReadRubric(a.ProjectVerification.AssessmentRubricJson),

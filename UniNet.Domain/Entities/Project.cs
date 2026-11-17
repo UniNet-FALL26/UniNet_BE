@@ -19,8 +19,7 @@ namespace UniNet.Domain.Entities
         public ProjectDetail? Details { get; set; }
         public ProjectRecruitment? Recruitment { get; set; }
         // Creator manages the platform record. An external project's real leader may be someone else.
-        public ProjectOrigin Origin { get; set; }
-        public bool SubmitterIsLeader { get; set; }
+        public bool SubmitterIsLeader { get; set; } = true;
         public string? ExternalLeaderName { get; set; }
         public string? ImplementationStartDate { get; set; }
         public string? ImplementationEndDate { get; set; }

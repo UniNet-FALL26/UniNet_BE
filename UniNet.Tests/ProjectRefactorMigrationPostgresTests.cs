@@ -39,16 +39,25 @@ public sealed class ProjectRefactorMigrationPostgresTests
                 RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(3) };
             var positionId = Guid.NewGuid();
             var external = new Project { Creator = owner.Profile!, Title = "External", Description = "Original external",
-                ProjectField = "IT", Origin = ProjectOrigin.External, Status = ProjectStatus.Completed,
+                ProjectField = "IT", SubmitterIsLeader = false, Status = ProjectStatus.Completed,
                 RecruitmentStatus = RecruitmentStatus.Closed, MemberTarget = null, MinimumQuantity = null,
                 RecruitmentDeadline = null, ImplementationStartDate = "2026-02-30", ImplementationEndDate = "2026-11-15",
                 ExternalDetailsJson = "{\"personalClaim\":\"preserve me\"}", CompletedAt = DateTimeOffset.UtcNow };
-            db.Projects.AddRange(project, external);
+            db.Projects.Add(project);
             var invitations = Enumerable.Range(0, 5).Select(status => (Id: Guid.NewGuid(), Status: status)).ToArray();
             db.ProjectJoinRequests.Add(new() { Id = Guid.NewGuid(), Project = project, User = guest.Profile!,
                 Role = "Backend", Status = ProjectJoinRequestStatus.Expired,
                 CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
+            // Seed the historical column explicitly: the current EF model no longer maps it.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Projects" ("Id","CreatorId","Title","Description","ProjectField","Origin","Status",
+                    "RecruitmentStatus","Visibility","SubmitterIsLeader","MemberTarget","MinimumQuantity","RecruitmentDeadline","CreatedAt","UpdatedAt",
+                    "ImplementationStartDate","ImplementationEndDate","ExternalDetailsJson","CompletedAt")
+                VALUES ({external.Id},{owner.Profile!.Id},{external.Title},{external.Description},'IT',1,2,2,1,false,NULL,NULL,NULL,
+                    {external.CreatedAt},{external.UpdatedAt},{external.ImplementationStartDate},
+                    {external.ImplementationEndDate},{external.ExternalDetailsJson}::jsonb,{external.CompletedAt});
+                """);
             var now = DateTimeOffset.UtcNow;
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "ProjectRoleRequirements" ("Id","ProjectId","Role","Quantity","Requirements","CreatedAt","UpdatedAt")

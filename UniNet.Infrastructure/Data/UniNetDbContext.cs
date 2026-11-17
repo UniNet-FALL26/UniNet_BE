@@ -237,7 +237,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
                 t.HasCheckConstraint("CK_Projects_MinimumQuantity",
                     "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
-                t.HasCheckConstraint("CK_Projects_Origin", "\"Origin\" IN (0, 1)");
 
                 t.HasCheckConstraint(
                     "CK_Projects_Status",
@@ -268,7 +267,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.MemberTarget).IsRequired(false);
 
             e.Property(x => x.RecruitmentDeadline).IsRequired(false);
-            e.Property(x => x.Origin).HasConversion<short>().HasDefaultValue(ProjectOrigin.Internal);
             e.Property(x => x.ImplementationStartDate).HasMaxLength(10);
             e.Property(x => x.ImplementationEndDate).HasMaxLength(10);
             e.Property(x => x.ExternalLeaderName).HasMaxLength(255);

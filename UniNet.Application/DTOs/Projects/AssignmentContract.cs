@@ -14,7 +14,7 @@ public record AssignmentResponse(Guid Id, Guid ProjectVerificationId, Guid Assig
     DateTimeOffset? MeetingStartAt, DateTimeOffset? MeetingEndAt, DateTimeOffset? CompletedAt = null);
 public record AssignmentProjectResponse(Guid Id, string Title, string ProjectField, string Description,
     ProjectStatus Status, Guid? LeaderId, List<ProjectSkillInfo> Skills, List<ProjectMemberInfo> Members,
-    ProjectLeaderInfo? Leader, ProjectOrigin Origin = ProjectOrigin.Internal, Guid? OwnerUserId = null,
+    ProjectLeaderInfo? Leader, Guid? OwnerUserId = null,
     UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
     SpecializationResponse? Specialization = null);
 public record AssignmentAssigneeResponse(Guid UserId, string FullName, string? AvatarUrl, string Nickname);

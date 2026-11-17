@@ -27,9 +27,7 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
     private static void Own(Project p, UserProfile actor) => Require(p.CreatorId == actor.Id,
         "FORBIDDEN", "Chỉ chủ dự án được thực hiện thao tác này.", 403);
     private static bool ActiveMember(Project p, Guid userId) => p.Members.Any(m => m.UserId == userId && m.Status == ProjectMemberStatus.Active);
-    private static bool Community(Project p) => p.Recruitment?.PublishedAt != null ||
-        p.Recruitment?.Status is ProjectRecruitmentStatus.Open or ProjectRecruitmentStatus.Closed ||
-        p.Members.Any(m => m.UserId != p.CreatorId && m.Status == ProjectMemberStatus.Active);
+    internal static bool AllowsFriendInvitations(Project p) => p.Status is ProjectStatus.Pending or ProjectStatus.Active or ProjectStatus.Completed;
 
     public async Task<HubPage> MineAsync(Guid accountId, int page, int pageSize, string? q, CancellationToken ct)
     {
@@ -41,8 +39,7 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
     public async Task<HubPage> DiscoverAsync(Guid accountId, int page, int pageSize, string? q, CancellationToken ct)
     {
         var actor = await Actor(accountId, ct); var now = DateTimeOffset.UtcNow;
-        var query = Projects().AsNoTracking().Where(p => p.Origin == ProjectOrigin.Internal &&
-            (p.Status == ProjectStatus.Active || p.Status == ProjectStatus.Pending) && p.Recruitment != null &&
+        var query = Projects().AsNoTracking().Where(p => (p.Status == ProjectStatus.Active || p.Status == ProjectStatus.Pending) && p.Recruitment != null &&
             p.Recruitment.Status == ProjectRecruitmentStatus.Open && (p.Recruitment.Deadline == null || p.Recruitment.Deadline > now));
         return await Page(query, actor.Id, page, pageSize, q, ct);
     }
@@ -94,8 +91,8 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
             Media = Read<HubFile[]>(d?.Media) ?? [], Links = Read<HubLink[]>(d?.Links) ?? [],
             StartDate = d?.StartDate, EndDate = d?.EndDate, CompletedAt = d?.CompletedAt ?? p.CompletedAt };
         var r = p.Recruitment;
-        return new(p.Id, p.Title, p.LogoUrl, p.Description, Technologies(p.Technologies), (short)p.Origin, (short)p.Status,
-            (short)ProjectVisibility.Public, Community(p) ? "community" : "personal", p.CreatorId == actor, ActiveMember(p, actor),
+        return new(p.Id, p.Title, p.LogoUrl, p.Description, Technologies(p.Technologies), (short)p.Status,
+            (short)ProjectVisibility.Public, p.CreatorId == actor, ActiveMember(p, actor),
             new(p.Creator.Id, p.Creator.FullName, p.Creator.AvatarUrl), details,
             r == null ? null : new(r.Id, r.Description, Positions(r.Positions), r.Deadline, (short)r.Status, r.PublishedAt),
             p.Members.OrderBy(m => m.JoinedAt).ThenBy(m => m.Id).Select(m => new HubMember(m.Id, m.UserId,

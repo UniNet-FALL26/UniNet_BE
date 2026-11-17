@@ -29,7 +29,7 @@ public static class ProjectVerificationMapping
     public static ProjectVerificationDetailResponse ToDetailResponse(ProjectVerification verification) => new(
         ToResponse(verification), new(verification.ProjectId, verification.Project.Title,
             verification.Project.ProjectField, verification.Project.Description, verification.Project.Status,
-            ProjectIdentityMapping.LeaderId(verification.Project), verification.Project.Origin, verification.Project.CreatorId,
+            ProjectIdentityMapping.LeaderId(verification.Project),  verification.Project.CreatorId,
             ProjectIdentityMapping.Leader(verification.Project), ProjectIdentityMapping.ExternalDetails(verification.Project), SpecializationMapping.ToResponse(verification.Project.Specialization)), verification.PackageId,
         verification.MeetingStartAt, verification.MeetingEndAt,
         verification.Assignments.OrderBy(a => a.AssignedAt).ThenBy(a => a.Id)
