@@ -1061,6 +1061,61 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.Friendship", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("HighAccountId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("uuid")
+                        .HasComputedColumnSql("CASE WHEN \"RequesterAccountId\" < \"ReceiverAccountId\" THEN \"ReceiverAccountId\" ELSE \"RequesterAccountId\" END", true);
+
+                    b.Property<Guid>("LowAccountId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("uuid")
+                        .HasComputedColumnSql("CASE WHEN \"RequesterAccountId\" < \"ReceiverAccountId\" THEN \"RequesterAccountId\" ELSE \"ReceiverAccountId\" END", true);
+
+                    b.Property<Guid>("ReceiverAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RequesterAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LowAccountId", "HighAccountId")
+                        .IsUnique();
+
+                    b.HasIndex("ReceiverAccountId", "Status", "CreatedAt");
+
+                    b.HasIndex("RequesterAccountId", "Status", "CreatedAt");
+
+                    b.ToTable("Friendships", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Friendships_DifferentAccounts", "\"RequesterAccountId\" <> \"ReceiverAccountId\"");
+
+                            t.HasCheckConstraint("CK_Friendships_Status", "\"Status\" BETWEEN 0 AND 4");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3442,6 +3497,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Reviewer");
 
                     b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Friendship", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ReceiverAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("RequesterAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.Job", b =>

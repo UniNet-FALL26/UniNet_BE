@@ -74,6 +74,7 @@ builder.Services.AddScoped<AdminVerificationQueries>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<FriendshipService>();
 builder.Services.AddScoped<NotificationTargets>();
 builder.Services.AddScoped<NotificationBroadcastService>();
 builder.Services.AddHostedService<UniNet.API.Services.NotificationBackgroundWorker>();

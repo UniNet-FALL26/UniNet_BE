@@ -73,6 +73,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AssessorOnboarding> AssessorOnboardings => Set<AssessorOnboarding>();
     public DbSet<AssessorOnboardingEmail> AssessorOnboardingEmails => Set<AssessorOnboardingEmail>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<Friendship> Friendships => Set<Friendship>();
     public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
@@ -127,6 +128,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         FinanceConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         NotificationConfiguration.Configure(model);
+        FriendshipConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         model.Entity<PortraitAsset>(e =>
         {

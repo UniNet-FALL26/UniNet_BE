@@ -34,6 +34,42 @@ namespace UniNet.Tests;
 public sealed class NotificationsHttpTests
 {
     [Fact]
+    public async Task FriendshipHttpUsesAuthenticatedActorAndBindsPagedListsAndVersionedActions()
+    {
+        await using var api = await Api.StartAsync();
+        var other = new Account { Email = "friend-http-student@example.test", Role = AccountRole.Student, Profile = new() { FullName = "Other student", Nickname = "friendstudent" } };
+        var outsider = new Account { Email = "friend-http-outsider@example.test", Role = AccountRole.Student, Profile = new() { FullName = "Outsider", Nickname = "friendoutsider" } };
+        await using (var scope = api.App.Services.CreateAsyncScope()) {
+            var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>(); db.Accounts.AddRange(other, outsider); await db.SaveChangesAsync();
+        }
+        using var sender = api.Client(api.Student); using var recipient = api.Client(other); using var stranger = api.Client(outsider); using var partner = api.Client(api.Partner);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await api.Http.GetAsync("/api/friendships")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await partner.GetAsync("/api/friendships")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await partner.PostAsJsonAsync("/api/friendships/requests", new { receiverAccountId = api.Student.Id })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await sender.PostAsJsonAsync("/api/friendships/requests", new { receiverAccountId = api.Partner.Id })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await sender.PostAsJsonAsync("/api/friendships/requests", new { receiverAccountId = api.Student.Id })).StatusCode);
+        var response = await sender.PostAsJsonAsync("/api/friendships/requests", new { receiverAccountId = other.Id, requesterAccountId = api.Admin.Id });
+        response.EnsureSuccessStatusCode();
+        var sent = (await response.Content.ReadFromJsonAsync<FriendPerson>())!;
+        Assert.Equal("outgoing", sent.Relationship); Assert.Equal(other.Profile!.Id, sent.ProfileId);
+        var id = sent.FriendshipId!.Value;
+        Assert.Equal(HttpStatusCode.Forbidden, (await sender.PostAsJsonAsync($"/api/friendships/{id}/accept", new { version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.PostAsJsonAsync($"/api/friendships/{id}/accept", new { version = 1 })).StatusCode);
+        var incoming = await recipient.GetFromJsonAsync<FriendPage>("/api/friendships/requests/received?page=1&pageSize=1");
+        Assert.Equal(api.Student.Id, Assert.Single(incoming!.Items).AccountId);
+        (await recipient.PostAsJsonAsync($"/api/friendships/{id}/accept", new { version = 1 })).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict, (await recipient.PostAsJsonAsync($"/api/friendships/{id}/accept", new { version = 1 })).StatusCode);
+        Assert.Single((await sender.GetFromJsonAsync<FriendPage>("/api/friendships?page=1&pageSize=20"))!.Items);
+        using var query = await sender.GetAsync("/api/friendships/people?q=notice&page=1&pageSize=1");
+        query.EnsureSuccessStatusCode(); Assert.DoesNotContain("@example.test", await query.Content.ReadAsStringAsync());
+        var relation = await sender.GetFromJsonAsync<FriendPerson>($"/api/friendships/relationship/{other.Profile.Id}");
+        Assert.Equal("friends", relation!.Relationship);
+        using var remove = new HttpRequestMessage(HttpMethod.Delete, $"/api/friendships/{id}") { Content = JsonContent.Create(new { version = relation.FriendshipVersion }) };
+        (await sender.SendAsync(remove)).EnsureSuccessStatusCode();
+        Assert.Empty((await recipient.GetFromJsonAsync<FriendPage>("/api/friendships"))!.Items);
+    }
+
+    [Fact]
     public async Task AssessorProfileHttpCreatesReadsUpdatesAndClearsOwnedProfessionalDetails()
     {
         await using var api = await Api.StartAsync();
@@ -432,7 +468,7 @@ public sealed class NotificationsHttpTests
             builder.Logging.ClearProviders(); builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
             builder.Services.AddDbContext<UniNetDbContext>(options => options.UseSqlite($"Data Source={database}")
                 .ReplaceService<IModelCustomizer, UtcSqliteModelCustomizer>());
-            builder.Services.AddScoped<NotificationService>(); builder.Services.AddScoped<NotificationTargets>();
+            builder.Services.AddScoped<NotificationService>(); builder.Services.AddScoped<NotificationTargets>(); builder.Services.AddScoped<FriendshipService>();
             builder.Services.AddScoped<AdminUsersService>(); builder.Services.AddScoped<AdminPermissionService>();
             builder.Services.AddScoped<AdminSkillsService>(); builder.Services.AddScoped<FinanceService>();
             builder.Services.AddScoped<ProfileService>(); builder.Services.AddScoped<AuthService>(); builder.Services.AddScoped<PortfolioService>();
@@ -465,7 +501,7 @@ public sealed class NotificationsHttpTests
             app.UseExceptionHandler(errors => errors.Run(async context =>
             {
                 var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
-                context.Response.StatusCode = error is ProjectVerificationException failure ? failure.Status : error is AuthException auth ? auth.Status : 500;
+                context.Response.StatusCode = error is ProjectVerificationException failure ? failure.Status : error is ProjectException project ? project.Status : error is AuthException auth ? auth.Status : 500;
                 await context.Response.WriteAsJsonAsync(new { code = error is ProjectVerificationException e ? e.Code : "INTERNAL_ERROR" });
             }));
             app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();

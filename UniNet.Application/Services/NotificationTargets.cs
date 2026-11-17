@@ -20,6 +20,10 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
         var staff = account.Role is AccountRole.Admin or AccountRole.Moderator or AccountRole.Assessor or AccountRole.Verifier or AccountRole.Accountant;
         string? url = null;
         switch (n.TargetType) {
+            case "Friendship":
+                if (account.Role == AccountRole.Student && await db.Friendships.AnyAsync(f => f.Id == id && (f.RequesterAccountId == accountId || f.ReceiverAccountId == accountId), ct))
+                    url = "/profile/friends";
+                break;
             case "User":
                 if (id == accountId) url = account.Role == AccountRole.Partner ? "/(company)/profile" : "/settings?account=1";
                 else if (await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.UsersDetail, ct) && await db.Accounts.AnyAsync(a => a.Id == id, ct))
