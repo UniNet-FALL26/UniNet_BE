@@ -173,11 +173,16 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             RecruitmentDeadline = request.RecruitmentDeadline.ToUniversalTime(),
             ExpectedOutput = request.ExpectedOutput?.ToUniversalTime(),
             Visibility = ProjectVisibility.Public,
-            Status = ProjectStatus.Pending,
+            Status = ProjectStatus.Active,
             RecruitmentStatus = RecruitmentStatus.Open,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
+
+        project.Details = new() { ProjectId = project.Id,
+            StartDate = DateOnly.FromDateTime(project.CreatedAt.ToOffset(TimeSpan.FromHours(7)).DateTime),
+            StartDateIsCreationDate = true,
+            EndDate = request.ExpectedOutput.HasValue ? DateOnly.FromDateTime(request.ExpectedOutput.Value.ToOffset(TimeSpan.FromHours(7)).DateTime) : null };
 
         var positions = new List<ProjectPosition>();
         // Add role requirements
@@ -237,8 +242,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
-        await moderation.ModerateNewProjectAsync(project.Id, userId, ct);
-
         return await GetProjectDetailsAsync(project.Id, userId, ct);
     }
 

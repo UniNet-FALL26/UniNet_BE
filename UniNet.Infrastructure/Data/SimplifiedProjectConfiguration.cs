@@ -21,6 +21,7 @@ public static class SimplifiedProjectConfiguration
                 e.Property<string?>(name).HasColumnType("jsonb");
             e.Property(x => x.StartDate).HasColumnType("date");
             e.Property(x => x.EndDate).HasColumnType("date");
+            e.Property(x => x.ActualEndDate).HasColumnType("date");
             e.HasOne(x => x.Project).WithOne(x => x.Details)
                 .HasForeignKey<ProjectDetail>(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });

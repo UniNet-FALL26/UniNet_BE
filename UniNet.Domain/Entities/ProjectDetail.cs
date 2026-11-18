@@ -11,6 +11,8 @@ public sealed class ProjectDetail
     public string? Links { get; set; }
     public DateOnly? StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
+    public DateOnly? ActualEndDate { get; set; }
+    public bool StartDateIsCreationDate { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public Project Project { get; set; } = null!;
