@@ -15,6 +15,53 @@ namespace UniNet.Tests;
 public sealed class ProjectHubTests
 {
     [Fact]
+    public async Task DocumentMetadataIsRecoveredFromRegistryAndSurvivesRename()
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        var uploadedAt = DateTimeOffset.Parse("2026-11-17T09:04:00Z");
+        var upload = new UploadedFile { OwnerAccountId = f.Other.Id, Url = "https://files.test/original.docx",
+            PublicId = "original.docx", FileName = "original.docx", Format = "docx", ResourceType = "raw",
+            SizeBytes = 2516582, CreatedAt = uploadedAt };
+        f.Db.UploadedFiles.Add(upload); await f.Db.SaveChangesAsync();
+        var result = await f.Service.UpdateAsync(project.Id, f.Owner.Id, new() {
+            Details = project.Details with { Documents = [new(upload.Url, "Original.docx", "document")] }
+        }, default);
+        var file = Assert.Single(result.Details.Documents);
+        Assert.Equal(upload.SizeBytes, file.SizeBytes); Assert.Equal(uploadedAt, file.UploadedAt);
+        Assert.Equal(f.Other.Profile!.Id, file.UploadedBy!.Id); Assert.Equal("Other", file.UploadedBy.FullName);
+        result = await f.Service.UpdateAsync(project.Id, f.Owner.Id, new() {
+            Details = result.Details with { Documents = [file with { Name = "Renamed.docx" }] }
+        }, default);
+        f.Db.ChangeTracker.Clear();
+        var reloaded = Assert.Single((await f.Service.GetAsync(project.Id, f.Owner.Id, default)).Details.Documents);
+        Assert.Equal("Renamed.docx", reloaded.Name); Assert.Equal(upload.SizeBytes, reloaded.SizeBytes);
+        Assert.Equal(uploadedAt, reloaded.UploadedAt); Assert.Equal(f.Other.Profile.Id, reloaded.UploadedBy!.Id);
+        var listed = Assert.Single((await f.Service.MineAsync(f.Owner.Id, 1, 10, null, default)).Items);
+        Assert.Equal(upload.SizeBytes, Assert.Single(listed.Details.Documents).SizeBytes);
+    }
+
+    [Fact]
+    public async Task ClientCannotForgeDocumentUploadMetadata()
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        var upload = new UploadedFile { OwnerAccountId = f.Other.Id, Url = "https://files.test/trusted.pdf",
+            PublicId = "trusted.pdf", FileName = "trusted.pdf", Format = "pdf", ResourceType = "raw", SizeBytes = 1024 };
+        f.Db.UploadedFiles.Add(upload); await f.Db.SaveChangesAsync();
+        var fake = new HubFile(upload.Url, "trusted.pdf", "document", 1, DateTimeOffset.MinValue,
+            new(f.Owner.Profile!.Id, "Fake uploader", null));
+        var result = await f.Service.UpdateAsync(project.Id, f.Owner.Id, new() {
+            Details = project.Details with { Documents = [fake, fake with { Url = "https://files.test/unknown.pdf" }] }
+        }, default);
+        Assert.Equal(1024, result.Details.Documents[0].SizeBytes);
+        Assert.Equal(upload.CreatedAt, result.Details.Documents[0].UploadedAt);
+        Assert.Equal(f.Other.Profile!.Id, result.Details.Documents[0].UploadedBy!.Id);
+        Assert.Null(result.Details.Documents[1].SizeBytes); Assert.Null(result.Details.Documents[1].UploadedAt);
+        Assert.Null(result.Details.Documents[1].UploadedBy);
+    }
+
+    [Fact]
     public async Task NewProjectTimelineUsesCreationDayAndSeparateEndDates()
     {
         await using var f = await Fixture.Create();

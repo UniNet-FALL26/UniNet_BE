@@ -58,7 +58,8 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
         var ids = projects.Select(p => p.Id).ToArray();
         var reviews = await db.ProjectPersonalReviews.AsNoTracking().Where(r => ids.Contains(r.ProjectId) && r.UserId == actor)
             .ToDictionaryAsync(r => r.ProjectId, ct);
-        return new(projects.Select(p => Map(p, actor, reviews.GetValueOrDefault(p.Id))).ToArray(), count, page, pageSize);
+        var items = projects.Select(p => Map(p, actor, reviews.GetValueOrDefault(p.Id))).ToArray();
+        return new(await WithUploadMetadata(items, ct), count, page, pageSize);
     }
 
     public async Task<HubProject> GetAsync(Guid id, Guid accountId, CancellationToken ct)
@@ -80,7 +81,26 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
     private async Task<HubProject> Response(Project p, Guid actor, CancellationToken ct)
     {
         var review = await db.ProjectPersonalReviews.AsNoTracking().SingleOrDefaultAsync(r => r.ProjectId == p.Id && r.UserId == actor, ct);
-        return Map(p, actor, review);
+        return (await WithUploadMetadata([Map(p, actor, review)], ct))[0];
+    }
+
+    private async Task<HubProject[]> WithUploadMetadata(HubProject[] projects, CancellationToken ct)
+    {
+        var urls = projects.SelectMany(p => p.Details.Documents.Concat(p.Details.Media))
+            .Select(file => file.Url).Distinct(StringComparer.Ordinal).ToArray();
+        if (urls.Length == 0) return projects;
+        var uploads = await db.UploadedFiles.AsNoTracking().Where(file => urls.Contains(file.Url))
+            .Select(file => new { file.Id, file.Url, file.SizeBytes, file.CreatedAt,
+                Uploader = file.OwnerAccount.Profile == null ? null : new HubPerson(file.OwnerAccount.Profile.Id,
+                    file.OwnerAccount.Profile.FullName, file.OwnerAccount.Profile.AvatarUrl) }).ToListAsync(ct);
+        var byUrl = uploads.GroupBy(file => file.Url, StringComparer.Ordinal).ToDictionary(group => group.Key,
+            group => group.OrderBy(file => file.CreatedAt).ThenBy(file => file.Id).First(), StringComparer.Ordinal);
+        HubFile Enrich(HubFile file) => byUrl.TryGetValue(file.Url, out var upload)
+            ? file with { SizeBytes = upload.SizeBytes, UploadedAt = upload.CreatedAt, UploadedBy = upload.Uploader }
+            : file with { SizeBytes = null, UploadedAt = null, UploadedBy = null };
+        return projects.Select(project => project with { Details = project.Details with {
+            Documents = project.Details.Documents.Select(Enrich).ToArray(),
+            Media = project.Details.Media.Select(Enrich).ToArray() } }).ToArray();
     }
 
     private static HubProject Map(Project p, Guid actor, ProjectPersonalReview? review)

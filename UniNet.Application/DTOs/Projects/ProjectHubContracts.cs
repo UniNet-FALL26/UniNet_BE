@@ -1,6 +1,7 @@
 namespace UniNet.Application.DTOs.Projects;
 
-public sealed record HubFile(string Url, string Name, string Type);
+public sealed record HubFile(string Url, string Name, string Type,
+    long? SizeBytes = null, DateTimeOffset? UploadedAt = null, HubPerson? UploadedBy = null);
 public sealed record HubLink(string Label, string Url);
 public sealed record HubPerson(Guid Id, string FullName, string? AvatarUrl);
 public sealed record HubMember(Guid Id, Guid UserId, string FullName, string? AvatarUrl,
