@@ -14,6 +14,34 @@ namespace UniNet.Tests;
 public sealed class FriendshipTests
 {
     [Theory]
+    [InlineData(FriendshipStatus.Accepted, false, 1)]
+    [InlineData(FriendshipStatus.Accepted, true, 1)]
+    [InlineData(FriendshipStatus.Pending, false, 0)]
+    [InlineData(FriendshipStatus.Rejected, false, 0)]
+    [InlineData(FriendshipStatus.Cancelled, false, 0)]
+    [InlineData(FriendshipStatus.Removed, false, 0)]
+    public async Task MutualFriendsCountUsesAcceptedEdgesInEitherDirection(FriendshipStatus status, bool reverse, int expected)
+    {
+        await using var f = await Fixture.Create();
+        f.Db.Friendships.AddRange(
+            new() { RequesterAccountId = reverse ? f.C.Id : f.A.Id, ReceiverAccountId = reverse ? f.A.Id : f.C.Id, Status = FriendshipStatus.Accepted },
+            new() { RequesterAccountId = reverse ? f.B.Id : f.C.Id, ReceiverAccountId = reverse ? f.C.Id : f.B.Id, Status = status });
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(expected, (await f.Service.RelationshipAsync(f.A.Id, f.B.Profile!.Id, default)).MutualFriendsCount);
+        Assert.Equal(expected, (await f.Service.ListAsync(f.A.Id, "people", 1, 20, "Bob", null, default)).Items.Single().MutualFriendsCount);
+        Assert.Equal(0, (await f.Service.RelationshipAsync(f.A.Id, f.A.Profile!.Id, default)).MutualFriendsCount);
+        var sent = await f.Service.SendAsync(f.A.Id, f.B.Id, default);
+        Assert.Equal(expected, sent.MutualFriendsCount);
+        var accepted = await f.Service.DecideAsync(f.B.Id, sent.FriendshipId!.Value, "accept", sent.FriendshipVersion!.Value, default);
+        Assert.Equal(expected, accepted.MutualFriendsCount);
+        Assert.Equal(expected, (await f.Service.ListAsync(f.A.Id, "friends", 1, 20, "Bob", null, default)).Items.Single().MutualFriendsCount);
+        f.C.Status = AccountStatus.Suspended; await f.Db.SaveChangesAsync();
+        Assert.Equal(0, (await f.Service.RelationshipAsync(f.A.Id, f.B.Profile.Id, default)).MutualFriendsCount);
+        f.C.Status = AccountStatus.Active; f.C.Role = AccountRole.Partner; await f.Db.SaveChangesAsync();
+        Assert.Equal(0, (await f.Service.RelationshipAsync(f.A.Id, f.B.Profile.Id, default)).MutualFriendsCount);
+    }
+
+    [Theory]
     [InlineData(AccountRole.Partner)]
     [InlineData(AccountRole.Assessor)]
     [InlineData(AccountRole.Verifier)]

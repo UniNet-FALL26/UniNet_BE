@@ -32,15 +32,21 @@ friendshipVersion. Version mismatch returns 409; clients reload instead of
 silently applying an old action to a resent request.
 
 DTO: accountId, profileId, fullName, nickname, avatarUrl, role, relationship
-(none/self/friends/incoming/outgoing), friendshipId. Paged {items,page,pageSize,total}.
+(none/self/friends/incoming/outgoing), friendshipId, friendshipVersion,
+mutualFriendsCount. Paged {items,page,pageSize,total}.
+Mutual count is the number of active Student accounts with Accepted friendships
+to both viewer and target, in either direction. Excludes both endpoints; self is
+zero. Computed in the SQL projection for list, relationship and mutation responses.
 Only recipient accepts/rejects; only requester cancels; participants unfriend.
 No email/credentials returned. Page 1+, size 1..50, search <=100 chars.
 projectId filtering requires project ownership; active student candidates only,
 excluding creator, active members and any pending project invitation.
 
 ## Frontend
-Profile header gains Bạn bè beside Dự án. Friends panel lists accepted/incoming/
-outgoing/search with avatar/name/nickname and relationship-specific actions.
+Profile header gains Bạn bè beside Dự án. Friends panel has two tabs: accepted
+friends and received requests. Rows show avatar/name/mutual count. Accepted rows
+use an ellipsis popup for removal; received rows use Xác nhận and Xóa (reject).
+Outgoing and people endpoints remain available to other consumers.
 Public profile action fetches relationship by profile ID, reconciles after errors,
 and confirms before unfriend. Refresh on focus and notification revisions.
 Project invitation picker searches eligible friends, selects one and requires

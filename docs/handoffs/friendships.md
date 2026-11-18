@@ -1,5 +1,12 @@
 # Student friendships
 
+- 2026-11-18: FriendPerson adds MutualFriendsCount (JSON mutualFriendsCount) for
+  the two-tab friends redesign. SQL projection counts active Student profiles
+  accepted by both viewer and target, excluding endpoints; self returns zero.
+  Covers lists, relationship reads and mutation responses without schema changes.
+  Twenty SQLite friendship cases passed, including both edge directions, all
+  nonaccepted states, inactive/nonstudent mutuals and mutation/count consistency.
+
 - Contract/design: [../friendships.md](../friendships.md).
 - New Friendship entity/configuration/service/controller. Account IDs identify
   both participants; profile IDs identify public-profile lookups and project

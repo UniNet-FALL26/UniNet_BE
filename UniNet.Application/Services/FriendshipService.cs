@@ -25,7 +25,13 @@ public sealed class FriendshipService(UniNetDbContext db)
         db.Friendships.Any(f => f.Status == FriendshipStatus.Pending && f.RequesterAccountId == actor && f.ReceiverAccountId == p.AccountId) ? "outgoing" :
         db.Friendships.Any(f => f.Status == FriendshipStatus.Pending && f.ReceiverAccountId == actor && f.RequesterAccountId == p.AccountId) ? "incoming" : "none",
         db.Friendships.Where(f => f.RequesterAccountId == actor && f.ReceiverAccountId == p.AccountId || f.ReceiverAccountId == actor && f.RequesterAccountId == p.AccountId).Select(f => (Guid?)f.Id).FirstOrDefault(),
-        db.Friendships.Where(f => f.RequesterAccountId == actor && f.ReceiverAccountId == p.AccountId || f.ReceiverAccountId == actor && f.RequesterAccountId == p.AccountId).Select(f => (long?)f.Version).FirstOrDefault()));
+        db.Friendships.Where(f => f.RequesterAccountId == actor && f.ReceiverAccountId == p.AccountId || f.ReceiverAccountId == actor && f.RequesterAccountId == p.AccountId).Select(f => (long?)f.Version).FirstOrDefault(),
+        p.AccountId == actor ? 0 : db.UserProfiles.Count(common => common.AccountId != actor && common.AccountId != p.AccountId &&
+            common.Account.Status == AccountStatus.Active && common.Account.Role == AccountRole.Student &&
+            db.Friendships.Any(f => f.Status == FriendshipStatus.Accepted &&
+                (f.RequesterAccountId == actor && f.ReceiverAccountId == common.AccountId || f.ReceiverAccountId == actor && f.RequesterAccountId == common.AccountId)) &&
+            db.Friendships.Any(f => f.Status == FriendshipStatus.Accepted &&
+                (f.RequesterAccountId == p.AccountId && f.ReceiverAccountId == common.AccountId || f.ReceiverAccountId == p.AccountId && f.RequesterAccountId == common.AccountId)))));
 
     public async Task<FriendPerson> RelationshipAsync(Guid accountId, Guid profileId, CancellationToken ct)
     {
