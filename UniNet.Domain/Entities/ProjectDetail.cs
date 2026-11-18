@@ -10,7 +10,6 @@ public sealed class ProjectDetail
     public string? Media { get; set; }
     public string? Links { get; set; }
     public DateOnly? StartDate { get; set; }
-    public DateOnly? EndDate { get; set; }
     public DateOnly? ActualEndDate { get; set; }
     public bool StartDateIsCreationDate { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }

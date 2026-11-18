@@ -110,8 +110,8 @@ public sealed class ProjectRefactorMigrationPostgresTests
             Assert.Equal(project.Id, recruitment.ProjectId);
             Assert.Contains(positionId.ToString(), recruitment.Positions);
             Assert.Equal(ProjectRecruitmentStatus.Open, recruitment.Status);
-            Assert.Null((await db.ProjectDetails.SingleAsync(x => x.ProjectId == external.Id)).StartDate);
-            Assert.Equal(new DateOnly(2026, 11, 15), (await db.ProjectDetails.SingleAsync(x => x.ProjectId == external.Id)).EndDate);
+            Assert.Null(await db.ProjectDetails.Where(x => x.ProjectId == external.Id).Select(x => x.StartDate).SingleAsync());
+            Assert.Equal(new DateOnly(2026, 11, 15), await db.Database.SqlQuery<DateOnly?>($"SELECT \"EndDate\" AS \"Value\" FROM \"ProjectDetails\" WHERE \"ProjectId\" = {external.Id}").SingleAsync());
             Assert.Equal(originalJson, (await db.Projects.SingleAsync(x => x.Id == external.Id)).ExternalDetailsJson);
             Assert.Equal(0, await db.ProjectPersonalReviews.CountAsync());
             Assert.Equal(0, await db.ProjectMembers.CountAsync());

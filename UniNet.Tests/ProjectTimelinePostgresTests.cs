@@ -36,13 +36,13 @@ public sealed class ProjectTimelinePostgresTests
             await migrator.MigrateAsync(); db.ChangeTracker.Clear();
             var service = new ProjectHubService(db);
             var existing = await service.GetAsync(project.Id, owner.Id, default);
-            Assert.Null(existing.Details.StartDate); Assert.Null(existing.Details.EndDate);
+            Assert.Null(existing.Details.StartDate);
             Assert.Null(existing.Details.ActualEndDate); Assert.False(existing.Details.StartDateIsCreationDate);
-            var created = await service.CreateAsync(owner.Id, new() { Title = "New", Description = "Timeline", ExpectedEndDate = new(2099, 12, 31) }, default);
+            var created = await service.CreateAsync(owner.Id, new() { Title = "New", Description = "Timeline" }, default);
             Assert.Equal(DateOnly.FromDateTime(created.CreatedAt.ToOffset(TimeSpan.FromHours(7)).DateTime), created.Details.StartDate);
             Assert.True(created.Details.StartDateIsCreationDate);
             var updated = await service.UpdateAsync(project.Id, owner.Id,
-                new() { Timeline = new(new(2020, 1, 1), new(2020, 3, 1), new(2020, 4, 1)) }, default);
+                new() { Timeline = new(new(2020, 1, 1), new(2020, 4, 1)) }, default);
             Assert.Equal(new DateOnly(2020, 4, 1), updated.Details.ActualEndDate);
         }
         finally

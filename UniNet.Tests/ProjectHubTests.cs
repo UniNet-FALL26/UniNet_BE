@@ -62,28 +62,51 @@ public sealed class ProjectHubTests
     }
 
     [Fact]
-    public async Task NewProjectTimelineUsesCreationDayAndSeparateEndDates()
+    public async Task NewProjectTimelineUsesCreationDayAndEditableEndDate()
     {
         await using var f = await Fixture.Create();
-        var expected = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
-        var p = await f.Service.CreateAsync(f.Owner.Id, new() { Title = "Timeline", Description = "Dates", ExpectedEndDate = expected }, default);
+        var p = await f.Service.CreateAsync(f.Owner.Id, new() { Title = "Timeline", Description = "Dates" }, default);
         var start = DateOnly.FromDateTime(p.CreatedAt.ToOffset(TimeSpan.FromHours(7)).DateTime);
         Assert.Equal(start, p.Details.StartDate); Assert.True(p.Details.StartDateIsCreationDate);
-        Assert.Equal(expected, p.Details.EndDate); Assert.Null(p.Details.ActualEndDate);
+        Assert.Null(p.Details.ActualEndDate);
         await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Other.Id,
-            new() { Timeline = new(start, expected, null) }, default));
+            new() { Timeline = new(start, null) }, default));
+        var revisedStart = start.AddYears(-2);
+        var revised = await f.Service.UpdateAsync(p.Id, f.Owner.Id,
+            new() { Timeline = new(revisedStart, null) }, default);
+        Assert.Equal(revisedStart, revised.Details.StartDate);
         await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Owner.Id,
-            new() { Timeline = new(start.AddDays(-1), expected, null) }, default));
+            new() { Timeline = new(start, start.AddDays(-1)) }, default));
         await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Owner.Id,
-            new() { Timeline = new(start, start.AddDays(-1), null) }, default));
-        await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Owner.Id,
-            new() { Timeline = new(start, expected, start.AddDays(2)) }, default));
-        var saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Timeline = new(start, expected.AddDays(1), start) }, default);
+            new() { Timeline = new(start, start.AddDays(2)) }, default));
+        var saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Timeline = new(revisedStart, start) }, default);
         Assert.Equal(start, saved.Details.ActualEndDate); Assert.Equal(1, saved.Status);
         Assert.Null((await f.Db.Projects.SingleAsync()).CompletedAt);
         f.Db.ChangeTracker.Clear();
         var reloaded = await f.Service.GetAsync(p.Id, f.Owner.Id, default);
-        Assert.Equal(expected.AddDays(1), reloaded.Details.EndDate); Assert.Equal(start, reloaded.Details.ActualEndDate);
+        Assert.Equal(start, reloaded.Details.ActualEndDate);
+        Assert.Equal(revisedStart, reloaded.Details.StartDate);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartDateCanBeCorrectedWithoutChangingCompletionDates(bool throughDetails)
+    {
+        await using var f = await Fixture.Create();
+        var created = await f.Internal();
+        var completed = await f.Service.CompleteAsync(created.Id, f.Owner.Id, default);
+        var earlierStart = completed.Details.StartDate!.Value.AddYears(-3);
+        var update = throughDetails
+            ? new UpdateHubProjectRequest { Details = completed.Details with { StartDate = earlierStart } }
+            : new UpdateHubProjectRequest { Timeline = new(earlierStart, completed.Details.ActualEndDate) };
+        var saved = await f.Service.UpdateAsync(created.Id, f.Owner.Id, update, default);
+        Assert.Equal(earlierStart, saved.Details.StartDate);
+        Assert.Equal(completed.Details.ActualEndDate, saved.Details.ActualEndDate);
+        Assert.Equal(completed.Details.CompletedAt, saved.Details.CompletedAt);
+        await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(created.Id, f.Owner.Id,
+            throughDetails ? new() { Details = saved.Details with { StartDate = completed.Details.ActualEndDate!.Value.AddDays(1) } }
+                : new() { Timeline = new(completed.Details.ActualEndDate!.Value.AddDays(1), completed.Details.ActualEndDate) }, default));
     }
 
     [Fact]
@@ -95,24 +118,40 @@ public sealed class ProjectHubTests
         if (stored.Details != null) f.Db.ProjectDetails.Remove(stored.Details);
         stored.Details = null; await f.Db.SaveChangesAsync(); f.Db.ChangeTracker.Clear();
         var legacy = await f.Service.GetAsync(p.Id, f.Owner.Id, default);
-        Assert.Null(legacy.Details.StartDate); Assert.Null(legacy.Details.EndDate);
+        Assert.Null(legacy.Details.StartDate);
         Assert.Null(legacy.Details.ActualEndDate); Assert.False(legacy.Details.StartDateIsCreationDate);
-        var start = new DateOnly(2020, 1, 1); var expected = start.AddMonths(2); var actual = start.AddMonths(3);
-        var saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Timeline = new(start, expected, actual) }, default);
-        Assert.Equal(start, saved.Details.StartDate); Assert.Equal(expected, saved.Details.EndDate); Assert.Equal(actual, saved.Details.ActualEndDate);
+        var start = new DateOnly(2020, 1, 1); var actual = start.AddMonths(3);
+        var saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Timeline = new(start, actual) }, default);
+        Assert.Equal(start, saved.Details.StartDate); Assert.Equal(actual, saved.Details.ActualEndDate);
         saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Title = "Changed" }, default);
         Assert.Equal(actual, saved.Details.ActualEndDate);
-        saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Timeline = new(null, null, null) }, default);
-        Assert.Null(saved.Details.StartDate); Assert.Null(saved.Details.EndDate); Assert.Null(saved.Details.ActualEndDate);
+        saved = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Timeline = new(null, null) }, default);
+        Assert.Null(saved.Details.StartDate); Assert.Null(saved.Details.ActualEndDate);
     }
 
     [Fact]
-    public async Task NewProjectCannotHaveAnExpectedEndBeforeCreationDay()
+    public async Task CompletionCannotPrecedeCorrectedStartDate()
     {
         await using var f = await Fixture.Create();
-        await Assert.ThrowsAsync<ProjectException>(() => f.Service.CreateAsync(f.Owner.Id,
-            new() { Title = "Bad dates", Description = "Dates", ExpectedEndDate = new(2000, 1, 1) }, default));
-        Assert.Empty(await f.Db.Projects.ToListAsync());
+        var created = await f.Internal();
+        await f.Service.UpdateAsync(created.Id, f.Owner.Id, new() {
+            Timeline = new(created.Details.StartDate!.Value.AddDays(10), null)
+        }, default);
+        await Assert.ThrowsAsync<ProjectException>(() => f.Service.CompleteAsync(created.Id, f.Owner.Id, default));
+        f.Db.ChangeTracker.Clear();
+        var unchanged = await f.Service.GetAsync(created.Id, f.Owner.Id, default);
+        Assert.Equal(1, unchanged.Status); Assert.Null(unchanged.Details.CompletedAt);
+    }
+
+    [Fact]
+    public async Task ProjectContractsDoNotExposePlannedEndDates()
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        Assert.Null(typeof(CreateHubProjectRequest).GetProperty("ExpectedEndDate"));
+        Assert.Null(typeof(HubTimeline).GetProperty("ExpectedEndDate"));
+        Assert.Null(typeof(HubDetails).GetProperty("EndDate"));
+        Assert.Null(project.Details.ActualEndDate);
     }
 
     [Theory]
@@ -260,7 +299,7 @@ public sealed class ProjectHubTests
         var p = await f.Internal();
         var updated = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Visibility = 1,
             Details = new() { Description = "Introduction", Features = ["Save game"],
-                StartDate = p.Details.StartDate, EndDate = p.Details.StartDate!.Value.AddDays(30),
+                StartDate = p.Details.StartDate,
                 Results = new() { Problem = "Learning is difficult", Objectives = ["Play to learn"] },
                 Links = [new("GitHub", "https://github.com/example/game")] } }, default);
         Assert.Equal("Introduction", updated.Details.Description);
@@ -409,7 +448,7 @@ public sealed class ProjectHubTests
         Assert.Empty(await f.Db.Projects.ToListAsync());
         var p = await f.Internal();
         await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Owner.Id,
-            new() { Details = new() { StartDate = new(2026, 12, 1), EndDate = new(2026, 11, 1) } }, default));
+            new() { Timeline = new(new(2026, 12, 1), new(2026, 11, 1)) }, default));
     }
 
     private sealed class Fixture(SqliteConnection connection, UniNetDbContext db, Account owner, Account other, Account third) : IAsyncDisposable

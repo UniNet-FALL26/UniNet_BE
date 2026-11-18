@@ -274,7 +274,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.SubmitterContribution).HasMaxLength(4000);
             e.Property(x => x.ExternalDetailsJson).HasColumnType("jsonb");
 
-            e.Property(x => x.ExpectedOutput);
 
             e.Property(x => x.Visibility)
                 .HasConversion<short>()

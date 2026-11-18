@@ -40,7 +40,6 @@ public static class ProjectMapping
             project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
-            project.ExpectedOutput,
             project.Visibility,
             project.Status,
             project.RecruitmentStatus,

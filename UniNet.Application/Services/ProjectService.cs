@@ -123,8 +123,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
         Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow,
             "INVALID_DEADLINE", "Project recruitment deadline must be in the future.");
-        Require(request.ExpectedOutput > DateTimeOffset.UtcNow,
-            "INVALID_EXPECTED_OUTPUT", "Project expected output must be in the future.");
 
         Require(request.MinimumQuantity >= 2 && request.MinimumQuantity <= request.MemberTarget,
             "INVALID_MINIMUM_QUANTITY", "Minimum quantity must be between 2 and member target, including the creator.");
@@ -171,7 +169,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             MemberTarget = request.MemberTarget,
             MinimumQuantity = request.MinimumQuantity,
             RecruitmentDeadline = request.RecruitmentDeadline.ToUniversalTime(),
-            ExpectedOutput = request.ExpectedOutput?.ToUniversalTime(),
             Visibility = ProjectVisibility.Public,
             Status = ProjectStatus.Active,
             RecruitmentStatus = RecruitmentStatus.Open,
@@ -181,8 +178,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
         project.Details = new() { ProjectId = project.Id,
             StartDate = DateOnly.FromDateTime(project.CreatedAt.ToOffset(TimeSpan.FromHours(7)).DateTime),
-            StartDateIsCreationDate = true,
-            EndDate = request.ExpectedOutput.HasValue ? DateOnly.FromDateTime(request.ExpectedOutput.Value.ToOffset(TimeSpan.FromHours(7)).DateTime) : null };
+            StartDateIsCreationDate = true };
 
         var positions = new List<ProjectPosition>();
         // Add role requirements
@@ -323,11 +319,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                 project.RecruitmentDeadline = request.RecruitmentDeadline.Value;
         }
 
-        if (request.ExpectedOutput.HasValue)
-        {
-            Require(request.ExpectedOutput > DateTimeOffset.UtcNow, "INVALID_EXPECTED_OUTPUT", "Expected completion time must be in the future.");
-            project.ExpectedOutput = request.ExpectedOutput;
-        }
 
         project.Status = ProjectStatus.Pending;
         project.UpdatedAt = DateTimeOffset.UtcNow;
@@ -571,7 +562,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
-            project.ExpectedOutput,
             project.Visibility,
             project.Status,
             project.RecruitmentStatus,

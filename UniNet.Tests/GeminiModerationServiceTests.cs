@@ -69,7 +69,7 @@ public sealed class GeminiModerationServiceTests
             ["Gemini:Model"] = model
         }).Build());
 
-    private static ProjectModerationInput Input() => new("Test project", null, null, [], 2, null, [], []);
+    private static ProjectModerationInput Input() => new("Test project", null, null, [], 2, [], []);
 
     private sealed class StubHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

@@ -109,7 +109,7 @@ public sealed partial class ProjectVerificationTests
         await using var f = await Fixture.CreateAsync();
         var service = new ProjectService(f.Db, null!, new ConfigurationBuilder().Build());
         var request = new CreateProjectRequest("New project", "IT", "Description", 3, 2,
-            DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow.AddDays(2), Domain.Enums.ProjectVisibility.Public);
+            DateTimeOffset.UtcNow.AddDays(1), Domain.Enums.ProjectVisibility.Public);
         await AssertProjectError("SPECIALIZATION_REQUIRED", () => service.CreateProjectAsync(f.Owner.Id, request, default));
         await AssertProjectError("INVALID_SPECIALIZATION", () => service.CreateProjectAsync(f.Owner.Id,
             request with { SpecializationId = Guid.NewGuid() }, default));

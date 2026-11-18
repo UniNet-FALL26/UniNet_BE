@@ -42,7 +42,6 @@ namespace UniNet.Application.DTOs.Projects
         string? ProjectField,
         List<string> Technologies,
         int MemberTarget,
-        string? ExpectedOutput,
         List<RoleRequirementRequest> RoleRequirements,
         List<string> Links
     );

@@ -109,7 +109,7 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
         var details = new HubDetails { Description = d?.Description, Features = Read<string[]>(d?.Features) ?? [],
             Results = Read<HubResults>(d?.Results) ?? new(), Documents = Read<HubFile[]>(d?.Documents) ?? [],
             Media = Read<HubFile[]>(d?.Media) ?? [], Links = Read<HubLink[]>(d?.Links) ?? [],
-            StartDate = d?.StartDate, EndDate = d?.EndDate, ActualEndDate = d?.ActualEndDate,
+            StartDate = d?.StartDate, ActualEndDate = d?.ActualEndDate,
             StartDateIsCreationDate = d?.StartDateIsCreationDate ?? false, CompletedAt = d?.CompletedAt ?? p.CompletedAt };
         var r = p.Recruitment;
         return new(p.Id, p.Title, p.LogoUrl, p.Description, Technologies(p.Technologies), (short)p.Status,

@@ -1477,9 +1477,6 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<DateTimeOffset?>("ExpectedOutput")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("ExternalDetailsJson")
                         .HasColumnType("jsonb");
 
@@ -1591,9 +1588,6 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.Property<string>("Documents")
                         .HasColumnType("jsonb");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date");
 
                     b.Property<string>("Features")
                         .HasColumnType("jsonb");

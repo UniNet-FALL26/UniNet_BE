@@ -17,7 +17,6 @@ public record CreateProjectRequest(
     int MemberTarget,
     int MinimumQuantity,
     DateTimeOffset RecruitmentDeadline,
-    DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
     List<RoleRequirementRequest>? RoleRequirements = null,
     List<Guid>? SkillIds = null,
@@ -32,7 +31,6 @@ public record UpdateProjectRequest(
     string? ProjectField = null,
     string? Description = null,
     DateTimeOffset? RecruitmentDeadline = null,
-    DateTimeOffset? ExpectedOutput = null,
     Guid? SpecializationId = null
 
 );
@@ -47,7 +45,6 @@ public record ProjectDetailResponse(
     int? MinimumQuantity,
     int CurrentMemberCount,
     DateTimeOffset? RecruitmentDeadline,
-    DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
     ProjectStatus Status,
     RecruitmentStatus RecruitmentStatus,

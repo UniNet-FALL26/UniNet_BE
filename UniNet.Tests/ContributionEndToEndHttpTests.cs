@@ -153,7 +153,6 @@ public sealed class ContributionEndToEndHttpTests
                     Description = "Isolated contribution lifecycle test",
                     MemberTarget = 4,
                     RecruitmentDeadline = now.AddDays(30),
-                    ExpectedOutput = now.AddDays(60),
                     Visibility = ProjectVisibility.Private,
                     Status = ProjectStatus.Active,
                     RecruitmentStatus = RecruitmentStatus.Closed,

@@ -36,7 +36,6 @@ namespace UniNet.Domain.Entities
         // Legacy projects may have a single creator; creation requests require at least two.
         public int? MinimumQuantity { get; set; } = 1;
         public DateTimeOffset? RecruitmentDeadline { get; set; } =DateTimeOffset.UtcNow;
-        public DateTimeOffset? ExpectedOutput { get; set; } = DateTimeOffset.UtcNow;
         public ProjectVisibility Visibility { get; set; }
         public ProjectStatus Status { get; set; } 
         public RecruitmentStatus RecruitmentStatus { get; set; }

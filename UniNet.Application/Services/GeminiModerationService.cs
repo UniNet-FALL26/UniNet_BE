@@ -259,8 +259,6 @@ public sealed class GeminiModerationService : IAIModerationService
         if (!string.IsNullOrWhiteSpace(input.ProjectField))
             sb.AppendLine($"Field: {EscapeInput(input.ProjectField)}");
 
-        if (!string.IsNullOrWhiteSpace(input.ExpectedOutput))
-            sb.AppendLine($"Expected Output: {EscapeInput(input.ExpectedOutput)}");
 
         sb.AppendLine($"Member Target: {input.MemberTarget}");
 

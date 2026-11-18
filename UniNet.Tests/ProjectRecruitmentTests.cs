@@ -70,7 +70,7 @@ public sealed class ProjectRecruitmentTests
         await using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>().UseSqlite("Data Source=:memory:").Options);
         var service = new ProjectService(db, null!, new ConfigurationBuilder().Build());
         var request = new CreateProjectRequest("Project", "IT", "Description", 5, minimum,
-            DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow.AddDays(2), ProjectVisibility.Public);
+            DateTimeOffset.UtcNow.AddDays(1), ProjectVisibility.Public);
         var error = await Assert.ThrowsAsync<ProjectException>(() => service.CreateProjectAsync(Guid.NewGuid(), request, default));
         Assert.Equal("INVALID_MINIMUM_QUANTITY", error.Code);
     }

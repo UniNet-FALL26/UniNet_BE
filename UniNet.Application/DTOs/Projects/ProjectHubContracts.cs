@@ -26,7 +26,6 @@ public sealed record HubDetails
     public HubFile[] Media { get; init; } = [];
     public HubLink[] Links { get; init; } = [];
     public DateOnly? StartDate { get; init; }
-    public DateOnly? EndDate { get; init; }
     public DateOnly? ActualEndDate { get; init; }
     public bool StartDateIsCreationDate { get; init; }
     public DateTimeOffset? CompletedAt { get; init; }
@@ -64,7 +63,6 @@ public sealed record CreateHubProjectRequest
     public short Status { get; init; } = 1;
     public short Visibility { get; init; }
     public string? SubmitterRole { get; init; }
-    public DateOnly? ExpectedEndDate { get; init; }
 }
 public sealed record UpdateHubProjectRequest
 {
@@ -78,7 +76,7 @@ public sealed record UpdateHubProjectRequest
     public HubDetails? Details { get; init; }
     public HubTimeline? Timeline { get; init; }
 }
-public sealed record HubTimeline(DateOnly? StartDate, DateOnly? ExpectedEndDate, DateOnly? ActualEndDate);
+public sealed record HubTimeline(DateOnly? StartDate, DateOnly? ActualEndDate);
 public sealed record SaveHubRecruitmentRequest
 {
     public string? Description { get; init; }

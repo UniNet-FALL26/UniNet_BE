@@ -15,21 +15,18 @@ public sealed partial class ProjectHubService
             "INVALID_PROJECT_INPUT", "Trạng thái hoặc quyền riêng tư không hợp lệ.");
         var now = DateTimeOffset.UtcNow;
         var today = ProjectDay(now);
-        Require(request.ExpectedEndDate == null || request.ExpectedEndDate >= today,
-            "INVALID_PROJECT_DATES", "Ngày dự kiến kết thúc phải bằng hoặc sau ngày bắt đầu.");
         var role = Text(request.SubmitterRole, 150);
         var p = new Project { CreatorId = actor.Id, Creator = actor,
             Title = Text(request.Title, 200, true)!, Description = Text(request.Description, 500, true)!,
             LogoUrl = Url(request.LogoUrl), Technologies = JsonSerializer.Serialize(Strings(request.Technologies), Json),
             Status = ProjectStatus.Active, Visibility = ProjectVisibility.Public,
-            ProjectField = "Khác", MemberTarget = null, MinimumQuantity = null, RecruitmentDeadline = null, ExpectedOutput = null,
+            ProjectField = "Khác", MemberTarget = null, MinimumQuantity = null, RecruitmentDeadline = null,
             RecruitmentStatus = RecruitmentStatus.Closed, CreatedAt = now, UpdatedAt = now, SubmitterRole = role };
         p.SubmitterIsLeader = true;
         p.Members.Add(new() { Id = Guid.NewGuid(), UserId = actor.Id, User = actor,
             Role = role ?? "Leader", Status = ProjectMemberStatus.Active,
             JoinedAt = now, CreatedAt = now, UpdatedAt = now });
-        p.Details = new() { ProjectId = p.Id, StartDate = today, StartDateIsCreationDate = true,
-            EndDate = request.ExpectedEndDate, UpdatedAt = now };
+        p.Details = new() { ProjectId = p.Id, StartDate = today, StartDateIsCreationDate = true, UpdatedAt = now };
         db.Projects.Add(p); await db.SaveChangesAsync(ct);
         return await Response(p, actor.Id, ct);
     }
@@ -64,11 +61,7 @@ public sealed partial class ProjectHubService
 
     private static void SaveDetails(Project p, HubDetails input, DateTimeOffset now)
     {
-        var start = p.Details?.StartDateIsCreationDate == true ? p.Details.StartDate : input.StartDate;
-        Require(p.Details?.StartDateIsCreationDate != true || input.StartDate == null || input.StartDate == start,
-            "PROJECT_START_DATE_LOCKED", "Ngày bắt đầu dự án mới là ngày tạo và không thể thay đổi.");
-        Require(!start.HasValue || !input.EndDate.HasValue || start <= input.EndDate,
-            "INVALID_PROJECT_DATES", "Ngày kết thúc phải bằng hoặc sau ngày bắt đầu.");
+        var start = input.StartDate ?? (p.Details?.StartDateIsCreationDate == true ? p.Details.StartDate : null);
         Require(start == null || p.Details?.ActualEndDate == null || start <= p.Details.ActualEndDate,
             "INVALID_PROJECT_DATES", "Ngày bắt đầu không được sau ngày kết thúc thực tế.");
         Require(input.Results != null && input.Documents != null && input.Media != null && input.Links != null,
@@ -89,7 +82,7 @@ public sealed partial class ProjectHubService
             Require(link != null, "INVALID_PROJECT_INPUT", "Liên kết không hợp lệ.");
             return new HubLink(Text(link.Label, 100, true)!, Url(link.Url) ?? throw new ProjectException("INVALID_PROJECT_URL", "Vui lòng nhập liên kết."));
         }).ToArray(), Json);
-        d.StartDate = start; d.EndDate = input.EndDate;
+        d.StartDate = start;
         d.CompletedAt = p.CompletedAt; d.UpdatedAt = now;
     }
 
@@ -98,17 +91,13 @@ public sealed partial class ProjectHubService
     private static void SaveTimeline(Project p, HubTimeline input, DateTimeOffset now)
     {
         var d = p.Details;
-        var start = d?.StartDateIsCreationDate == true ? d.StartDate : input.StartDate;
-        Require(d?.StartDateIsCreationDate != true || input.StartDate == null || input.StartDate == start,
-            "PROJECT_START_DATE_LOCKED", "Ngày bắt đầu dự án mới là ngày tạo và không thể thay đổi.");
-        Require(start == null || input.ExpectedEndDate == null || input.ExpectedEndDate >= start,
-            "INVALID_PROJECT_DATES", "Ngày dự kiến kết thúc phải bằng hoặc sau ngày bắt đầu.");
+        var start = input.StartDate;
         Require(start == null || input.ActualEndDate == null || input.ActualEndDate >= start,
             "INVALID_PROJECT_DATES", "Ngày kết thúc thực tế phải bằng hoặc sau ngày bắt đầu.");
         Require(input.ActualEndDate == null || input.ActualEndDate <= ProjectDay(now),
             "INVALID_PROJECT_DATES", "Ngày kết thúc thực tế không được ở tương lai.");
         d = p.Details ??= new() { ProjectId = p.Id };
-        d.StartDate = start; d.EndDate = input.ExpectedEndDate; d.ActualEndDate = input.ActualEndDate; d.UpdatedAt = now;
+        d.StartDate = start; d.ActualEndDate = input.ActualEndDate; d.UpdatedAt = now;
     }
 
     private static HubFile[] Files(HubFile[] files, bool documents)
@@ -156,6 +145,10 @@ public sealed partial class ProjectHubService
 
     private static void StampCompletion(Project p, DateTimeOffset now)
     {
+        var actualEnd = p.Details?.ActualEndDate;
+        if (p.Details?.StartDateIsCreationDate == true) actualEnd ??= ProjectDay(p.CompletedAt ?? now);
+        Require(p.Details?.StartDate == null || actualEnd == null || p.Details.StartDate <= actualEnd,
+            "INVALID_PROJECT_DATES", "Ngày kết thúc thực tế phải bằng hoặc sau ngày bắt đầu.");
         p.CompletedAt ??= now;
         p.Details ??= new() { ProjectId = p.Id };
         p.Details.CompletedAt = p.CompletedAt; p.Details.UpdatedAt = now;

@@ -16,11 +16,14 @@ public sealed class ProjectRefactorSchemaTests
         var project = db.Model.FindEntityType(typeof(Project))!;
         Assert.Null(project.FindProperty("Origin"));
         Assert.Null(project.FindProperty("Mode"));
+        Assert.Null(project.FindProperty("ExpectedOutput"));
         foreach (var table in new[] { "ProjectDetails", "ProjectRecruitments", "ProjectPersonalReviews" })
             Assert.Contains(entities, e => e.GetTableName() == table);
         var details = entities.Single(e => e.GetTableName() == "ProjectDetails");
         Assert.Equal("ProjectId", Assert.Single(details.FindPrimaryKey()!.Properties).Name);
         Assert.Equal("date", details.FindProperty("StartDate")!.GetColumnType());
+        Assert.Null(details.FindProperty("EndDate"));
+        Assert.Equal("date", details.FindProperty("ActualEndDate")!.GetColumnType());
         Assert.Equal("jsonb", details.FindProperty("Links")!.GetColumnType());
         var recruitment = entities.Single(e => e.GetTableName() == "ProjectRecruitments");
         Assert.Contains(recruitment.GetIndexes(), i => i.IsUnique && i.Properties.Select(p => p.Name).SequenceEqual(new[] { "ProjectId" }));
