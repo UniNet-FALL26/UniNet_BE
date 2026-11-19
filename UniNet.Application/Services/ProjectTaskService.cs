@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using System.Text.RegularExpressions;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -106,11 +107,8 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             .FirstOrDefaultAsync(p => p.Id == projectId, ct);
         Require(project is not null, "PROJECT_NOT_FOUND", "Project not found.", 404);
 
-        var isCreator = project.CreatorId == profile.Id;
-        var isMember = await db.ProjectMembers.AsNoTracking()
-            .AnyAsync(m => m.ProjectId == projectId && m.UserId == profile.Id && m.Status == ProjectMemberStatus.Active, ct);
-
-        Require(isCreator || isMember, "PROJECT_ACCESS_DENIED", "You are not authorized to access this project.", 403);
+        Require(await ProjectMembership.IsEffectiveMemberAsync(db, projectId, profile.Id, ct),
+            "PROJECT_ACCESS_DENIED", "You are not authorized to access this project.", 403);
     }
 
     private async Task EnsureProjectLeaderAsync(Guid projectId, Guid accountId, CancellationToken ct)
@@ -197,18 +195,14 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             .Select(t => new
             {
                 t.Id,
-                t.Project.CreatorId,
                 IsAssigned = t.Assignments.Any(a => a.UserId == profile.Id)
             })
             .SingleOrDefaultAsync(ct);
         if (task is null)
             throw new ProjectException("PROJECT_TASK_NOT_FOUND", "Task not found.", 404);
 
-        var isActiveParticipant = task.CreatorId == profile.Id ||
-            await db.ProjectMembers.AsNoTracking().AnyAsync(m =>
-                m.ProjectId == projectId &&
-                m.UserId == profile.Id &&
-                m.Status == ProjectMemberStatus.Active, ct);
+        var isActiveParticipant = await ProjectMembership.IsEffectiveMemberAsync(
+            db, projectId, profile.Id, ct);
         Require(task.IsAssigned && isActiveParticipant,
             "TASK_REPORT_SUBMISSION_DENIED",
             "Only active project members assigned to this task can submit reports.",
@@ -715,11 +709,8 @@ public sealed class ProjectTaskService(UniNetDbContext db, IConfiguration config
             .SingleOrDefaultAsync(t => t.Id == taskId && t.ProjectId == projectId, ct);
         Require(task is not null, "PROJECT_TASK_NOT_FOUND", "Task not found.", 404);
 
-        var isActiveProjectMember = await db.ProjectMembers.AsNoTracking()
-            .AnyAsync(member =>
-                member.ProjectId == projectId &&
-                member.UserId == profile.Id &&
-                member.Status == ProjectMemberStatus.Active, ct);
+        var isActiveProjectMember = await ProjectMembership.IsEffectiveMemberAsync(
+            db, projectId, profile.Id, ct);
         var isAssigned = task.Assignments.Any(assignment => assignment.UserId == profile.Id);
         Require(isActiveProjectMember && isAssigned,
             "TASK_STATUS_UPDATE_DENIED",

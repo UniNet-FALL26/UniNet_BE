@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using UniNet.Application.Common;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
@@ -157,9 +158,7 @@ public sealed class SpecializationService(UniNetDbContext db)
         var permitted = NotificationPermissionPolicy.Recipients(db, NotificationPermissionPolicy.EvidenceReview);
         var query = db.UserProfiles.AsNoTracking().Where(p =>
             p.Account.Role == AccountRole.Assessor && permitted.Any(a => a.Id == p.AccountId) &&
-            p.Id != project.CreatorId &&
-            !db.ProjectMembers.Any(m => m.ProjectId == projectId && m.UserId == p.Id &&
-                m.Status == ProjectMemberStatus.Active && m.LeftAt == null) &&
+            !ProjectMembership.EffectiveMemberIds(db, projectId).Contains(p.Id) &&
             db.AssessorSpecializations.Any(s => s.AssessorUserId == p.Id && s.SpecializationId == project.SpecializationId));
         var total = await query.CountAsync(ct);
         var people = await query.OrderBy(p => p.FullName).ThenBy(p => p.Id)

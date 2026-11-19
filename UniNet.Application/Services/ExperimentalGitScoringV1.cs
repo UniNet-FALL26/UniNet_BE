@@ -36,7 +36,19 @@ internal sealed record ExperimentalGitScoringResult(
     IReadOnlyList<ExperimentalGitMemberScore> Results,
     IReadOnlyList<ExperimentalGitExcludedActivity> ExcludedActivities,
     IReadOnlyDictionary<ExperimentalGitActivityCategory, int> EligibleActivityCounts,
-    IReadOnlyDictionary<ExperimentalGitActivityCategory, int> ExternalActivityCounts);
+    IReadOnlyDictionary<ExperimentalGitActivityCategory, int> ExternalActivityCounts,
+    IReadOnlyDictionary<Guid, decimal> UnroundedGitWeights,
+    decimal ExternalGitWeight);
+
+internal sealed record ExperimentalGitOnlyMemberScore(Guid UserId, decimal CommitScore, decimal PullRequestScore,
+    decimal ReviewScore, decimal IssueScore, decimal GitScore);
+internal sealed record ExperimentalGitOnlyScoringResult(
+    IReadOnlyList<ExperimentalGitOnlyMemberScore> Results,
+    IReadOnlyList<ExperimentalGitActivity> ScoredActivities,
+    IReadOnlyList<ExperimentalGitExcludedActivity> ExcludedActivities,
+    IReadOnlyDictionary<ExperimentalGitActivityCategory, int> EligibleActivityCounts,
+    IReadOnlyDictionary<ExperimentalGitActivityCategory, int> ExternalActivityCounts,
+    IReadOnlyDictionary<Guid, decimal> UnroundedGitWeights, decimal ExternalGitWeight);
 
 internal static class ExperimentalGitScoringV1
 {
@@ -56,6 +68,26 @@ internal static class ExperimentalGitScoringV1
             throw new ArgumentException("The frozen roster must contain participants.", nameof(roster));
         if (participants.Any(id => !peerScores.TryGetValue(id, out var score) || score is < 0 or > 100))
             throw new ArgumentException("A valid peer score is required for every frozen participant.", nameof(peerScores));
+        var git = CalculateGit(roster, activities);
+        var results = git.Results.Select(x =>
+        {
+            var peer = decimal.Round(peerScores[x.UserId], 2, Rounding);
+            return new ExperimentalGitMemberScore(x.UserId, x.CommitScore, x.PullRequestScore, x.ReviewScore,
+                x.IssueScore, x.GitScore, peer, decimal.Round(.60m * x.GitScore + .40m * peer, 2, Rounding));
+        }).ToArray();
+        return new(results, git.ExcludedActivities, git.EligibleActivityCounts, git.ExternalActivityCounts,
+            git.UnroundedGitWeights, git.ExternalGitWeight);
+    }
+
+    // Same category arithmetic and overlap policy, without fabricating any peer inputs.
+    public static ExperimentalGitOnlyScoringResult CalculateGit(
+        IReadOnlyCollection<Guid> roster, IReadOnlyCollection<ExperimentalGitActivity> activities)
+    {
+        ArgumentNullException.ThrowIfNull(roster);
+        ArgumentNullException.ThrowIfNull(activities);
+        var participants = roster.Distinct().Order().ToArray();
+        if (participants.Length == 0 || participants.Any(x => x == Guid.Empty))
+            throw new ArgumentException("The frozen roster must contain participants.", nameof(roster));
         if (activities.Any(x => string.IsNullOrWhiteSpace(x.ObjectId) ||
             x.RepositoryId == Guid.Empty || x.UserId is { } userId && !participants.Contains(userId) ||
             x.RelatedCommitShas is null ||
@@ -129,12 +161,22 @@ internal static class ExperimentalGitScoringV1
             var review = categoryScores[ExperimentalGitActivityCategory.Review][userId];
             var issue = categoryScores[ExperimentalGitActivityCategory.Issue][userId];
             var git = decimal.Round(.35m * commit + .30m * pullRequest + .20m * review + .15m * issue, 2, Rounding);
-            var peer = decimal.Round(peerScores[userId], 2, Rounding);
-            var total = decimal.Round(.60m * git + .40m * peer, 2, Rounding);
-            return new ExperimentalGitMemberScore(userId, commit, pullRequest, review, issue, git, peer, total);
+            return new ExperimentalGitOnlyMemberScore(userId, commit, pullRequest, review, issue, git);
         }).ToArray();
 
-        return new(results, exclusions, counts, externalCounts);
+        // Keep exact pre-rounding category weights for V2 normalization. Do not derive
+        // external mass as 100 minus member GitScore: empty categories are not External.
+        var weights = new Dictionary<ExperimentalGitActivityCategory, decimal>
+        {
+            [ExperimentalGitActivityCategory.Commit] = .35m,
+            [ExperimentalGitActivityCategory.PullRequest] = .30m,
+            [ExperimentalGitActivityCategory.Review] = .20m,
+            [ExperimentalGitActivityCategory.Issue] = .15m
+        };
+        var gitWeights = participants.ToDictionary(id => id, id => weights.Sum(pair =>
+            counts[pair.Key] == 0 ? 0m : pair.Value * scored.Count(x => x.Category == pair.Key && x.UserId == id) / counts[pair.Key]));
+        var externalWeight = weights.Sum(pair => counts[pair.Key] == 0 ? 0m : pair.Value * externalCounts[pair.Key] / counts[pair.Key]);
+        return new(results, scored, exclusions, counts, externalCounts, gitWeights, externalWeight);
     }
 
     private static IReadOnlyList<ExperimentalGitActivity> Deduplicate(

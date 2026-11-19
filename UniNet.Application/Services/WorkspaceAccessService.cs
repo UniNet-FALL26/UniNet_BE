@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -13,11 +14,7 @@ public sealed class WorkspaceAccessService(UniNetDbContext db) : IWorkspaceAcces
     public async Task<UserProfile> RequireMemberAsync(Guid projectId, Guid accountId, CancellationToken ct = default)
     {
         var (profile, project) = await GetProfileAndProjectAsync(projectId, accountId, ct);
-        var isMember = project.CreatorId == profile.Id || await db.ProjectMembers.AsNoTracking()
-            .AnyAsync(member => member.ProjectId == project.Id &&
-                member.UserId == profile.Id &&
-                member.Status == ProjectMemberStatus.Active &&
-                member.LeftAt == null, ct);
+        var isMember = await ProjectMembership.IsEffectiveMemberAsync(db, project.Id, profile.Id, ct);
         Require(isMember, "PROJECT_ACCESS_DENIED", "You are not authorized to access this project.", 403);
         return profile;
     }

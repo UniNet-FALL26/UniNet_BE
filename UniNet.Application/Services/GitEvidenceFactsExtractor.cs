@@ -9,6 +9,62 @@ namespace UniNet.Application.Services;
 // Only stable, explicitly listed fields are copied from a fetched item.
 public static class GitEvidenceFactsExtractor
 {
+    // V5 defines the existing experimental comment unit: provider actor + actual
+    // creation time + fetched issue scope. Parent type is separately proven at scoring.
+    // No comment body/login or mutable payload is used to confer completeness.
+    public static GitFrozenFacts ExtractV5IssueComment(string externalId, JsonElement item, string? scope, DateTimeOffset observedAt)
+    {
+        var facts = ExtractV4("issue-comments", externalId, item, scope);
+        var details = facts.Details!;
+        var missing = details.MissingFacts.Where(x => x != "CategoryCoverage").ToList();
+        if (facts.Actors.Count != 1 || facts.Actors[0].Role != "actor" ||
+            !long.TryParse(facts.Actors[0].ProviderAccountId, NumberStyles.None, CultureInfo.InvariantCulture, out var id) || id <= 0)
+            missing.Add("ProviderActorId");
+        if (details.CreatedAt is null) missing.Add("CreatedAt");
+        if (details.CreatedAt > observedAt) missing.Add("CreatedAtAfterObservation");
+        if (details.UpdatedAt is { } updated && details.CreatedAt is { } created && updated < created)
+            missing.Add("CommentTimestampMismatch");
+        return facts with { SchemaVersion = 5, Completeness = GetCompleteness(missing), Details = details with { MissingFacts = missing } };
+    }
+    public static GitFrozenFacts ExtractV4(string category, string externalId, JsonElement item, string? scope)
+    {
+        var facts = ExtractV2(category, externalId, item, scope);
+        if (category is not ("commits" or "pull-request-commits" or "pull-requests" or "issues" or "issue-comments" or "issue-events")) return facts;
+        static string? Sha(JsonElement value) => value.ValueKind == JsonValueKind.String && value.GetString() is { Length: 40 or 64 } s && s.All(Uri.IsHexDigit) ? s.ToLowerInvariant() : null;
+        var details = facts.Details!;
+        IReadOnlyList<string>? parents = null; IReadOnlyList<string>? parentTrees = null; string? tree = null; string? merge = null;
+        var missing = details.MissingFacts.ToList();
+        long? issueNumber = details.RelatedIssueNumber;
+        if (category is "issues" or "issue-comments" or "issue-events")
+        {
+            if (category == "issues" && item.TryGetProperty("number", out var issueValue) && issueValue.TryGetInt64(out var n) && n > 0) issueNumber = n;
+            else if (category != "issues" && long.TryParse(scope, NumberStyles.None, CultureInfo.InvariantCulture, out var n2) && n2 > 0) issueNumber = n2;
+            if (issueNumber is null) missing.Add("IssueScope");
+        }
+        else if (category == "pull-requests")
+        {
+            if (item.TryGetProperty("merge_commit_sha", out var mergeValue)) merge = Sha(mergeValue);
+        }
+        else
+        {
+            if (item.TryGetProperty("parents", out var parentValues) && parentValues.ValueKind == JsonValueKind.Array)
+            {
+                var values = parentValues.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.Object && x.TryGetProperty("sha", out var sha) ? Sha(sha) : null).ToArray();
+                if (values.All(x => x is not null)) parents = values.Select(x => x!).ToArray();
+            }
+            if (item.TryGetProperty("commit", out var commit) && commit.ValueKind == JsonValueKind.Object && commit.TryGetProperty("tree", out var t) && t.ValueKind == JsonValueKind.Object && t.TryGetProperty("sha", out var treeValue)) tree = Sha(treeValue);
+            if (item.TryGetProperty("_uninet_parent_tree_shas", out var trees) && trees.ValueKind == JsonValueKind.Array)
+            {
+                var values = trees.EnumerateArray().Select(Sha).ToArray();
+                if (values.All(x => x is not null) && parents is not null && values.Length == parents.Count) parentTrees = values.Select(x => x!).ToArray();
+            }
+            if (parents is null) missing.Add("CommitParents");
+            if (parents?.Count > 1 && (tree is null || parentTrees is null)) missing.Add("MergeTreeEvidence");
+        }
+        return facts with { SchemaVersion = 4, Completeness = GetCompleteness(missing), Details = details with {
+            ParentShas = parents, TreeSha = tree, ParentTreeShas = parentTrees, MergeCommitSha = merge, MissingFacts = missing, RelatedIssueNumber = issueNumber } };
+    }
+
     public static GitFrozenFacts ExtractV3(string category, string externalId, JsonElement item, string? scope)
     {
         if (category != "pull-request-files")

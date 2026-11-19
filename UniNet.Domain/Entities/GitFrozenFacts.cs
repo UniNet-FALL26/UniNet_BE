@@ -22,7 +22,11 @@ public sealed record GitFrozenDetails(DateTimeOffset? CreatedAt, DateTimeOffset?
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Deletions = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Changes = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BlobSha = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PatchSha256 = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PatchSha256 = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ParentShas = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TreeSha = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ParentTreeShas = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MergeCommitSha = null);
 public sealed record CanonicalGitFrozenFacts(byte[] Bytes, string Sha256);
 
 public static class GitFrozenFactsCanonicalizer
@@ -32,12 +36,22 @@ public static class GitFrozenFactsCanonicalizer
     public static CanonicalGitFrozenFacts Canonicalize(GitFrozenFacts facts)
     {
         ArgumentNullException.ThrowIfNull(facts);
-        if (facts.SchemaVersion is not (1 or 2 or 3) || (facts.SchemaVersion == 1 && facts.Details is not null) ||
-            (facts.SchemaVersion is 2 or 3 && (facts.Details is null || facts.Details.MissingFacts is null)) || string.IsNullOrWhiteSpace(facts.Category) ||
+        if (facts.SchemaVersion is not (1 or 2 or 3 or 4 or 5) || (facts.SchemaVersion == 1 && facts.Details is not null) ||
+            (facts.SchemaVersion is 2 or 3 or 4 or 5 && (facts.Details is null || facts.Details.MissingFacts is null)) || string.IsNullOrWhiteSpace(facts.Category) ||
             string.IsNullOrWhiteSpace(facts.ExternalObjectId) || string.IsNullOrWhiteSpace(facts.Completeness) || facts.Actors is null)
             throw new ArgumentException("Invalid frozen facts contract.", nameof(facts));
+        if (facts.SchemaVersion == 5 && (facts.Category != "issue-comments" ||
+            facts.Completeness == "Complete" && (facts.Details!.CreatedAt is null || facts.Details.RelatedIssueNumber is null or <= 0 ||
+                facts.Details.MissingFacts.Count != 0 || facts.Actors.Count != 1 || facts.Actors[0].Role != "actor" ||
+                !long.TryParse(facts.Actors[0].ProviderAccountId, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var actorId) || actorId <= 0)))
+            throw new ArgumentException("Invalid issue comment facts.", nameof(facts));
         if (facts.SchemaVersion == 3 && !IsValidPullRequestFileFacts(facts))
             throw new ArgumentException("Invalid pull request file facts.", nameof(facts));
+        if (facts.SchemaVersion == 4 && (facts.Details!.ParentShas?.Any(x => !IsOptionalSha(x, 40, 64) || x is null) == true ||
+            facts.Details.ParentTreeShas?.Any(x => !IsOptionalSha(x, 40, 64) || x is null) == true ||
+            !IsOptionalSha(facts.Details.TreeSha, 40, 64) || !IsOptionalSha(facts.Details.MergeCommitSha, 40, 64)))
+            throw new ArgumentException("Invalid commit graph facts.", nameof(facts));
         if (facts.Actors.Any(x => x is null || string.IsNullOrWhiteSpace(x.Role)))
             throw new ArgumentException("Invalid actor.", nameof(facts));
         var normalized = new GitFrozenFacts(facts.SchemaVersion, facts.Category, facts.ExternalObjectId,

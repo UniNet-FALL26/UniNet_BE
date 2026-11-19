@@ -67,7 +67,8 @@ builder.Services.AddScoped<AssessorContractTasks>();
 builder.Services.AddSingleton<AssessorContractSecrets>();
 builder.Services.AddScoped<IAssessorContractFiles, AssessorContractFiles>();
 builder.Services.AddScoped<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorSmtpSender>();
-builder.Services.AddHostedService<UniNet.API.Services.AssessorContractWorker>();
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService<UniNet.API.Services.AssessorContractWorker>();
 builder.Services.AddOptions<AssessorContractOptions>()
     .Bind(builder.Configuration.GetSection("AssessorOnboarding"))
     .Validate(o => !o.Enabled || (
@@ -194,7 +195,8 @@ builder.Services.AddScoped<IAdvertisementService, AdvertisementService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
 if (!disableUnrelatedWorkers)
     builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
-builder.Services.AddHostedService<UniNet.API.Services.GitHubOAuthFlowCleanupWorker>();
+if (!disableUnrelatedWorkers)
+    builder.Services.AddHostedService<UniNet.API.Services.GitHubOAuthFlowCleanupWorker>();
 builder.Services.AddHostedService<UniNet.API.Services.GitSyncWorker>();
 builder.Services.AddControllers();
 builder.Services.AddHttpClient<IGitHubProviderClient, UniNet.API.Services.GitHubProviderClient>(client =>

@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
@@ -17,6 +19,7 @@ using Npgsql;
 using UniNet.API.Controllers;
 using UniNet.Application;
 using UniNet.Application.Services;
+using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
@@ -34,8 +37,35 @@ public sealed class GitExperimentalContributionPostgresFactAttribute : FactAttri
     }
 }
 
-public sealed class GitExperimentalContributionPostgresHttpTests
+public sealed partial class GitExperimentalContributionPostgresHttpTests
 {
+    [GitExperimentalContributionPostgresFact]
+    public async Task CoverageMigrationPreservesLegacyRunSnapshotAndFacts()
+    {
+        if (!int.TryParse(Environment.GetEnvironmentVariable("UNINET_GIT_MVP_TEST_PORT"), out var port) || port is <= 1024 or 55433 or > 65535)
+            throw new InvalidOperationException("Unsafe coverage upgrade target.");
+        const string name = "uninet_phase2_upgrade_disposable";
+        await using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
+            .UseNpgsql($"Host=127.0.0.1;Port={port};Database={name};Username=postgres;SSL Mode=Disable").Options);
+        await db.Database.OpenConnectionAsync(); var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        Assert.Equal(name, connection.Database); Assert.Equal(port, connection.Port); Assert.Equal("postgres", connection.UserName);
+        await db.GetService<IMigrator>().MigrateAsync("20261118152617_GuardGitV2FinalNormalizationReadiness");
+        var seed = await SeedProjectAsync(db);
+        var capture = new ProjectGitEvidenceSnapshotService(db); var reader = new ProjectGitEvidenceSnapshotReader(db);
+        var snapshotId = await capture.CaptureAsync(seed.ProjectId, seed.AccountIds[0], DateTimeOffset.UtcNow, default);
+        Assert.Equal(1, (await reader.ReadAsync(seed.ProjectId, snapshotId, seed.AccountIds[0], default)).PolicyVersion);
+        var service = new GitExperimentalContributionService(db, new ProjectGitContributionSnapshotAccess(capture, reader), TimeProvider.System);
+        var run = await service.CreateRunAsync(seed.ProjectId, seed.AccountIds[0], new(snapshotId, true), default);
+        var before = await db.GitEvidenceVersions.AsNoTracking().OrderBy(x => x.Id).Select(x => new { x.Id, x.ContentHash, x.FrozenFactsJson }).ToArrayAsync();
+        var memberships = await db.Set<ProjectGitEvidenceSnapshotEntry>().CountAsync(x => x.SnapshotId == snapshotId);
+        await db.Database.MigrateAsync();
+        Assert.Empty(await db.Set<ProjectGitEvidenceSnapshotCoverage>().ToArrayAsync()); // No invented/backfilled receipts.
+        Assert.Equal(before, await db.GitEvidenceVersions.AsNoTracking().OrderBy(x => x.Id).Select(x => new { x.Id, x.ContentHash, x.FrozenFactsJson }).ToArrayAsync());
+        Assert.Equal(memberships, await db.Set<ProjectGitEvidenceSnapshotEntry>().CountAsync(x => x.SnapshotId == snapshotId));
+        Assert.Equal(run.InputHash, (await service.GetRunAsync(seed.ProjectId, run.RunId, seed.AccountIds[0], default)).InputHash);
+        Assert.Equal(1, (await reader.ReadAsync(seed.ProjectId, snapshotId, seed.AccountIds[0], default)).PolicyVersion);
+        Assert.False(db.Database.HasPendingModelChanges());
+    }
     private const string Issuer = "git-contribution-postgres-tests";
     private const string SigningKey = "git-contribution-postgres-tests-signing-key-32-bytes-minimum";
 
@@ -112,6 +142,16 @@ public sealed class GitExperimentalContributionPostgresHttpTests
             profileIds = seeded.ProfileIds;
             snapshotId = await new ProjectGitEvidenceSnapshotService(db)
                 .CaptureAsync(projectId, accountIds[0], DateTimeOffset.UtcNow, CancellationToken.None);
+            var diagnostics = (GitExperimentalContributionService)scope.ServiceProvider.GetRequiredService<IGitExperimentalContributionService>();
+            var firstDiagnostic = await diagnostics.DiagnoseGitAsync(projectId, snapshotId, accountIds[0], profileIds.Take(3).ToArray(), default);
+            var secondDiagnostic = await diagnostics.DiagnoseGitAsync(projectId, snapshotId, accountIds[0], profileIds.Take(3).ToArray(), default);
+            using var firstRead = System.Text.Json.JsonDocument.Parse(firstDiagnostic);
+            using var secondRead = System.Text.Json.JsonDocument.Parse(secondDiagnostic);
+            Assert.Equal(firstRead.RootElement.GetProperty("inputHash").GetString(), secondRead.RootElement.GetProperty("inputHash").GetString());
+            Assert.Equal(await db.Set<ProjectGitEvidenceSnapshotEntry>().CountAsync(x => x.SnapshotId == snapshotId),
+                firstRead.RootElement.GetProperty("observationAudit").GetArrayLength());
+            Assert.Empty(await db.GitContributionRuns.Where(x => x.ProjectId == projectId).ToArrayAsync());
+            Assert.Empty(await db.Set<ExperimentalPeerCohort>().Where(x => x.ProjectId == projectId).ToArrayAsync());
         }
 
         await app.StartAsync();
@@ -212,6 +252,114 @@ public sealed class GitExperimentalContributionPostgresHttpTests
                 verifyDb.Database.ExecuteSqlInterpolatedAsync(
                     $"UPDATE \"GitContributionRuns\" SET \"ReviewFeedback\" = 'tampered' WHERE \"Id\" = {run.RunId}"));
             Assert.Equal("55000", immutableFailure.SqlState);
+
+            var openPeer = await leader.PostAsJsonAsync($"{route}/peer-cohorts", new ExperimentalPeerOpenRequest([profileIds[1]]));
+            Assert.Equal(HttpStatusCode.OK, openPeer.StatusCode);
+            var cohort = (await openPeer.Content.ReadFromJsonAsync<ExperimentalPeerCohortResponse>())!;
+            Assert.Equal(2, cohort.ParticipantIds.Count);
+            var ratingA = await leader.PutAsJsonAsync($"{route}/peer-cohorts/{cohort.Id}/evaluations/{profileIds[1]}", new ExperimentalPeerSubmitRequest(5, "test-only A", null));
+            Assert.Equal(HttpStatusCode.OK, ratingA.StatusCode);
+            var ratingB = await memberA.PutAsJsonAsync($"{route}/peer-cohorts/{cohort.Id}/evaluations/{profileIds[0]}", new ExperimentalPeerSubmitRequest(3, "test-only B", null));
+            Assert.Equal(HttpStatusCode.OK, ratingB.StatusCode);
+            var edit = await leader.PutAsJsonAsync($"{route}/peer-cohorts/{cohort.Id}/evaluations/{profileIds[1]}", new ExperimentalPeerSubmitRequest(4, "test-only edit", 1));
+            Assert.True(edit.StatusCode == HttpStatusCode.OK, await edit.Content.ReadAsStringAsync());
+            var peerView = await memberA.GetFromJsonAsync<ExperimentalPeerCohortResponse>($"{route}/peer-cohorts/{cohort.Id}");
+            Assert.Single(peerView!.Ratings); Assert.Empty(peerView.History); Assert.Equal(profileIds[1], peerView.Ratings[0].EvaluatorId);
+            Assert.Equal(HttpStatusCode.Forbidden, (await memberA.PostAsync($"{route}/peer-cohorts/{cohort.Id}/close", null)).StatusCode);
+            var close = await leader.PostAsync($"{route}/peer-cohorts/{cohort.Id}/close", null);
+            Assert.Equal(HttpStatusCode.OK, close.StatusCode);
+            var closedView = (await leader.GetFromJsonAsync<ExperimentalPeerCohortResponse>($"{route}/peer-cohorts/{cohort.Id}"))!;
+            Assert.Equal(3, closedView.History.Count); Assert.NotNull(closedView.SnapshotId);
+            Assert.Equal(HttpStatusCode.Conflict, (await memberA.PutAsJsonAsync($"{route}/peer-cohorts/{cohort.Id}/evaluations/{profileIds[0]}", new ExperimentalPeerSubmitRequest(5, null, 1))).StatusCode);
+            var immutablePeer = await Assert.ThrowsAsync<PostgresException>(() => verifyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"ExperimentalPeerSnapshots\" SET \"InputHash\" = repeat('a',64) WHERE \"Id\" = {closedView.SnapshotId}"));
+            Assert.Equal("55000", immutablePeer.SqlState);
+            var closedRatingFailure = await Assert.ThrowsAsync<PostgresException>(() => verifyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"ExperimentalPeerSubmissions\" SET \"Score\"=5,\"Revision\"=\"Revision\"+1 WHERE \"CohortId\"={cohort.Id}"));
+            Assert.Equal("55000", closedRatingFailure.SqlState);
+            var historyFailure = await Assert.ThrowsAsync<PostgresException>(() => verifyDb.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM \"ExperimentalPeerRevisions\" WHERE \"SubmissionId\" IN (SELECT \"Id\" FROM \"ExperimentalPeerSubmissions\" WHERE \"CohortId\"={cohort.Id})"));
+            Assert.Equal("55000", historyFailure.SqlState);
+            var createV2 = await leader.PostAsJsonAsync($"{route}/runs", new GitExperimentalRunRequest(snapshotId, true, null, "ExperimentalGitScoringV2", closedView.SnapshotId));
+            Assert.Equal(HttpStatusCode.OK, createV2.StatusCode);
+            var v2Run = (await createV2.Content.ReadFromJsonAsync<GitExperimentalRunResponse>())!;
+            Assert.Equal(closedView.SnapshotId, v2Run.PeerSnapshotId); Assert.All(v2Run.Results, x => Assert.Null(x.ContributionPercent));
+            var retryV2 = (await (await leader.PostAsJsonAsync($"{route}/runs", new GitExperimentalRunRequest(snapshotId, true, null, "ExperimentalGitScoringV2", closedView.SnapshotId))).Content.ReadFromJsonAsync<GitExperimentalRunResponse>())!;
+            Assert.Equal(v2Run.RunId, retryV2.RunId);
+            Assert.Equal(HttpStatusCode.Conflict, (await leader.PostAsJsonAsync($"{route}/runs/{v2Run.RunId}/review", new GitExperimentalReviewRequest("approve", null))).StatusCode);
+            var v2Immutable = await Assert.ThrowsAsync<PostgresException>(() => verifyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"GitContributionRuns\" SET \"ResultsJson\"='[]' WHERE \"Id\"={v2Run.RunId}"));
+            Assert.Equal("55000", v2Immutable.SqlState);
+            var notReadyFinalization = await Assert.ThrowsAsync<PostgresException>(() => verifyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"GitContributionRuns\" SET \"Status\"=3,\"FinalizedAt\"=now(),\"FinalizedById\"={profileIds[0]} WHERE \"Id\"={v2Run.RunId}"));
+            Assert.Equal("23514", notReadyFinalization.SqlState);
+            Assert.Equal("CK_GitContributionRuns_V2FinalReady", notReadyFinalization.ConstraintName);
+
+            // Both requests must wait on the same real PostgreSQL cohort row before racing.
+            var raceCohort = (await (await leader.PostAsJsonAsync($"{route}/peer-cohorts", new ExperimentalPeerOpenRequest([profileIds[1]]))).Content.ReadFromJsonAsync<ExperimentalPeerCohortResponse>())!;
+            Assert.Equal(HttpStatusCode.OK, (await leader.PutAsJsonAsync($"{route}/peer-cohorts/{raceCohort.Id}/evaluations/{profileIds[1]}", new ExperimentalPeerSubmitRequest(4, null, null))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await memberA.PutAsJsonAsync($"{route}/peer-cohorts/{raceCohort.Id}/evaluations/{profileIds[0]}", new ExperimentalPeerSubmitRequest(3, null, null))).StatusCode);
+            await using var lockDb = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>().UseNpgsql(connectionString).Options);
+            await using var lockTx = await lockDb.Database.BeginTransactionAsync();
+            await lockDb.Database.SqlQuery<int>($"SELECT 1 AS \"Value\" FROM \"ExperimentalPeerCohorts\" WHERE \"Id\"={raceCohort.Id} FOR UPDATE").ToListAsync();
+            var racingClose = leader.PostAsync($"{route}/peer-cohorts/{raceCohort.Id}/close", null);
+            var racingEdit = memberA.PutAsJsonAsync($"{route}/peer-cohorts/{raceCohort.Id}/evaluations/{profileIds[0]}", new ExperimentalPeerSubmitRequest(2, null, 1));
+            var lockDeadline = DateTimeOffset.UtcNow.AddSeconds(10); var blocked = false;
+            try
+            {
+                while (DateTimeOffset.UtcNow < lockDeadline)
+                {
+                    var waiting = await verifyDb.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname={database} AND wait_event_type='Lock' AND query LIKE '%ExperimentalPeerCohorts%'").SingleAsync();
+                    if (waiting >= 2) { blocked = true; break; }
+                    await Task.Delay(20);
+                }
+            }
+            finally { await lockTx.CommitAsync(); }
+            var raceResponses = await Task.WhenAll(racingClose, racingEdit); Assert.True(blocked);
+            foreach (var response in raceResponses)
+                Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.OK, (await leader.PostAsync($"{route}/peer-cohorts/{raceCohort.Id}/close", null)).StatusCode);
+            var frozenPeer = await verifyDb.Set<ExperimentalPeerSnapshot>().AsNoTracking().SingleAsync(x => x.CohortId == raceCohort.Id);
+            using var peerJson = System.Text.Json.JsonDocument.Parse(frozenPeer.InputJson);
+            var frozenIncoming = peerJson.RootElement.GetProperty("ratings").EnumerateArray().Single(x => x.GetProperty("evaluatorId").GetGuid() == profileIds[1]);
+            var currentIncoming = await verifyDb.Set<ExperimentalPeerSubmission>().AsNoTracking().SingleAsync(x => x.CohortId == raceCohort.Id && x.EvaluatorId == profileIds[1]);
+            Assert.Equal(currentIncoming.Score, frozenIncoming.GetProperty("score").GetInt32());
+            Assert.Equal(currentIncoming.Revision, frozenIncoming.GetProperty("revision").GetInt32());
+
+            // Append new complete evidence; never alter the earlier immutable versions/snapshot.
+            var association = await verifyDb.ProjectGitRepositories.AsNoTracking().SingleAsync(x=>x.ProjectId==projectId);
+            var priorObservations = await verifyDb.ProjectEvidenceObservations.AsNoTracking().Where(x=>x.ProjectGitRepositoryId==association.Id).ToArrayAsync();
+            var observedAt = DateTimeOffset.UtcNow;
+            foreach(var oldObservation in priorObservations)
+            {
+                var oldVersion = await verifyDb.GitEvidenceVersions.AsNoTracking().SingleAsync(x=>x.Id==oldObservation.GitEvidenceVersionId);
+                var oldFacts = System.Text.Json.JsonSerializer.Deserialize<GitFrozenFacts>(oldVersion.FrozenFactsJson)!;
+                var facts = oldFacts with { SchemaVersion=4,Completeness="Complete",Details=oldFacts.Details! with {
+                    MissingFacts=[],ParentShas=oldObservation.Category=="commits" ? [new string('d',40)] : null } };
+                var canonical=GitFrozenFactsCanonicalizer.Canonicalize(facts);
+                var version=new GitEvidenceVersion { GitHubProviderObjectId=oldVersion.GitHubProviderObjectId,GitHubRepositoryId=oldVersion.GitHubRepositoryId,
+                    EvidenceSchemaVersion=4,CanonicalizationVersion=1,HashAlgorithm="SHA-256",ContentHash=canonical.Sha256,
+                    FrozenFactsJson=Encoding.UTF8.GetString(canonical.Bytes),EvidenceStatus="Complete",CreatedAt=observedAt };
+                verifyDb.Add(version);
+                verifyDb.Add(new ProjectEvidenceObservation { ProjectGitRepositoryId=association.Id,GitHubRepositoryId=association.GitHubRepositoryId,
+                    GitSyncJobId=oldObservation.GitSyncJobId,GitEvidenceVersionId=version.Id,Category=oldObservation.Category,ScopeKey=oldObservation.ScopeKey,
+                    ObservedAt=observedAt,AuthorizationSource=oldObservation.AuthorizationSource,RetrievalCompleteness="Complete" });
+            }
+            await verifyDb.SaveChangesAsync();
+            var readySnapshot=await new ProjectGitEvidenceSnapshotService(verifyDb).CaptureAsync(projectId,accountIds[0],DateTimeOffset.UtcNow,default);
+            var completeCohort=(await (await leader.PostAsJsonAsync($"{route}/peer-cohorts",new ExperimentalPeerOpenRequest(profileIds.Take(3).ToArray()))).Content.ReadFromJsonAsync<ExperimentalPeerCohortResponse>())!;
+            var clients=new[]{leader,memberA,memberB};
+            for(var evaluator=0;evaluator<3;evaluator++) for(var evaluatee=0;evaluatee<3;evaluatee++)
+                if(evaluator!=evaluatee) Assert.Equal(HttpStatusCode.OK,(await clients[evaluator].PutAsJsonAsync($"{route}/peer-cohorts/{completeCohort.Id}/evaluations/{profileIds[evaluatee]}",new ExperimentalPeerSubmitRequest(3,"disposable fixture",null))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK,(await leader.PostAsync($"{route}/peer-cohorts/{completeCohort.Id}/close",null)).StatusCode);
+            var readyPeer=(await leader.GetFromJsonAsync<ExperimentalPeerCohortResponse>($"{route}/peer-cohorts/{completeCohort.Id}"))!;
+            var readyRequest=new GitExperimentalRunRequest(readySnapshot,true,null,"ExperimentalGitScoringV2",readyPeer.SnapshotId);
+            var readyResponse=await leader.PostAsJsonAsync($"{route}/runs",readyRequest);
+            Assert.True(readyResponse.IsSuccessStatusCode,await readyResponse.Content.ReadAsStringAsync());
+            var readyRun=(await readyResponse.Content.ReadFromJsonAsync<GitExperimentalRunResponse>())!;
+            Assert.Equal("Ready",readyRun.CalculationStatus);Assert.Equal(GitPeerNormalization.Version,readyRun.NormalizationPolicyVersion);
+            Assert.Equal(0m,readyRun.ExternalContributionPercent);Assert.Equal(100m,readyRun.Results.Sum(x=>x.ContributionPercent));
+            var readyRetry=(await (await leader.PostAsJsonAsync($"{route}/runs",readyRequest)).Content.ReadFromJsonAsync<GitExperimentalRunResponse>())!;
+            Assert.Equal(readyRun.RunId,readyRetry.RunId);
+            var persistedReady=await verifyDb.GitContributionRuns.AsNoTracking().SingleAsync(x=>x.Id==readyRun.RunId);
+            Assert.NotNull(persistedReady.NormalizedResultsJson);Assert.Contains(GitPeerNormalization.Version,persistedReady.InputSnapshotJson);
+            var stillV1=await verifyDb.GitContributionRuns.AsNoTracking().SingleAsync(x=>x.Id==run.RunId);
+            Assert.Equal(run.InputHash,stillV1.InputHash);Assert.Null(stillV1.NormalizedResultsJson);
         }
         finally
         {

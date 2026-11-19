@@ -322,7 +322,8 @@ public sealed class GitHubSyncJobProcessor(
         }
         var facts = category == "pull-request-files"
             ? GitEvidenceFactsExtractor.ExtractV3(category, externalId, payload, scope)
-            : GitEvidenceFactsExtractor.ExtractV2(category, externalId, payload, scope);
+            : category == "issue-comments" ? GitEvidenceFactsExtractor.ExtractV5IssueComment(externalId, payload, scope, observedAt)
+            : GitEvidenceFactsExtractor.ExtractV4(category, externalId, payload, scope);
         var canonical = GitFrozenFactsCanonicalizer.Canonicalize(facts);
         var version = db.GitEvidenceVersions.Local.FirstOrDefault(x => x.GitHubProviderObjectId == providerObject.Id && x.EvidenceSchemaVersion == facts.SchemaVersion && x.CanonicalizationVersion == GitFrozenFactsCanonicalizer.CanonicalizationVersion && x.ContentHash == canonical.Sha256)
             ?? await db.GitEvidenceVersions.SingleOrDefaultAsync(x => x.GitHubProviderObjectId == providerObject.Id && x.EvidenceSchemaVersion == facts.SchemaVersion && x.CanonicalizationVersion == GitFrozenFactsCanonicalizer.CanonicalizationVersion && x.ContentHash == canonical.Sha256, ct);

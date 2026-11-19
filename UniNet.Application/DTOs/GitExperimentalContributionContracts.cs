@@ -2,7 +2,12 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application;
 
-public sealed record GitExperimentalRunRequest(Guid? SnapshotId, bool AcknowledgeExperimentalPolicy);
+public sealed record GitExperimentalRunRequest(
+    Guid? SnapshotId,
+    bool AcknowledgeExperimentalPolicy,
+    IReadOnlyList<Guid>? ParticipantUserIds = null,
+    string ScoringPolicyVersion = "ExperimentalGitScoringV1",
+    Guid? PeerSnapshotId = null);
 
 public sealed record GitExperimentalReviewRequest(string Decision, string? Feedback);
 
@@ -30,7 +35,9 @@ public sealed record GitExperimentalMemberResult(
     decimal IssueScore,
     decimal GitScore,
     decimal PeerScore,
-    decimal TotalScore);
+    decimal TotalScore,
+    decimal? RawTotalScore = null,
+    decimal? ContributionPercent = null);
 
 public sealed record GitExperimentalReviewHistoryEntry(
     string Decision,
@@ -51,11 +58,18 @@ public sealed record GitExperimentalRunResponse(
     IReadOnlyList<GitExperimentalCategoryStatus> Categories,
     IReadOnlyList<GitExperimentalMemberResult> Results,
     IReadOnlyList<GitExperimentalExcludedActivityResponse> ExcludedActivities,
-    IReadOnlyList<GitExperimentalReviewHistoryEntry> ReviewHistory);
+    IReadOnlyList<GitExperimentalReviewHistoryEntry> ReviewHistory,
+    Guid? PeerSnapshotId = null,
+    string? NormalizationPolicyVersion = null,
+    string? CalculationStatus = null,
+    decimal? ExternalContributionPercent = null);
 
 public sealed record GitExperimentalFinalResultsResponse(
     Guid RunId,
     Guid GitEvidenceSnapshotId,
     string ScoringPolicyVersion,
     DateTimeOffset FinalizedAt,
-    IReadOnlyList<GitExperimentalMemberResult> Results);
+    IReadOnlyList<GitExperimentalMemberResult> Results,
+    string? NormalizationPolicyVersion = null,
+    string? CalculationStatus = null,
+    decimal? ExternalContributionPercent = null);

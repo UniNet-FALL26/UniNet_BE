@@ -23,7 +23,25 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         GitSyncJobStatus.Paused
     ];
 
-    public async Task<GitSyncJob?> ClaimNextAsync(TimeSpan leaseDuration, CancellationToken ct)
+    public Task<GitSyncJob?> ClaimNextAsync(TimeSpan leaseDuration, CancellationToken ct)
+    {
+        if (options.Value.ScopedManual.Enabled)
+            throw Error("GITHUB_SCOPED_MANUAL_GLOBAL_CLAIM_FORBIDDEN", "Global claiming is unavailable in scoped manual mode.", 409);
+        return ClaimCoreAsync(null, null, null, leaseDuration, ct);
+    }
+
+    public Task<GitSyncJob?> ClaimScopedManualAsync(Guid projectId, Guid associationId, Guid jobId,
+        TimeSpan leaseDuration, CancellationToken ct)
+    {
+        var scope = options.Value.ScopedManual;
+        scope.Validate(options.Value.Enabled);
+        if (scope.ProjectId != projectId || scope.AssociationId != associationId || scope.JobId != jobId || jobId == Guid.Empty)
+            throw Error("GITHUB_SCOPED_MANUAL_TARGET_MISMATCH", "The claim does not match the approved manual job.", 409);
+        return ClaimCoreAsync(projectId, associationId, jobId, leaseDuration, ct);
+    }
+
+    private async Task<GitSyncJob?> ClaimCoreAsync(Guid? projectId, Guid? associationId, Guid? jobId,
+        TimeSpan leaseDuration, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql())
             throw new NotSupportedException("Durable Git sync job claiming requires PostgreSQL row-lock semantics.");
@@ -51,7 +69,12 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
                     ON credential."Id" = association."OAuthConnectionId"
                 LEFT JOIN "GitHubAppRepositoryGrants" AS app_grant ON app_grant."Id" = association."GitHubAppRepositoryGrantId"
                 LEFT JOIN "GitHubAppInstallations" AS installation ON installation."Id" = app_grant."InstallationId"
-                WHERE candidate."GitHubRepositoryId" = association."GitHubRepositoryId" AND (
+                WHERE ({!jobId.HasValue} OR (
+                        association."ProjectId" = {projectId ?? Guid.Empty}
+                        AND candidate."ProjectGitRepositoryId" = {associationId ?? Guid.Empty}
+                        AND candidate."Id" = {jobId ?? Guid.Empty}
+                        AND candidate."SyncType" = {(short)GitSyncType.Manual}))
+                    AND candidate."GitHubRepositoryId" = association."GitHubRepositoryId" AND (
                     (association."CredentialSource" = 0 AND candidate."CredentialSource" = 0
                         AND candidate."GitHubAppRepositoryGrantId" IS NULL AND candidate."OAuthConnectionId" = association."OAuthConnectionId"
                         AND credential."Status" = {(short)GitHubOAuthConnectionStatus.Active}) OR
@@ -359,7 +382,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         var link = (await EligibleAppCandidatesAsync(projectId, linkId, ct)).SingleOrDefault()
             ?? throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App repository access is not ready for synchronization.", 409);
         var existing = await FindActiveJobAsync(link.Id, ct);
-        if (existing is not null) return new(await ToResponseAsync(existing, ct), true);
+        if (existing is not null) return await ManualReplayAsync(existing, ct);
         var job = NewAppJob(link, GitSyncType.Manual, actor, DateTimeOffset.UtcNow);
         db.GitSyncJobs.Add(job);
         try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
@@ -370,7 +393,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             await transaction.DisposeAsync();
             existing = await FindActiveJobAsync(link.Id, ct);
             if (existing is null) throw;
-            return new(await ToResponseAsync(existing, ct), true);
+            return await ManualReplayAsync(existing, ct);
         }
         catch (Exception ex) when (ex.GetBaseException() is PostgresException { SqlState: "40001" or "40P01" })
         { throw Error("GITHUB_SYNC_CONFLICT", "Synchronization state changed concurrently; retry.", 409); }
@@ -457,9 +480,25 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
     public async Task<GitSyncRequestResult> RequestManualSyncAsync(
         Guid accountId, Guid projectId, Guid projectGitRepositoryId, CancellationToken ct)
     {
-        if (!options.Value.Enabled)
+        if (!options.Value.Enabled && !options.Value.ManualEnqueueEnabled)
             throw Error("GITHUB_SYNC_DISABLED", "GitHub synchronization is not enabled.", 503);
         var actorProfileId = await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
+        if (options.Value.ScopedManual.Enabled || !options.Value.Enabled)
+        {
+            var scope = options.Value.ScopedManual;
+            scope.Validate(options.Value.Enabled);
+            if (scope.ProjectId != projectId || scope.AssociationId != projectGitRepositoryId)
+                throw Error("GITHUB_SCOPED_MANUAL_TARGET_MISMATCH", "The request does not match the approved project and association.", 409);
+            if (!await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == projectGitRepositoryId && x.ProjectId == projectId, ct))
+                throw Error("GITHUB_SCOPED_MANUAL_TARGET_MISMATCH", "The association does not belong to the approved project.", 409);
+            if (scope.JobId is { } pinnedId)
+            {
+                var pinned = await db.GitSyncJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pinnedId &&
+                    x.ProjectGitRepositoryId == projectGitRepositoryId, ct)
+                    ?? throw Error("GITHUB_SCOPED_MANUAL_JOB_NOT_FOUND", "The approved manual job does not exist.", 409);
+                return await ManualReplayAsync(pinned, ct);
+            }
+        }
         if (await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == projectGitRepositoryId && x.ProjectId == projectId && x.UnlinkedAt == null && x.CredentialSource == GitRepositoryCredentialSource.GitHubApp, ct))
         {
             if (!AppEnabled) throw Error("GITHUB_APP_DISABLED", "GitHub App integration is unavailable.", 503);
@@ -492,7 +531,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
 
         var existing = await FindActiveJobAsync(projectGitRepositoryId, ct);
         if (existing is not null)
-            return new(await ToResponseAsync(existing, ct), true);
+            return await ManualReplayAsync(existing, ct);
 
         var now = DateTimeOffset.UtcNow;
         var job = new GitSyncJob
@@ -516,7 +555,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
             db.Entry(job).State = EntityState.Detached;
             existing = await FindActiveJobAsync(projectGitRepositoryId, ct);
             if (existing is null) throw;
-            return new(await ToResponseAsync(existing, ct), true);
+            return await ManualReplayAsync(existing, ct);
         }
 
         return new(await ToResponseAsync(job, ct), false);
@@ -677,6 +716,14 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         }
 
         return new(response);
+    }
+
+    private async Task<GitSyncRequestResult> ManualReplayAsync(GitSyncJob job, CancellationToken ct)
+    {
+        if (options.Value.ScopedManual.Enabled && (job.SyncType != GitSyncType.Manual ||
+            options.Value.ScopedManual.JobId is { } pinned && pinned != job.Id))
+            throw Error("GITHUB_SCOPED_MANUAL_JOB_CONFLICT", "Another job cannot be reused as the approved manual job.", 409);
+        return new(await ToResponseAsync(job, ct), true);
     }
 
     private Task<GitSyncJob?> FindActiveJobAsync(Guid projectGitRepositoryId, CancellationToken ct) =>

@@ -15,6 +15,13 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        if (ChangeTracker.Entries<ExperimentalPeerSnapshot>().Any(e => e.State is EntityState.Modified or EntityState.Deleted) ||
+            ChangeTracker.Entries<ExperimentalPeerRevision>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Peer snapshot and revision history are immutable.");
+        foreach (var entry in ChangeTracker.Entries<ExperimentalPeerCohort>().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
+            if (entry.State == EntityState.Deleted || entry.OriginalValues.GetValue<ExperimentalPeerCohortStatus>(nameof(ExperimentalPeerCohort.Status)) == ExperimentalPeerCohortStatus.Closed ||
+                entry.Property(x => x.RosterJson).IsModified || entry.Property(x => x.RosterHash).IsModified || entry.Property(x => x.ProjectId).IsModified)
+                throw new InvalidOperationException("Closed cohorts and frozen rosters are immutable.");
         if (ChangeTracker.Entries<GitEvidenceVersion>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Git evidence versions are immutable.");
         if (ChangeTracker.Entries<GitContributionRun>().Any(e =>
@@ -173,6 +180,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.ApplyConfiguration(new OfficialWorkflowConfiguration());
+        model.ApplyConfiguration(new OfficialRunConfiguration());
+        model.ApplyConfiguration(new OfficialAuditConfiguration());
+        model.ApplyConfiguration(new OfficialPublicationConfiguration());
         SpecializationConfiguration.Configure(model);
         AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
@@ -190,6 +201,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         GitEvidenceConfiguration.Configure(model);
         ProjectGitEvidenceSnapshotConfiguration.Configure(model);
         GitContributionConfiguration.Configure(model);
+        ExperimentalPeerConfiguration.Configure(model, Database.IsNpgsql());
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);

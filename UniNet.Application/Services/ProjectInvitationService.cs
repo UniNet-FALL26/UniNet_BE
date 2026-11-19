@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -27,8 +28,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
         await ProjectRoleCapacity.CancelUnavailableAsync(db, project, ct);
         await db.SaveChangesAsync(ct);
         await RequireRecruitingAsync(project, request.Role, ct);
-        Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == invitee.Id &&
-            m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
+        Require(!await ProjectMembership.IsEffectiveMemberAsync(db, projectId, invitee.Id, ct),
+            "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
         Require(!await db.ProjectInvitations.AnyAsync(i => i.ProjectId == projectId && i.InviteeId == invitee.Id &&
             i.Status == ProjectInvitationStatus.Sent, ct), "INVITATION_EXISTS", "The invitee already has a pending invitation to this project.", 409);
 

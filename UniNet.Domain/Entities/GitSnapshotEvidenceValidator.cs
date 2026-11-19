@@ -24,7 +24,7 @@ public static class GitSnapshotEvidenceValidator
         ArgumentNullException.ThrowIfNull(source);
         if (version.GitHubProviderObjectId != source.Id || version.GitHubRepositoryId != source.GitHubRepositoryId)
             return GitSnapshotEvidenceValidation.IdentityMismatch;
-        if (version.EvidenceSchemaVersion is not (1 or 2 or 3) || version.CanonicalizationVersion != GitFrozenFactsCanonicalizer.CanonicalizationVersion)
+        if (version.EvidenceSchemaVersion is not (1 or 2 or 3 or 4 or 5) || version.CanonicalizationVersion != GitFrozenFactsCanonicalizer.CanonicalizationVersion)
             return GitSnapshotEvidenceValidation.UnsupportedContract;
         if (!StringComparer.Ordinal.Equals(version.HashAlgorithm, "SHA-256"))
             return GitSnapshotEvidenceValidation.UnsupportedHashAlgorithm;

@@ -30,11 +30,10 @@ internal static class ProjectGitAuthorization
             ?? throw Error("PROJECT_NOT_FOUND", "Project not found.", 404);
         if (creatorId == profileId) return profileId;
 
-        var isManager = await db.ProjectGitManagerGrants.AsNoTracking().AnyAsync(x =>
-            x.ProjectId == projectId && x.UserProfileId == profileId && x.IsActive &&
-            db.ProjectMembers.Any(m => m.ProjectId == projectId && m.UserId == profileId &&
-                m.Status == ProjectMemberStatus.Active), ct);
-        if (!isManager)
+        var hasManagerGrant = await db.ProjectGitManagerGrants.AsNoTracking().AnyAsync(x =>
+            x.ProjectId == projectId && x.UserProfileId == profileId && x.IsActive, ct);
+        if (!hasManagerGrant ||
+            !await ProjectMembership.IsEffectiveMemberAsync(db, projectId, profileId, ct))
             throw Error("FORBIDDEN", "Project creator or an authorized Git Manager permission is required.", 403);
         return profileId;
     }
@@ -48,11 +47,7 @@ internal static class ProjectGitAuthorization
             .Select(x => new { x.CreatorId })
             .SingleOrDefaultAsync(ct)
             ?? throw Error("PROJECT_NOT_FOUND", "Project not found.", 404);
-        if (project.CreatorId == profileId) return profileId;
-
-        var isMember = await db.ProjectMembers.AsNoTracking().AnyAsync(x =>
-            x.ProjectId == projectId && x.UserId == profileId && x.Status == ProjectMemberStatus.Active, ct);
-        if (!isMember)
+        if (!await ProjectMembership.IsEffectiveMemberAsync(db, projectId, profileId, ct))
             throw Error("FORBIDDEN", "An active project member is required.", 403);
         return profileId;
     }

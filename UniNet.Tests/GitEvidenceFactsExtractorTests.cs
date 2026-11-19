@@ -9,6 +9,18 @@ namespace UniNet.Tests;
 public sealed class GitEvidenceFactsExtractorTests
 {
     [Fact]
+    public void V4PreservesCommitGraphAndIssueParentWithoutMessageHeuristics()
+    {
+        using var commit = JsonDocument.Parse("""{"author":{"id":7},"commit":{"message":"Merge misleading message","committer":{"date":"2026-01-01T00:00:00Z"},"tree":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"parents":[{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}""");
+        var facts = GitEvidenceFactsExtractor.ExtractV4("commits", new string('c',40), commit.RootElement, "main");
+        Assert.Equal(4,facts.SchemaVersion);Assert.Single(facts.Details!.ParentShas!);Assert.Equal("Complete",facts.Completeness);
+        using var issue = JsonDocument.Parse("""{"id":1,"number":42,"user":{"id":7},"created_at":"2026-01-01T00:00:00Z","state":"open"}""");
+        var parent = GitEvidenceFactsExtractor.ExtractV4("issues","1",issue.RootElement,null);
+        Assert.Equal(42,parent.Details!.RelatedIssueNumber);Assert.False(parent.Details.IsPullRequest);
+        using var comment = JsonDocument.Parse("""{"id":2,"user":{"id":7},"created_at":"2026-01-01T00:00:00Z"}""");
+        Assert.Equal(42,GitEvidenceFactsExtractor.ExtractV4("issue-comments","2",comment.RootElement,"42").Details!.RelatedIssueNumber);
+    }
+    [Fact]
     public void V2FreezesFetchedReviewAndPrMetadataWithoutRawSecrets()
     {
         using var review = JsonDocument.Parse("""{"id":9,"user":{"id":7},"state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","commit_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","token":"secret"}""");

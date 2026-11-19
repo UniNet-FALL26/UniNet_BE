@@ -13,7 +13,8 @@ internal sealed record SnapshotEvidenceEntry(Guid AssociationId, Guid Repository
     Guid JobId, Guid VersionId, string Category, string ScopeKey, string ExternalObjectId,
     DateTimeOffset ObservedAt, string ContentHash, SnapshotEvidenceStatus Status, string Reason, GitFrozenFacts? Facts);
 internal sealed record ProjectGitEvidenceSnapshotRead(Guid SnapshotId, Guid ProjectId, DateTimeOffset CreatedAt,
-    DateTimeOffset ObservationCutoff, int PolicyVersion, int RestrictedCount, IReadOnlyList<SnapshotEvidenceEntry> Entries);
+    DateTimeOffset ObservationCutoff, int PolicyVersion, int RestrictedCount, IReadOnlyList<SnapshotEvidenceEntry> Entries,
+    IReadOnlyList<ProjectGitEvidenceSnapshotCoverage>? Coverage = null);
 
 // This is an internal boundary, not an endpoint or authorization to read a version by ID.
 internal sealed class ProjectGitEvidenceSnapshotReader(UniNetDbContext db)
@@ -21,16 +22,23 @@ internal sealed class ProjectGitEvidenceSnapshotReader(UniNetDbContext db)
     public async Task<ProjectGitEvidenceSnapshotRead> ReadAsync(Guid projectId, Guid snapshotId, Guid accountId, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql()) throw new InvalidOperationException("Snapshot reads require PostgreSQL.");
-        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct) : null;
         await ProjectGitAuthorization.RequireProjectViewerAsync(db, projectId, accountId, ct);
         var snapshot = await db.Set<ProjectGitEvidenceSnapshot>().AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == snapshotId && x.ProjectId == projectId && x.Finalized, ct)
             ?? throw new GitHubIntegrationException("SNAPSHOT_NOT_FOUND", "Snapshot not found.", 404);
+        if (snapshot.CapturePolicyVersion is not (1 or 2))
+            throw new GitHubIntegrationException("SNAPSHOT_POLICY_UNSUPPORTED", "Unsupported snapshot capture policy.", 409);
         var memberships = await db.Set<ProjectGitEvidenceSnapshotEntry>().AsNoTracking()
             .Where(x => x.SnapshotId == snapshotId && x.ProjectId == projectId)
             .OrderBy(x => x.ProjectGitRepositoryId).ThenBy(x => x.ProjectEvidenceObservationId).ToListAsync(ct);
         var authorized = new HashSet<Guid>();
-        foreach (var id in memberships.Select(x => x.ProjectGitRepositoryId).Distinct().Order())
+        // Legacy policy-1 snapshots never query the additive coverage table.
+        var coverage = snapshot.CapturePolicyVersion >= 2 ? await db.Set<ProjectGitEvidenceSnapshotCoverage>().AsNoTracking()
+            .Where(x => x.SnapshotId == snapshotId && x.ProjectId == projectId)
+            .OrderBy(x => x.GitSyncCheckpointId).ToListAsync(ct) : [];
+        foreach (var id in memberships.Select(x => x.ProjectGitRepositoryId).Concat(coverage.Select(x => x.ProjectGitRepositoryId)).Distinct().Order())
         {
             // Lock local authorization through the read, in the same order as the sync writer.
             await db.Database.SqlQuery<int>($"""
@@ -97,8 +105,9 @@ internal sealed class ProjectGitEvidenceSnapshotReader(UniNetDbContext db)
                 row.Version.Id, row.Category, row.ScopeKey, row.Source.ExternalObjectId, row.ObservedAt, row.Version.ContentHash,
                 status, status == SnapshotEvidenceStatus.Incomplete ? "IncompleteSource" : validation.ToString(), facts);
         }).OrderBy(x => x.AssociationId).ThenBy(x => x.ObservationId).ToArray();
-        await tx.CommitAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return new(snapshot.Id, snapshot.ProjectId, snapshot.CreatedAt, snapshot.ObservationCutoff,
-            snapshot.CapturePolicyVersion, memberships.Count - visible.Length, entries);
+            snapshot.CapturePolicyVersion, memberships.Count - visible.Length + coverage.Count(x => !authorized.Contains(x.ProjectGitRepositoryId)),
+            entries, coverage.Where(x => authorized.Contains(x.ProjectGitRepositoryId)).ToArray());
     }
 }

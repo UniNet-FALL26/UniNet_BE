@@ -23,4 +23,9 @@ public sealed class GitContributionRun
     public string? ReviewFeedback { get; set; }
     public Guid? FinalizedById { get; set; }
     public DateTimeOffset? FinalizedAt { get; set; }
+    public Guid? PeerSnapshotId { get; set; }
+    public string? CalculationContextHash { get; set; }
+    public string? NormalizationPolicyVersion { get; set; }
+    public string? CalculationStatus { get; set; }
+    public string? NormalizedResultsJson { get; set; }
 }

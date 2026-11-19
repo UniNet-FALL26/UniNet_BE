@@ -29,5 +29,23 @@ public static class ProjectGitEvidenceSnapshotConfiguration
             e.HasOne<ProjectGitRepository>().WithMany().HasForeignKey(x => new { x.ProjectGitRepositoryId, x.ProjectId })
                 .HasPrincipalKey(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Restrict);
         });
+        model.Entity<GitSyncCheckpoint>().HasAlternateKey(x => new { x.Id, x.SyncJobId });
+        model.Entity<ProjectGitEvidenceSnapshotCoverage>(e =>
+        {
+            e.ToTable("ProjectGitEvidenceSnapshotCoverage", t => t.HasCheckConstraint("CK_SnapshotCoverage_Receipt",
+                "\"ItemsProcessed\" >= 0 AND \"ReceiptPolicyVersion\" = 1 AND \"ScopeCompletedAt\" <= \"JobCompletedAt\""));
+            e.HasKey(x => new { x.SnapshotId, x.GitSyncCheckpointId });
+            e.Property(x => x.Category).HasMaxLength(100).IsRequired();
+            e.Property(x => x.ScopeKey).HasMaxLength(512).IsRequired();
+            e.HasIndex(x => new { x.SnapshotId, x.GitSyncJobId, x.Category, x.ScopeKey }).IsUnique();
+            e.HasOne<ProjectGitEvidenceSnapshot>().WithMany().HasForeignKey(x => new { x.SnapshotId, x.ProjectId })
+                .HasPrincipalKey(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ProjectGitRepository>().WithMany().HasForeignKey(x => new { x.ProjectGitRepositoryId, x.ProjectId })
+                .HasPrincipalKey(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<GitSyncJob>().WithMany().HasForeignKey(x => new { x.GitSyncJobId, x.ProjectGitRepositoryId })
+                .HasPrincipalKey(x => new { x.Id, x.ProjectGitRepositoryId }).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<GitSyncCheckpoint>().WithMany().HasForeignKey(x => new { x.GitSyncCheckpointId, x.GitSyncJobId })
+                .HasPrincipalKey(x => new { x.Id, x.SyncJobId }).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }

@@ -13,7 +13,9 @@ public static class GitContributionConfiguration
             entity.ToTable("GitContributionRuns", table =>
             {
                 table.HasCheckConstraint("CK_GitContributionRuns_RunNumber", "\"RunNumber\" > 0");
-                table.HasCheckConstraint("CK_GitContributionRuns_Policy", "\"ScoringPolicyVersion\" = 'ExperimentalGitScoringV1'");
+                table.HasCheckConstraint("CK_GitContributionRuns_Policy", "\"ScoringPolicyVersion\" IN ('ExperimentalGitScoringV1','ExperimentalGitScoringV2')");
+                table.HasCheckConstraint("CK_GitContributionRuns_V2Context", "\"ScoringPolicyVersion\" <> 'ExperimentalGitScoringV2' OR length(\"CalculationContextHash\") = 64 AND \"CalculationContextHash\" IS NOT NULL");
+                table.HasCheckConstraint("CK_GitContributionRuns_V2FinalReady", "\"ScoringPolicyVersion\" <> 'ExperimentalGitScoringV2' OR \"Status\" <> 3 OR (\"CalculationStatus\" = 'Ready' AND \"CalculationStatus\" IS NOT NULL AND \"NormalizedResultsJson\" IS NOT NULL AND \"NormalizationPolicyVersion\" IS NOT NULL)");
                 table.HasCheckConstraint("CK_GitContributionRuns_Hash", "length(\"InputHash\") = 64");
                 table.HasCheckConstraint("CK_GitContributionRuns_Status", "\"Status\" BETWEEN 0 AND 3");
                 table.HasCheckConstraint("CK_GitContributionRuns_Finalization",
@@ -37,7 +39,14 @@ public static class GitContributionConfiguration
             entity.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.ReviewedById).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.FinalizedById).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => new { x.ProjectId, x.RunNumber }).IsUnique();
-            entity.HasIndex(x => new { x.ProjectId, x.GitEvidenceSnapshotId, x.ScoringPolicyVersion }).IsUnique();
+            entity.HasIndex(x => new { x.ProjectId, x.GitEvidenceSnapshotId, x.ScoringPolicyVersion }).IsUnique().HasFilter("\"ScoringPolicyVersion\" = 'ExperimentalGitScoringV1'");
+            entity.HasIndex(x => new { x.ProjectId, x.CalculationContextHash }).IsUnique().HasFilter("\"CalculationContextHash\" IS NOT NULL");
+            entity.HasOne<ExperimentalPeerSnapshot>().WithMany().HasForeignKey(x => new { x.PeerSnapshotId, x.ProjectId })
+                .HasPrincipalKey(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(x => x.CalculationContextHash).HasMaxLength(64);
+            entity.Property(x => x.NormalizationPolicyVersion).HasMaxLength(64);
+            entity.Property(x => x.CalculationStatus).HasMaxLength(64);
+            entity.Property(x => x.NormalizedResultsJson).HasColumnType("jsonb");
         });
     }
 }

@@ -317,6 +317,9 @@ public sealed class ContributionService(UniNetDbContext db) : IContributionServi
 
     private async Task<(Project Project, ContributionCycle Cycle)> GetRequiredCycleAsync(Guid projectId, CancellationToken ct)
     {
+        var hasWorkflowSchema = !db.Database.IsNpgsql() || await db.Database.SqlQuery<int>($"SELECT CASE WHEN to_regclass('public.\"ProjectContributionWorkflows\"') IS NULL THEN 0 ELSE 1 END AS \"Value\"").SingleAsync(ct) == 1;
+        Require(!hasWorkflowSchema || !await db.Set<ProjectContributionWorkflow>().AsNoTracking().AnyAsync(x => x.ProjectId == projectId && x.Mode == "OfficialV2", ct),
+            "CONTRIBUTION_USE_OFFICIAL_V2", "This project uses the official Contribution V2 workflow.", 409);
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(p => p.Id == projectId, ct)
             ?? throw new ProjectException("PROJECT_NOT_FOUND", "Project not found.", 404);
         Require(project.Status == ProjectStatus.Completed,

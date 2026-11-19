@@ -6,6 +6,8 @@ namespace UniNet.Application.Interfaces;
 public interface IGitSyncJobService
 {
     Task<GitSyncJob?> ClaimNextAsync(TimeSpan leaseDuration, CancellationToken ct);
+    Task<GitSyncJob?> ClaimScopedManualAsync(Guid projectId, Guid associationId, Guid jobId,
+        TimeSpan leaseDuration, CancellationToken ct) => throw new NotSupportedException("Scoped manual claiming is not implemented by this provider.");
     Task<bool> RenewLeaseAsync(Guid jobId, Guid leaseId, TimeSpan leaseDuration, CancellationToken ct);
     Task CompleteAsync(Guid jobId, Guid leaseId, CancellationToken ct);
     Task<bool> FailAsync(

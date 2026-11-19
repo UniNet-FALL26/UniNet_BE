@@ -1061,6 +1061,184 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerCohort", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OpenedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RosterHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("RosterJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OpenedById");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("ExperimentalPeerCohorts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ExperimentalPeerCohorts_Closed", "(\"Status\" = 3) = (\"ClosedAt\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ExperimentalPeerCohorts_Roster", "jsonb_typeof(\"RosterJson\") = 'array' AND jsonb_array_length(\"RosterJson\") > 0 AND length(\"RosterHash\") = 64");
+
+                            t.HasCheckConstraint("CK_ExperimentalPeerCohorts_Status", "\"Status\" BETWEEN 0 AND 3");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerRevision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("PreviousComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int?>("PreviousScore")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Score")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SubmissionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubmissionId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("ExperimentalPeerRevisions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ExperimentalPeerRevisions_Score", "\"Score\" BETWEEN 1 AND 5 AND (\"PreviousScore\" IS NULL OR \"PreviousScore\" BETWEEN 1 AND 5) AND \"Revision\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CohortId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InputHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("InputJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ScoresJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CohortId")
+                        .IsUnique();
+
+                    b.HasIndex("CohortId", "ProjectId");
+
+                    b.ToTable("ExperimentalPeerSnapshots", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ExperimentalPeerSnapshots_Hash", "length(\"InputHash\") = 64");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerSubmission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CohortId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("EvaluateeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EvaluatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Score")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EvaluateeId");
+
+                    b.HasIndex("EvaluatorId");
+
+                    b.HasIndex("CohortId", "EvaluatorId", "EvaluateeId")
+                        .IsUnique();
+
+                    b.ToTable("ExperimentalPeerSubmissions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ExperimentalPeerSubmissions_Score", "\"Score\" BETWEEN 1 AND 5 AND \"Revision\" > 0 AND \"EvaluatorId\" <> \"EvaluateeId\"");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.ExternalProjectDraft", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1221,6 +1399,14 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<Guid>("CalculatedById")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CalculationContextHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CalculationStatus")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("CategoryStatusJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -1246,6 +1432,16 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<string>("InputSnapshotJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
+
+                    b.Property<string>("NormalizationPolicyVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("NormalizedResultsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("PeerSnapshotId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
@@ -1289,11 +1485,18 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("GitEvidenceSnapshotId", "ProjectId");
 
+                    b.HasIndex("PeerSnapshotId", "ProjectId");
+
+                    b.HasIndex("ProjectId", "CalculationContextHash")
+                        .IsUnique()
+                        .HasFilter("\"CalculationContextHash\" IS NOT NULL");
+
                     b.HasIndex("ProjectId", "RunNumber")
                         .IsUnique();
 
                     b.HasIndex("ProjectId", "GitEvidenceSnapshotId", "ScoringPolicyVersion")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"ScoringPolicyVersion\" = 'ExperimentalGitScoringV1'");
 
                     b.ToTable("GitContributionRuns", null, t =>
                         {
@@ -1301,11 +1504,15 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_GitContributionRuns_Hash", "length(\"InputHash\") = 64");
 
-                            t.HasCheckConstraint("CK_GitContributionRuns_Policy", "\"ScoringPolicyVersion\" = 'ExperimentalGitScoringV1'");
+                            t.HasCheckConstraint("CK_GitContributionRuns_Policy", "\"ScoringPolicyVersion\" IN ('ExperimentalGitScoringV1','ExperimentalGitScoringV2')");
 
                             t.HasCheckConstraint("CK_GitContributionRuns_RunNumber", "\"RunNumber\" > 0");
 
                             t.HasCheckConstraint("CK_GitContributionRuns_Status", "\"Status\" BETWEEN 0 AND 3");
+
+                            t.HasCheckConstraint("CK_GitContributionRuns_V2Context", "\"ScoringPolicyVersion\" <> 'ExperimentalGitScoringV2' OR length(\"CalculationContextHash\") = 64 AND \"CalculationContextHash\" IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_GitContributionRuns_V2FinalReady", "\"ScoringPolicyVersion\" <> 'ExperimentalGitScoringV2' OR \"Status\" <> 3 OR (\"CalculationStatus\" = 'Ready' AND \"CalculationStatus\" IS NOT NULL AND \"NormalizedResultsJson\" IS NOT NULL AND \"NormalizationPolicyVersion\" IS NOT NULL)");
                         });
                 });
 
@@ -2498,6 +2705,130 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("NotificationPermissionOverrides", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.OfficialContributionAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Feedback")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("RunId", "Revision")
+                        .IsUnique();
+
+                    b.ToTable("OfficialContributionAudits", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.OfficialContributionPublication", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PublishedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ProjectId");
+
+                    b.HasIndex("PublishedById");
+
+                    b.HasIndex("RunId")
+                        .IsUnique();
+
+                    b.HasIndex("RunId", "ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("OfficialContributionPublications", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.OfficialContributionRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("FinalizedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("FinalizedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResultHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("FinalizedById");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique()
+                        .HasFilter("\"State\" = 'Finalized'");
+
+                    b.HasIndex("ProjectId", "RequestId")
+                        .IsUnique();
+
+                    b.ToTable("OfficialContributionRuns", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OfficialRun_Finalized", "(\"State\" = 'Finalized') = (\"FinalizedAt\" IS NOT NULL AND \"FinalizedById\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_OfficialRun_Revision", "\"Revision\" >= 0 AND length(\"ResultHash\") = 64");
+
+                            t.HasCheckConstraint("CK_OfficialRun_State", "\"State\" IN ('Draft','Review','Approved','Rejected','Finalized')");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Package", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2675,6 +3006,27 @@ namespace UniNet.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectContributionWorkflow", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("SelectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ProjectId");
+
+                    b.ToTable("ProjectContributionWorkflows", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OfficialWorkflow_Mode", "\"Mode\" IN ('OfficialV2','LegacyV1','RequiresOptIn')");
+                        });
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceObservation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2816,6 +3168,64 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectId", "CreatedAt");
 
                     b.ToTable("ProjectGitEvidenceSnapshots", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitEvidenceSnapshotCoverage", b =>
+                {
+                    b.Property<Guid>("SnapshotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GitSyncCheckpointId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("GitSyncJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ItemsProcessed")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("JobCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProjectGitRepositoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ReceiptPolicyVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("ScopeCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ScopeKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("SnapshotId", "GitSyncCheckpointId");
+
+                    b.HasIndex("GitSyncCheckpointId", "GitSyncJobId");
+
+                    b.HasIndex("GitSyncJobId", "ProjectGitRepositoryId");
+
+                    b.HasIndex("ProjectGitRepositoryId", "ProjectId");
+
+                    b.HasIndex("SnapshotId", "ProjectId");
+
+                    b.HasIndex("SnapshotId", "GitSyncJobId", "Category", "ScopeKey")
+                        .IsUnique();
+
+                    b.ToTable("ProjectGitEvidenceSnapshotCoverage", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SnapshotCoverage_Receipt", "\"ItemsProcessed\" >= 0 AND \"ReceiptPolicyVersion\" = 1 AND \"ScopeCompletedAt\" <= \"JobCompletedAt\"");
+                        });
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitEvidenceSnapshotEntry", b =>
@@ -5331,6 +5741,61 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Run");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerCohort", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("OpenedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerRevision", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.ExperimentalPeerSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("SubmissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerSnapshot", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.ExperimentalPeerCohort", null)
+                        .WithMany()
+                        .HasForeignKey("CohortId", "ProjectId")
+                        .HasPrincipalKey("Id", "ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ExperimentalPeerSubmission", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.ExperimentalPeerCohort", null)
+                        .WithMany()
+                        .HasForeignKey("CohortId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("EvaluateeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("EvaluatorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.ExternalProjectDraft", b =>
                 {
                     b.HasOne("UniNet.Domain.Entities.Project", "ConfirmedProject")
@@ -5406,6 +5871,12 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasPrincipalKey("Id", "ProjectId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ExperimentalPeerSnapshot", null)
+                        .WithMany()
+                        .HasForeignKey("PeerSnapshotId", "ProjectId")
+                        .HasPrincipalKey("Id", "ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.GitEvidenceVersion", b =>
@@ -5651,6 +6122,64 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.OfficialContributionAudit", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.OfficialContributionRun", null)
+                        .WithMany()
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.OfficialContributionPublication", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("PublishedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.OfficialContributionRun", null)
+                        .WithOne()
+                        .HasForeignKey("UniNet.Domain.Entities.OfficialContributionPublication", "RunId", "ProjectId")
+                        .HasPrincipalKey("UniNet.Domain.Entities.OfficialContributionRun", "Id", "ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.OfficialContributionRun", b =>
+                {
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("FinalizedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectContributionWorkflow", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitContributionRun", null)
+                        .WithOne()
+                        .HasForeignKey("UniNet.Domain.Entities.OfficialContributionRun", "Id", "ProjectId")
+                        .HasPrincipalKey("UniNet.Domain.Entities.GitContributionRun", "Id", "ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.Project", b =>
                 {
                     b.HasOne("UniNet.Domain.UserProfile", "Creator")
@@ -5667,6 +6196,15 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Creator");
 
                     b.Navigation("Specialization");
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectContributionWorkflow", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithOne()
+                        .HasForeignKey("UniNet.Domain.Entities.ProjectContributionWorkflow", "ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.ProjectEvidenceObservation", b =>
@@ -5748,6 +6286,37 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.HasOne("UniNet.Domain.Entities.Project", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.ProjectGitEvidenceSnapshotCoverage", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.GitSyncCheckpoint", null)
+                        .WithMany()
+                        .HasForeignKey("GitSyncCheckpointId", "GitSyncJobId")
+                        .HasPrincipalKey("Id", "SyncJobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.GitSyncJob", null)
+                        .WithMany()
+                        .HasForeignKey("GitSyncJobId", "ProjectGitRepositoryId")
+                        .HasPrincipalKey("Id", "ProjectGitRepositoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitRepository", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectGitRepositoryId", "ProjectId")
+                        .HasPrincipalKey("Id", "ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.ProjectGitEvidenceSnapshot", null)
+                        .WithMany()
+                        .HasForeignKey("SnapshotId", "ProjectId")
+                        .HasPrincipalKey("Id", "ProjectId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

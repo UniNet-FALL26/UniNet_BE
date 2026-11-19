@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using System.Data.Common;
 using System.Text;
@@ -24,6 +26,29 @@ public sealed class SnapshotPostgresTheoryAttribute : TheoryAttribute
 
 public sealed class ProjectGitEvidenceSnapshotPostgresTests
 {
+    [SnapshotPostgresTheory]
+    [InlineData(true)]
+    public async Task LegacyCaptureWithoutCoverageSchemaIsExplicitlyPolicyOne(bool legacy)
+    {
+        Assert.True(legacy);
+        if (!int.TryParse(Environment.GetEnvironmentVariable("UNINET_SNAPSHOT_TEST_PORT"), out var port) || port is <= 1024 or 55433 or > 65535)
+            throw new InvalidOperationException("Unsafe legacy snapshot target.");
+        const string name = "uninet_snapshot_legacy_coverage_disposable";
+        await using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
+            .UseNpgsql($"Host=127.0.0.1;Port={port};Database={name};Username=postgres;SSL Mode=Disable").Options);
+        await db.Database.OpenConnectionAsync(); var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        Assert.Equal(name, connection.Database); Assert.Equal(port, connection.Port); Assert.Equal("postgres", connection.UserName);
+        await db.GetService<IMigrator>().MigrateAsync("20261118152617_GuardGitV2FinalNormalizationReadiness");
+        var owner = new Account { Email = $"legacy-coverage-{Guid.NewGuid():N}@example.test", Role = AccountRole.Student, Status = AccountStatus.Active,
+            Profile = new UserProfile { FullName = "Owner", Nickname = "Owner" } };
+        var project = new Project { Creator = owner.Profile!, Title = "Legacy snapshot", ProjectField = "IT", Description = "fixture",
+            MemberTarget = 2, MinimumQuantity = 1, RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(1), Status = ProjectStatus.Active };
+        db.AddRange(owner, project); await db.SaveChangesAsync();
+        var id = await new ProjectGitEvidenceSnapshotService(db).CaptureAsync(project.Id, owner.Id, DateTimeOffset.UtcNow, default);
+        var read = await new ProjectGitEvidenceSnapshotReader(db).ReadAsync(project.Id, id, owner.Id, default);
+        Assert.Equal(1, read.PolicyVersion); Assert.Empty(read.Entries); Assert.Empty(read.Coverage!);
+        Assert.False(GitSnapshotCoverageValidation.HasVerifiedEmptyReviewCoverage(read));
+    }
     private sealed class FailAfterEntries : SaveChangesInterceptor
     {
         public Guid SnapshotId { get; private set; }
@@ -85,6 +110,10 @@ public sealed class ProjectGitEvidenceSnapshotPostgresTests
             Assert.True(await db.GitEvidenceVersions.AnyAsync(x => x.Id == version.Id && x.FrozenFactsJson == "{}"));
             Assert.True(await db.ProjectEvidenceObservations.AnyAsync(x => x.Id == first.Id));
         }
+        job.Status = GitSyncJobStatus.Completed; job.CompletedAt = DateTimeOffset.UtcNow;
+        var scopeReceipt = new GitSyncCheckpoint { SyncJobId = job.Id, Category = "pull-requests", ScopeKey = "",
+            Status = GitSyncCheckpointStatus.Completed, ItemsProcessed = 0, LastProcessedAt = job.CompletedAt.Value.AddSeconds(-1) };
+        db.Add(scopeReceipt); await db.SaveChangesAsync();
         await using var writer = new UniNetDbContext(options);
         await using var tx = await writer.Database.BeginTransactionAsync();
         var late = Observation("late"); writer.Add(late); await writer.SaveChangesAsync();
@@ -95,6 +124,30 @@ public sealed class ProjectGitEvidenceSnapshotPostgresTests
         await using var verify = new UniNetDbContext(options);
         var members = await verify.Set<ProjectGitEvidenceSnapshotEntry>().Where(x => x.SnapshotId == id).ToListAsync();
         Assert.Single(members); Assert.Equal(first.Id, members[0].ProjectEvidenceObservationId);
+        var frozenCoverage = await verify.Set<ProjectGitEvidenceSnapshotCoverage>().SingleAsync(x => x.SnapshotId == id);
+        Assert.Equal(scopeReceipt.Id, frozenCoverage.GitSyncCheckpointId);
+        Assert.Equal(0, frozenCoverage.ItemsProcessed);
+        Assert.Equal(2, (await verify.Set<ProjectGitEvidenceSnapshot>().SingleAsync(x => x.Id == id)).CapturePolicyVersion);
+        await using (var bad = new UniNetDbContext(options))
+        await using (var badTx = await bad.Database.BeginTransactionAsync())
+        {
+            var invalidReceiptSnapshot = new ProjectGitEvidenceSnapshot { ProjectId = project.Id, ObservationCutoff = cutoff, CapturePolicyVersion = 2 };
+            bad.Add(invalidReceiptSnapshot); await bad.SaveChangesAsync();
+            bad.Add(new ProjectGitEvidenceSnapshotCoverage { SnapshotId = invalidReceiptSnapshot.Id, ProjectId = project.Id,
+                ProjectGitRepositoryId = link.Id, GitSyncJobId = job.Id, GitSyncCheckpointId = scopeReceipt.Id,
+                Category = scopeReceipt.Category, ScopeKey = scopeReceipt.ScopeKey, ItemsProcessed = 99,
+                ScopeCompletedAt = scopeReceipt.LastProcessedAt!.Value, JobCompletedAt = job.CompletedAt!.Value });
+            var rejected = await Assert.ThrowsAsync<DbUpdateException>(() => bad.SaveChangesAsync());
+            Assert.Equal("23514", Assert.IsType<PostgresException>(rejected.InnerException).SqlState);
+            await badTx.RollbackAsync();
+            Assert.False(await verify.Set<ProjectGitEvidenceSnapshot>().AnyAsync(x => x.Id == invalidReceiptSnapshot.Id));
+        }
+        Assert.Equal("55000", (await Assert.ThrowsAsync<PostgresException>(() => verify.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM \"ProjectGitEvidenceSnapshotCoverage\" WHERE \"SnapshotId\"={id}"))).SqlState);
+        Assert.Equal("55000", (await Assert.ThrowsAsync<PostgresException>(() => verify.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE \"ProjectGitEvidenceSnapshotCoverage\" SET \"ItemsProcessed\"=99 WHERE \"SnapshotId\"={id}"))).SqlState);
+        await verify.GitSyncCheckpoints.Where(x => x.Id == scopeReceipt.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.ItemsProcessed, 1));
+        Assert.Equal(0, (await verify.Set<ProjectGitEvidenceSnapshotCoverage>().AsNoTracking().SingleAsync(x => x.SnapshotId == id)).ItemsProcessed);
         await using var later = new UniNetDbContext(options);
         var laterId = await new ProjectGitEvidenceSnapshotService(later).CaptureAsync(project.Id, owner.Id, cutoff, default);
         Assert.Equal(2, await verify.Set<ProjectGitEvidenceSnapshotEntry>().CountAsync(x => x.SnapshotId == laterId));
@@ -231,7 +284,7 @@ public sealed class ProjectGitEvidenceSnapshotPostgresTests
         var validVersion = FactVersion(validFacts, "Complete");
         var incompleteVersion = FactVersion(incompleteFacts, "Incomplete");
         var unsupportedVersion = new GitEvidenceVersion { GitHubProviderObjectId = obj.Id, GitHubRepositoryId = repo.Id,
-            EvidenceSchemaVersion = 3, CanonicalizationVersion = 1, ContentHash = new string('f', 64), FrozenFactsJson = "{}", EvidenceStatus = "Incomplete" };
+            EvidenceSchemaVersion = 99, CanonicalizationVersion = 1, ContentHash = new string('f', 64), FrozenFactsJson = "{}", EvidenceStatus = "Incomplete" };
         var validObservation = Observation("reader-valid"); validObservation.GitEvidenceVersionId = validVersion.Id; validObservation.RetrievalCompleteness = "Complete";
         var incompleteObservation = Observation("reader-incomplete"); incompleteObservation.GitEvidenceVersionId = incompleteVersion.Id;
         var unsupportedObservation = Observation("reader-unsupported"); unsupportedObservation.GitEvidenceVersionId = unsupportedVersion.Id;

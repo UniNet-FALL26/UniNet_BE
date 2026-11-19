@@ -124,6 +124,40 @@ public sealed class GitHubProviderClient(HttpClient http, IOptions<GitHubIntegra
             throw new GitHubIntegrationException("GITHUB_INVALID_RESPONSE", "GitHub returned invalid synchronization data.", 502);
         }
 
+        if (category is "commits" or "pull-request-commits")
+        {
+            for (var index = 0; index < items.Count; index++)
+            {
+                var item = items[index];
+                if (!item.TryGetProperty("parents", out var parents) || parents.ValueKind != JsonValueKind.Array || parents.GetArrayLength() < 2) continue;
+                var parentTrees = new List<string>();
+                foreach (var parent in parents.EnumerateArray())
+                {
+                    if (!parent.TryGetProperty("sha", out var shaValue) || shaValue.ValueKind != JsonValueKind.String ||
+                        shaValue.GetString() is not { Length: 40 or 64 } sha || !sha.All(Uri.IsHexDigit))
+                        throw new GitHubIntegrationException("GITHUB_INVALID_RESPONSE", "Invalid commit parent identity.", 502);
+                    using var parentRequest = CreateApiRequest(HttpMethod.Get, $"repos/{repositoryPath}/git/commits/{Uri.EscapeDataString(sha)}", accessToken);
+                    using var parentResponse = await SendApiAsync(parentRequest, ct);
+                    using var parentDocument = JsonDocument.Parse(await parentResponse.Content.ReadAsStringAsync(ct));
+                    if (!parentDocument.RootElement.TryGetProperty("sha", out var returnedSha) || returnedSha.GetString() != sha ||
+                        !parentDocument.RootElement.TryGetProperty("tree", out var parentTree) || !parentTree.TryGetProperty("sha", out var treeSha) ||
+                        treeSha.GetString() is not { Length: 40 or 64 } tree || !tree.All(Uri.IsHexDigit))
+                        throw new GitHubIntegrationException("GITHUB_INVALID_RESPONSE", "Invalid parent tree evidence.", 502);
+                    parentTrees.Add(tree);
+                }
+                using var buffer = new MemoryStream();
+                using (var writer = new Utf8JsonWriter(buffer))
+                {
+                    writer.WriteStartObject();
+                    foreach (var property in item.EnumerateObject())
+                        if (property.Name != "_uninet_parent_tree_shas") property.WriteTo(writer);
+                    writer.WritePropertyName("_uninet_parent_tree_shas"); JsonSerializer.Serialize(writer, parentTrees);
+                    writer.WriteEndObject();
+                }
+                using var enriched = JsonDocument.Parse(buffer.ToArray()); items[index] = enriched.RootElement.Clone();
+            }
+        }
+
         var hasMore = response.Headers.TryGetValues("Link", out var linkValues) &&
             linkValues.Any(value => value.Split(',').Any(link =>
                 link.Contains("rel=\"next\"", StringComparison.OrdinalIgnoreCase)));

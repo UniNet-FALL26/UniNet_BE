@@ -68,7 +68,11 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                     })
                 ]
             };
-            db.ContributionCycles.Add(cycle);
+            // New projects have a persisted OfficialV2 selection. Their frozen
+            // peer roster is independent from the legacy Contribution Cycle.
+            var officialV2 = await db.Set<ProjectContributionWorkflow>().AsNoTracking()
+                .AnyAsync(x => x.ProjectId == project.Id && x.Mode == "OfficialV2", ct);
+            if (!officialV2) db.ContributionCycles.Add(cycle);
             var participantAccountIds = await db.UserProfiles.Where(p => cycle.Participants.Select(x => x.UserId).Contains(p.Id))
                 .Select(p => p.AccountId).ToArrayAsync(ct);
             await NotificationService.EnqueueAsync(db, participantAccountIds.Where(id => id != accountId),

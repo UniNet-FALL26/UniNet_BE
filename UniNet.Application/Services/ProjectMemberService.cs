@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -41,10 +42,9 @@ public sealed class ProjectMemberService(
 
         var requiredSkillIds = requiredSkills.Select(s => s.SkillId).ToArray();
         var matches = await db.UserSkills.AsNoTracking()
-            .Where(s => requiredSkillIds.Contains(s.SkillId) && s.UserId != project.CreatorId &&
+            .Where(s => requiredSkillIds.Contains(s.SkillId) &&
                 s.User.Account.Role == AccountRole.Student && s.User.Account.Status == AccountStatus.Active &&
-                !db.ProjectMembers.Any(m => m.ProjectId == projectId && m.UserId == s.UserId &&
-                    m.Status == ProjectMemberStatus.Active) &&
+                !ProjectMembership.EffectiveMemberIds(db, projectId).Contains(s.UserId) &&
                 !db.ProjectInvitations.Any(i => i.ProjectId == projectId && i.InviteeId == s.UserId &&
                     i.Status == ProjectInvitationStatus.Sent) &&
                 !db.ProjectJoinRequests.Any(r => r.ProjectId == projectId && r.UserId == s.UserId &&
@@ -53,10 +53,7 @@ public sealed class ProjectMemberService(
             .ToListAsync(ct);
         if (matches.Count == 0) return [];
 
-        var teamIds = (await db.ProjectMembers.AsNoTracking()
-            .Where(m => m.ProjectId == projectId && m.Status == ProjectMemberStatus.Active)
-            .Select(m => m.UserId)
-            .ToListAsync(ct)).Append(project.CreatorId).Distinct().ToArray();
+        var teamIds = await ProjectMembership.EffectiveMemberIds(db, projectId).ToArrayAsync(ct);
         var candidateIds = matches.Select(s => s.UserId).Distinct().ToArray();
 
         // Historical membership remains collaboration history after a member leaves.

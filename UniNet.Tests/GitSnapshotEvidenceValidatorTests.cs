@@ -40,7 +40,7 @@ public sealed class GitSnapshotEvidenceValidatorTests
         var (version, source) = Fixture();
         switch (change)
         {
-            case "schema": version.EvidenceSchemaVersion = 4; break;
+            case "schema": version.EvidenceSchemaVersion = 99; break;
             case "canonicalization": version.CanonicalizationVersion = 2; break;
             case "algorithm": version.HashAlgorithm = "unsupported"; break;
             case "json": version.FrozenFactsJson = "{"; break;

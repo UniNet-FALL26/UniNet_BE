@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -22,8 +23,8 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         await ProjectRoleCapacity.CancelUnavailableAsync(db, project, ct);
         await db.SaveChangesAsync(ct);
         await RequireRecruitingAsync(project, request.Role, ct);
-        Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == student.Id &&
-            m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
+        Require(!await ProjectMembership.IsEffectiveMemberAsync(db, projectId, student.Id, ct),
+            "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
         Require(!await db.ProjectJoinRequests.AnyAsync(r => r.ProjectId == projectId && r.UserId == student.Id &&
             r.Status == ProjectJoinRequestStatus.Pending, ct), "JOIN_REQUEST_EXISTS", "You already have a pending request.", 409);
 

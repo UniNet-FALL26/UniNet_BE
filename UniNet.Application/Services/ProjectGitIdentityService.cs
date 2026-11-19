@@ -344,14 +344,10 @@ public sealed class ProjectGitIdentityService(
     private async Task<Guid> RequireEligibleParticipantAsync(Guid accountId, Guid projectId, CancellationToken ct)
     {
         var profileId = await ProjectGitAuthorization.RequireActorProfileAsync(db, accountId, ct);
-        var project = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
-            .Select(x => new { x.CreatorId }).SingleOrDefaultAsync(ct)
-            ?? throw Error("PROJECT_NOT_FOUND", "Project not found.", 404);
-        if (project.CreatorId == profileId) return profileId;
-        var activeMember = await db.ProjectMembers.AsNoTracking().AnyAsync(x =>
-            x.ProjectId == projectId && x.UserId == profileId &&
-            x.Status == ProjectMemberStatus.Active, ct);
-        if (!activeMember)
+        var projectExists = await db.Projects.AsNoTracking().AnyAsync(x => x.Id == projectId, ct);
+        if (!projectExists)
+            throw Error("PROJECT_NOT_FOUND", "Project not found.", 404);
+        if (!await ProjectMembership.IsEffectiveMemberAsync(db, projectId, profileId, ct))
             throw Error("GIT_PROJECT_MEMBERSHIP_REQUIRED",
                 "The project creator or an active project member is required.", 403);
         return profileId;

@@ -34,6 +34,8 @@ Provider/worker retrieval includes PR commits, PR files, reviews, review comment
 ## Critical invariants
 
 - Never infer verified Git identity from login/display name or assign unknown work to the creator/leader.
+- Verified historical attribution uses the verified numeric provider account ID and project-scoped ownership history; do not require activity to be after LinkedAt or rewrite ownership timestamps. Reject ambiguous multi-owner history.
+- Experimental alternate rosters are frozen per run and remain draft-only unless their participant IDs exactly match the immutable Contribution Cycle roster. Do not reuse legacy peer evaluations for a different cohort, and reject idempotency hits whose scoring-input hash differs.
 - Do not substitute AuthorDate, ObservedAt or project dates for missing CommitterDate.
 - Do not reconstruct project history from mutable shared provider payload; never bypass atomic evidence writer.
 - Never update/delete immutable evidence versions, silently promote incomplete evidence, invent facts, or represent Experimental V1 as an official result.

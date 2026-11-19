@@ -1,9 +1,9 @@
 using System.Data;
 using System.Globalization;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
@@ -30,7 +30,7 @@ internal sealed class ProjectGitContributionSnapshotAccess(
         reader.ReadAsync(projectId, snapshotId, accountId, ct);
 }
 
-internal sealed class GitExperimentalContributionService(
+internal sealed partial class GitExperimentalContributionService(
     UniNetDbContext db,
     IGitContributionSnapshotAccess snapshots,
     TimeProvider timeProvider) : IGitExperimentalContributionService
@@ -39,12 +39,25 @@ internal sealed class GitExperimentalContributionService(
     private const int MaxFeedbackLength = 2000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task<GitExperimentalRunResponse> CreateRunAsync(
-        Guid projectId, Guid accountId, GitExperimentalRunRequest request, CancellationToken ct)
+    public async Task<GitExperimentalRunResponse> CreateRunAsync(Guid projectId, Guid accountId, GitExperimentalRunRequest request, CancellationToken ct)
+    {
+        try { return await CreateRunCoreAsync(projectId, accountId, request, ct); }
+        catch (Exception ex) when (request.ScoringPolicyVersion == ExperimentalGitScoringV2.PolicyVersion && ex.GetBaseException() is PostgresException { SqlState: "40001" or "40P01" or "23505" })
+        { throw Error("GIT_CONTRIBUTION_RETRY_REQUIRED", "Retry the request with a fresh transaction.", 409); }
+    }
+
+    private async Task<GitExperimentalRunResponse> CreateRunCoreAsync(
+        Guid projectId, Guid accountId, GitExperimentalRunRequest request, CancellationToken ct, bool official = false)
     {
         if (!request.AcknowledgeExperimentalPolicy)
             throw Error("GIT_EXPERIMENTAL_POLICY_ACK_REQUIRED",
                 "Explicitly acknowledge ExperimentalGitScoringV1 before calculating a run.");
+        Require(request.ScoringPolicyVersion is PolicyVersion or ExperimentalGitScoringV2.PolicyVersion,
+            "GIT_CONTRIBUTION_POLICY_UNSUPPORTED", "Select a supported experimental policy.");
+        var isV2 = request.ScoringPolicyVersion == ExperimentalGitScoringV2.PolicyVersion;
+        Require(isV2 || request.PeerSnapshotId is null, "GIT_CONTRIBUTION_PEER_POLICY_MISMATCH", "Peer cohorts require policy V2.");
+        Require(!isV2 || request.PeerSnapshotId is not null, "PEER_SNAPSHOT_REQUIRED",
+            "Close a complete peer cohort before creating a V2 run; missing evaluations are not zero ratings.", 409);
 
         var actor = await GetActiveStudentAsync(accountId, ct);
         var project = await GetProjectAsync(projectId, ct);
@@ -59,30 +72,59 @@ internal sealed class GitExperimentalContributionService(
         Require(snapshot.ProjectId == projectId,
             "GIT_CONTRIBUTION_SNAPSHOT_PROJECT_MISMATCH", "The evidence snapshot does not belong to this project.", 409);
 
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var existing = await db.GitContributionRuns.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.GitEvidenceSnapshotId == snapshotId &&
-                x.ScoringPolicyVersion == PolicyVersion, ct);
-        if (existing is not null)
-        {
-            await transaction.CommitAsync(ct);
-            return await MapRunAsync(existing, snapshot.Entries.Select(x => x.RepositoryId).ToHashSet(), ct);
-        }
-
+        await using var transaction = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var cycle = await db.ContributionCycles.AsNoTracking()
             .Include(x => x.Participants)
-            .SingleOrDefaultAsync(x => x.ProjectId == projectId, ct)
-            ?? throw Error("CONTRIBUTION_CYCLE_NOT_FOUND", "The project has no contribution roster.", 409);
-        var participants = cycle.Participants.OrderBy(x => x.UserId).ToArray();
+            .SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
+        Require(official || cycle is not null, "CONTRIBUTION_CYCLE_NOT_FOUND", "The project has no contribution roster.", 409);
+        var cycleParticipants = official ? [] : cycle!.Participants.OrderBy(x => x.UserId).ToArray();
+        ExperimentalPeerSnapshot? peerSnapshot = null;
+        Guid[]? requestedRoster = request.ParticipantUserIds?.ToArray();
+        if (isV2 && request.PeerSnapshotId is { } peerId)
+        {
+            peerSnapshot = await db.Set<ExperimentalPeerSnapshot>().AsNoTracking().SingleOrDefaultAsync(x => x.Id == peerId && x.ProjectId == projectId, ct)
+                ?? throw Error("PEER_SNAPSHOT_NOT_FOUND", "A closed peer snapshot in this project is required.", 409);
+            Require(ContributionCanonicalJson.Hash(peerSnapshot.InputJson) == peerSnapshot.InputHash,
+                "PEER_SNAPSHOT_INTEGRITY_ERROR", "Frozen peer inputs do not match their hash.", 409);
+            var cohort = await db.Set<ExperimentalPeerCohort>().AsNoTracking().SingleAsync(x => x.Id == peerSnapshot.CohortId && x.ProjectId == projectId, ct);
+            Require(cohort.Status == ExperimentalPeerCohortStatus.Closed, "PEER_COHORT_NOT_CLOSED", "Close the peer cohort before calculating with it.", 409);
+            var cohortRoster = ExperimentalPeerCohortService.Roster(cohort);
+            Require(requestedRoster is null || requestedRoster.Append(project.CreatorId).ToHashSet().SetEquals(cohortRoster), "GIT_CONTRIBUTION_PEER_ROSTER_MISMATCH", "The run roster must match the frozen peer roster.", 409);
+            requestedRoster = cohortRoster;
+        }
+        if (isV2 && requestedRoster is null) requestedRoster = await ProjectMembership.EffectiveMemberIds(db, projectId).ToArrayAsync(ct);
+        var participants = requestedRoster is null
+            ? cycleParticipants
+            : await ResolveRequestedRosterAsync(project, requestedRoster, snapshot.ObservationCutoff, ct);
+        var rosterMatchesCycle = participants.Select(x => x.UserId).Order()
+            .SequenceEqual(cycleParticipants.Select(x => x.UserId).Order());
+        var rosterSource = rosterMatchesCycle ? "contributionCycle" : "effectiveProjectMembership";
+        if (rosterMatchesCycle)
+            participants = cycleParticipants;
         var roster = participants.Select(x => x.UserId).ToArray();
         Require(roster.Length > 0, "CONTRIBUTION_ROSTER_EMPTY", "The contribution roster is empty.", 409);
 
-        var peerInputs = await db.ContributionPeerEvaluations.AsNoTracking()
-            .Where(x => x.CycleId == cycle.Id)
-            .Select(x => new ContributionPeerEvaluationInput(x.EvaluatorUserId, x.EvaluateeUserId, x.Score))
-            .ToArrayAsync(ct);
-        var peerOutput = ContributionCalculator.Calculate(roster, [], [], peerInputs);
-        var peerScores = peerOutput.Results.ToDictionary(x => x.UserId, x => x.PeerEvaluationScore);
+        var peerInputs = !isV2 && rosterMatchesCycle
+            ? await db.ContributionPeerEvaluations.AsNoTracking()
+                .Where(x => x.CycleId == cycle!.Id)
+                .Select(x => new ContributionPeerEvaluationInput(x.EvaluatorUserId, x.EvaluateeUserId, x.Score))
+                .ToArrayAsync(ct)
+            : [];
+        var peerScores = !isV2 && rosterMatchesCycle
+            ? ContributionCalculator.Calculate(roster, [], [], peerInputs).Results
+                .ToDictionary(x => x.UserId, x => x.PeerEvaluationScore)
+            : roster.ToDictionary(x => x, _ => 0m);
+        if (peerSnapshot is not null)
+        {
+            using var peerDocument = JsonDocument.Parse(peerSnapshot.InputJson);
+            var frozenPeerRoster = peerDocument.RootElement.GetProperty("roster").EnumerateArray().Select(x => x.GetGuid()).ToArray();
+            Require(frozenPeerRoster.Length == roster.Length && frozenPeerRoster.ToHashSet().SetEquals(roster),
+                "PEER_SNAPSHOT_INTEGRITY_ERROR", "Frozen peer inputs have a different participant roster.", 409);
+            peerInputs = peerDocument.RootElement.GetProperty("ratings").EnumerateArray()
+                .Select(x => new ContributionPeerEvaluationInput(x.GetProperty("evaluatorId").GetGuid(), x.GetProperty("evaluateeId").GetGuid(), x.GetProperty("score").GetInt32())).ToArray();
+            peerScores = ContributionCalculator.Calculate(roster, [], [], peerInputs).Results.ToDictionary(x => x.UserId, x => x.PeerEvaluationScore);
+        }
 
         var identityHistory = await db.ProjectGitMemberIdentityHistory.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.OccurredAt <= snapshot.ObservationCutoff)
@@ -90,25 +132,73 @@ internal sealed class GitExperimentalContributionService(
             .ToListAsync(ct);
         var exclusions = new List<GitExperimentalExcludedActivityResponse>();
         var selectedEntries = SelectLatestEvidence(snapshot.Entries, exclusions);
+        if (isV2) selectedEntries = ExperimentalGitScoringV2.Filter(selectedEntries, exclusions);
         var evidenceActivities = BuildActivities(projectId, snapshot, selectedEntries, roster, identityHistory, exclusions);
+        if (isV2)
+        {
+            var inTimeline = ExperimentalGitScoringV2.ApplyCommitTimeline(evidenceActivities.Select(x => x.Activity).ToArray(),
+                selectedEntries, snapshot.ObservationCutoff, exclusions);
+            evidenceActivities = evidenceActivities.Where(x => inTimeline.Contains(x.Activity)).ToArray();
+        }
+        var effectiveMembers = isV2 ? (await ProjectMembership.EffectiveMemberIds(db, projectId).ToArrayAsync(ct)).Order().ToArray() : null;
+        if (isV2)
+        {
+            evidenceActivities = evidenceActivities.Where(work =>
+            {
+                if (work.Activity.UserId is not null || !identityHistory.Any(h => h.ExternalAccountId == work.Input.ProviderActorId && effectiveMembers!.Contains(h.UserProfileId))) return true;
+                exclusions.Add(new(CategoryName(work.Activity.Category), work.Activity.RepositoryId, work.Activity.ObjectId,
+                    "Unattributed", "VerifiedMemberOutsideCohort"));
+                return false;
+            }).ToArray();
+        }
         var scoring = ExperimentalGitScoringV1.Calculate(roster, evidenceActivities.Select(x => x.Activity).ToArray(), peerScores);
         exclusions.AddRange(scoring.ExcludedActivities.Select(x => new GitExperimentalExcludedActivityResponse(
-            CategoryName(x.Category), x.RepositoryId, x.ObjectId, PolicyExclusionClassification(x.Reason), x.Reason)));
+            CategoryName(x.Category), x.RepositoryId, x.ObjectId, PolicyExclusionClassification(x.Reason),
+            isV2 && x.Reason == "CountedUnderMergedPullRequest" ? "AlreadyRepresentedByPullRequest" : x.Reason)));
 
-        var categories = BuildCategoryStatuses(snapshot.Entries, snapshot.RestrictedCount,
+        var categories = BuildCategoryStatuses(isV2 ? selectedEntries : snapshot.Entries, snapshot.RestrictedCount,
             scoring.EligibleActivityCounts, scoring.ExternalActivityCounts, exclusions);
+        if (isV2)
+            categories = ExperimentalGitScoringV2.ApplyReadiness(categories, selectedEntries, snapshot.RestrictedCount, exclusions,
+                GitSnapshotCoverageValidation.HasVerifiedEmptyReviewCoverage(snapshot));
+        // No selected activities is not proof that Git is truly NotApplicable: the
+        // snapshot currently has no frozen empty-scope coverage receipt.
+        var gitAbsenceUnproven = isV2 && scoring.EligibleActivityCounts.Values.Sum() == 0;
+        if (gitAbsenceUnproven)
+            categories = categories.Select(x => x with { Status = "Incomplete",
+                Limitations = x.Limitations.Append("GitAbsenceNotProven").Distinct(StringComparer.Ordinal).ToArray() }).ToArray();
+        var v2EvidenceGap = isV2 && (gitAbsenceUnproven || ExperimentalGitScoringV2.HasEvidenceGap(
+            categories, selectedEntries, snapshot.RestrictedCount, exclusions));
+        var gitComponentState = v2EvidenceGap ? ScoreState.NotReady :
+            scoring.EligibleActivityCounts.Values.Sum() == 0 ? ScoreState.NotApplicable : ScoreState.Ready;
+        var peerComponentState = peerSnapshot is null ? ScoreState.NotReady : roster.Length == 1 ? ScoreState.NotApplicable : ScoreState.Ready;
+        var normalization = isV2 ? GitPeerNormalization.Calculate(scoring.UnroundedGitWeights, scoring.ExternalGitWeight,
+            gitComponentState, peerScores, peerComponentState) : null;
+        var calculationStatus = normalization is null ? null : v2EvidenceGap ? "IncompleteGitEvidence" : normalization.Status;
         var activityInputs = evidenceActivities.Select(x => x.Input)
             .OrderBy(x => x.Category, StringComparer.Ordinal).ThenBy(x => x.RepositoryId).ThenBy(x => x.ObjectId, StringComparer.Ordinal)
             .ToArray();
         var frozenInput = new
         {
-            PolicyVersion,
+            PolicyVersion = request.ScoringPolicyVersion,
             ProjectId = projectId,
             snapshot.SnapshotId,
             snapshot.ObservationCutoff,
             snapshot.RestrictedCount,
-            PolicyAcknowledgment = new { AcknowledgedBy = actor.Id, AcknowledgedAt = now, PolicyVersion },
+            PolicyAcknowledgment = new { AcknowledgedBy = actor.Id, AcknowledgedAt = now, PolicyVersion = request.ScoringPolicyVersion },
+            PeerSnapshot = peerSnapshot is null ? null : new { peerSnapshot.Id, peerSnapshot.InputHash, peerSnapshot.PolicyVersion },
+            Coverage = isV2 ? snapshot.Coverage : null,
+            EffectiveMembers = effectiveMembers,
+            NormalizationPolicy = isV2 ? GitPeerNormalization.Version : null,
+            NormalizationInputs = isV2 ? new {
+                GitState = gitComponentState.ToString(), PeerState = peerComponentState.ToString(),
+                GitWeights = scoring.UnroundedGitWeights.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value),
+                scoring.ExternalGitWeight, PeerScores = peerScores.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value)
+            } : null,
+            Normalization = normalization,
             SnapshotPolicyVersion = snapshot.PolicyVersion,
+            RosterSource = rosterSource,
+            RosterEligibilityEvaluatedAt = now,
             Roster = participants.Select(x => new
             {
                 x.UserId, x.RoleAtSnapshot, x.MembershipStatusAtSnapshot, x.JoinedAt, x.LeftAt, x.IsLeader
@@ -133,7 +223,23 @@ internal sealed class GitExperimentalContributionService(
             Results = scoring.Results.OrderBy(x => x.UserId).ToArray()
         };
         var inputSnapshotJson = JsonSerializer.Serialize(frozenInput, JsonOptions);
-        var inputHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(inputSnapshotJson))).ToLowerInvariant();
+        var inputHash = ComputeScoringInputHash(inputSnapshotJson);
+
+        var contextHash = isV2 ? inputHash : null;
+        var existing = await db.GitContributionRuns.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ProjectId == projectId && (isV2
+                ? x.CalculationContextHash == contextHash
+                : x.GitEvidenceSnapshotId == snapshotId && x.ScoringPolicyVersion == PolicyVersion), ct);
+        if (existing is not null)
+        {
+            Require(!official || await db.Set<OfficialContributionRun>().AnyAsync(x => x.Id == existing.Id, ct),
+                "EXPERIMENTAL_RUN_NOT_OFFICIAL", "Existing experimental runs cannot be promoted implicitly.", 409);
+            Require(ComputeScoringInputHash(existing.InputSnapshotJson) == inputHash,
+                "GIT_CONTRIBUTION_INPUT_MISMATCH",
+                "A run already exists for this snapshot with different frozen scoring inputs.", 409);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return await MapRunAsync(existing, snapshot.Entries.Select(x => x.RepositoryId).ToHashSet(), ct);
+        }
 
         var runNumber = (await db.GitContributionRuns.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
@@ -143,7 +249,12 @@ internal sealed class GitExperimentalContributionService(
             ProjectId = projectId,
             GitEvidenceSnapshotId = snapshotId,
             RunNumber = runNumber,
-            ScoringPolicyVersion = PolicyVersion,
+            ScoringPolicyVersion = request.ScoringPolicyVersion,
+            PeerSnapshotId = peerSnapshot?.Id,
+            CalculationContextHash = contextHash,
+            CalculationStatus = calculationStatus,
+            NormalizationPolicyVersion = isV2 ? GitPeerNormalization.Version : null,
+            NormalizedResultsJson = normalization is null ? null : JsonSerializer.Serialize(normalization, JsonOptions),
             InputSnapshotJson = inputSnapshotJson,
             InputHash = inputHash,
             CategoryStatusJson = JsonSerializer.Serialize(categories, JsonOptions),
@@ -156,7 +267,7 @@ internal sealed class GitExperimentalContributionService(
         };
         db.GitContributionRuns.Add(run);
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return await MapRunAsync(run, snapshot.Entries.Select(x => x.RepositoryId).ToHashSet(), ct);
     }
 
@@ -177,6 +288,10 @@ internal sealed class GitExperimentalContributionService(
         var project = await GetProjectAsync(projectId, ct);
         RequireLeader(project, actor.Id);
         var run = await GetRunEntityAsync(projectId, runId, ct);
+        await RequireExperimentalLifecycleAsync(runId, ct);
+        await RequireOfficialRosterAsync(projectId, run.InputSnapshotJson, ct);
+        Require(run.ScoringPolicyVersion == PolicyVersion || run.CalculationStatus == "Ready",
+            "GIT_CONTRIBUTION_NOT_READY", "Complete calculation inputs before review.", 409);
         var readableSnapshot = await snapshots.ReadAsync(projectId, run.GitEvidenceSnapshotId, accountId, ct);
         Require(run.Status == GitContributionRunStatus.Draft,
             "GIT_CONTRIBUTION_RUN_NOT_REVIEWABLE", "Only a draft experimental run can be reviewed.", 409);
@@ -213,6 +328,10 @@ internal sealed class GitExperimentalContributionService(
         var project = await GetProjectAsync(projectId, ct);
         RequireLeader(project, actor.Id);
         var run = await GetRunEntityAsync(projectId, runId, ct);
+        await RequireExperimentalLifecycleAsync(runId, ct);
+        Require(run.ScoringPolicyVersion == PolicyVersion || run.CalculationStatus == "Ready",
+            "GIT_CONTRIBUTION_NOT_READY", "Complete all calculation inputs before finalizing.", 409);
+        await RequireOfficialRosterAsync(projectId, run.InputSnapshotJson, ct);
         var readableSnapshot = await snapshots.ReadAsync(projectId, run.GitEvidenceSnapshotId, accountId, ct);
         Require(run.Status == GitContributionRunStatus.Review && run.ReviewedById == actor.Id,
             "GIT_CONTRIBUTION_RUN_NOT_FINALIZABLE", "The leader must approve the draft before finalizing it.", 409);
@@ -237,8 +356,10 @@ internal sealed class GitExperimentalContributionService(
             .OrderByDescending(x => x.RunNumber)
             .FirstOrDefaultAsync(ct)
             ?? throw Error("GIT_CONTRIBUTION_RESULTS_NOT_FOUND", "No finalized experimental Git result is available.", 404);
-        var members = await MapMembersAsync(run.ResultsJson, ct);
-        return new(run.Id, run.GitEvidenceSnapshotId, run.ScoringPolicyVersion, run.FinalizedAt!.Value, members);
+        var members = ApplyNormalization(run, await MapMembersAsync(run.ResultsJson, ct));
+        var allocation = run.NormalizedResultsJson is null ? null : Deserialize<ContributionAllocation>(run.NormalizedResultsJson);
+        return new(run.Id, run.GitEvidenceSnapshotId, run.ScoringPolicyVersion, run.FinalizedAt!.Value, members,
+            run.NormalizationPolicyVersion, run.CalculationStatus, allocation?.ExternalPercent);
     }
 
     private async Task<IReadOnlyList<GitExperimentalMemberResult>> MapMembersAsync(
@@ -265,6 +386,7 @@ internal sealed class GitExperimentalContributionService(
     private async Task<GitExperimentalRunResponse> MapRunAsync(
         GitContributionRun run, IReadOnlySet<Guid>? visibleRepositoryIds, CancellationToken ct)
     {
+        var allocation = run.NormalizedResultsJson is null ? null : Deserialize<ContributionAllocation>(run.NormalizedResultsJson);
         return new(
             run.Id,
             run.ProjectId,
@@ -276,10 +398,19 @@ internal sealed class GitExperimentalContributionService(
             run.CalculatedAt,
             run.FinalizedAt,
             Deserialize<GitExperimentalCategoryStatus[]>(run.CategoryStatusJson),
-            await MapMembersAsync(run.ResultsJson, ct),
+            ApplyNormalization(run, await MapMembersAsync(run.ResultsJson, ct)),
             Deserialize<GitExperimentalExcludedActivityResponse[]>(run.ExcludedActivitiesJson)
                 .Where(x => visibleRepositoryIds is null || visibleRepositoryIds.Contains(x.RepositoryId)).ToArray(),
-            Deserialize<GitExperimentalReviewHistoryEntry[]>(run.ReviewHistoryJson));
+            Deserialize<GitExperimentalReviewHistoryEntry[]>(run.ReviewHistoryJson),
+            run.PeerSnapshotId, run.NormalizationPolicyVersion, run.CalculationStatus, allocation?.ExternalPercent);
+    }
+
+    private static IReadOnlyList<GitExperimentalMemberResult> ApplyNormalization(GitContributionRun run, IReadOnlyList<GitExperimentalMemberResult> members)
+    {
+        if (run.ScoringPolicyVersion == PolicyVersion) return members;
+        var allocation = run.NormalizedResultsJson is null ? null : Deserialize<ContributionAllocation>(run.NormalizedResultsJson);
+        return members.Select(x => x with { RawTotalScore = x.TotalScore,
+            ContributionPercent = allocation?.Status == "Ready" && allocation.Members.TryGetValue(x.UserId, out var percent) ? percent : null }).ToArray();
     }
 
     private async Task<GitContributionRun> GetRunEntityAsync(Guid projectId, Guid runId, CancellationToken ct) =>
@@ -295,11 +426,159 @@ internal sealed class GitExperimentalContributionService(
         return actor!;
     }
 
-    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken ct) =>
-        await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == projectId, ct)
+    private async Task<ContributionParticipant[]> ResolveRequestedRosterAsync(
+        ContributionProject project, IReadOnlyList<Guid> requestedUserIds, DateTimeOffset snapshotCutoff, CancellationToken ct)
+    {
+        Require(!requestedUserIds.Contains(Guid.Empty),
+            "GIT_CONTRIBUTION_ROSTER_INVALID", "The requested contribution roster contains an invalid user.", 409);
+        Require(project.CreatedAt <= snapshotCutoff,
+            "GIT_CONTRIBUTION_ROSTER_INVALID", "The project did not exist at the evidence snapshot cutoff.", 409);
+
+        var userIds = requestedUserIds.Append(project.CreatorId).Distinct().Order().ToArray();
+        var effectiveIds = await ProjectMembership.EffectiveMemberIds(db, project.Id)
+            .Where(id => userIds.Contains(id))
+            .ToArrayAsync(ct);
+        Require(effectiveIds.Length == userIds.Length,
+            "GIT_CONTRIBUTION_ROSTER_INVALID", "Every requested participant must be an active project member.", 409);
+
+        var activeStudentIds = await db.UserProfiles.AsNoTracking()
+            .Where(x => userIds.Contains(x.Id) &&
+                x.Account.Role == AccountRole.Student && x.Account.Status == AccountStatus.Active)
+            .Select(x => x.Id)
+            .ToArrayAsync(ct);
+        Require(activeStudentIds.Length == userIds.Length,
+            "GIT_CONTRIBUTION_ROSTER_INVALID", "Every requested participant must have an active Student account.", 409);
+
+        var memberIds = userIds.Where(id => id != project.CreatorId).ToArray();
+        var memberships = (await db.ProjectMembers.AsNoTracking()
+                .Where(x => x.ProjectId == project.Id && memberIds.Contains(x.UserId) &&
+                    x.Status == ProjectMemberStatus.Active)
+                .ToListAsync(ct))
+            .Where(x => x.JoinedAt <= snapshotCutoff && (x.LeftAt is null || x.LeftAt > snapshotCutoff))
+            .ToDictionary(x => x.UserId);
+        Require(memberships.Count == memberIds.Length,
+            "GIT_CONTRIBUTION_ROSTER_INVALID",
+            "Every requested member must have joined by the evidence snapshot cutoff.", 409);
+
+        return userIds.Select(id => id == project.CreatorId
+            ? new ContributionParticipant
+            {
+                UserId = id,
+                RoleAtSnapshot = "Creator",
+                MembershipStatusAtSnapshot = ProjectMemberStatus.Active,
+                JoinedAt = project.CreatedAt,
+                IsLeader = true
+            }
+            : new ContributionParticipant
+            {
+                UserId = id,
+                RoleAtSnapshot = memberships[id].Role,
+                MembershipStatusAtSnapshot = memberships[id].Status,
+                JoinedAt = memberships[id].JoinedAt,
+                LeftAt = memberships[id].LeftAt,
+                IsLeader = false
+            }).ToArray();
+    }
+
+    private async Task RequireOfficialRosterAsync(Guid projectId, string inputSnapshotJson, CancellationToken ct)
+    {
+        var officialRoster = await db.ContributionParticipants.AsNoTracking()
+            .Where(x => x.Cycle.ProjectId == projectId)
+            .Select(x => x.UserId)
+            .ToArrayAsync(ct);
+        var frozenRoster = ReadFrozenRosterUserIds(inputSnapshotJson);
+        Require(frozenRoster.Length == officialRoster.Distinct().Count() &&
+                frozenRoster.ToHashSet().SetEquals(officialRoster),
+            "GIT_CONTRIBUTION_ALTERNATE_ROSTER_NOT_OFFICIAL",
+            "Only a run using the official Contribution Cycle roster can be reviewed or finalized.", 409);
+    }
+
+    private static Guid[] ReadFrozenRosterUserIds(string inputSnapshotJson)
+    {
+        using var document = JsonDocument.Parse(inputSnapshotJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("roster", out var roster) ||
+            roster.ValueKind != JsonValueKind.Array)
+            throw Error("GIT_CONTRIBUTION_RUN_DATA_CORRUPT", "The frozen contribution roster is invalid.", 409);
+
+        var ids = new List<Guid>();
+        foreach (var participant in roster.EnumerateArray())
+        {
+            if (participant.ValueKind != JsonValueKind.Object ||
+                !participant.TryGetProperty("userId", out var userId) ||
+                userId.ValueKind != JsonValueKind.String ||
+                !userId.TryGetGuid(out var id))
+                throw Error("GIT_CONTRIBUTION_RUN_DATA_CORRUPT", "The frozen contribution roster is invalid.", 409);
+            ids.Add(id);
+        }
+        return ids.Distinct().Order().ToArray();
+    }
+
+    private static string ComputeScoringInputHash(string inputSnapshotJson)
+    {
+        using var document = JsonDocument.Parse(inputSnapshotJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw Error("GIT_CONTRIBUTION_RUN_DATA_CORRUPT", "Stored experimental contribution data is invalid.", 409);
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in document.RootElement.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal))
+            {
+                if (property.Name is "policyAcknowledgment" or "rosterEligibilityEvaluatedAt" or "rosterSource")
+                    continue;
+                if (property.Name == "peerSnapshot" && property.Value.ValueKind == JsonValueKind.Null) continue;
+                if (property.Name == "effectiveMembers" && property.Value.ValueKind == JsonValueKind.Null) continue;
+                if (property.Name == "coverage" && property.Value.ValueKind == JsonValueKind.Null) continue;
+                if (property.Name == "normalizationPolicy" && property.Value.ValueKind == JsonValueKind.Null) continue;
+                if (property.Name is "normalizationInputs" or "normalization" && property.Value.ValueKind == JsonValueKind.Null) continue;
+                writer.WritePropertyName(property.Name);
+                WriteCanonicalHashValue(writer, property.Value);
+            }
+            writer.WriteEndObject();
+        }
+        return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
+    }
+
+    private static void WriteCanonicalHashValue(Utf8JsonWriter writer, JsonElement element)
+    {
+        // PostgreSQL jsonb changes object property order. Arrays retain business ordering.
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteCanonicalHashValue(writer, property.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray()) WriteCanonicalHashValue(writer, item);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.Number:
+                if (!element.TryGetDecimal(out var number))
+                    throw Error("GIT_CONTRIBUTION_RUN_DATA_CORRUPT", "Invalid calculation number.", 409);
+                writer.WriteRawValue(number.ToString("G29", CultureInfo.InvariantCulture));
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
+    }
+
+    private async Task<ContributionProject> GetProjectAsync(Guid projectId, CancellationToken ct) =>
+        await db.Projects.AsNoTracking()
+            .Where(x => x.Id == projectId)
+            .Select(x => new ContributionProject(x.Id, x.CreatorId, x.Status, x.CreatedAt))
+            .SingleOrDefaultAsync(ct)
         ?? throw Error("PROJECT_NOT_FOUND", "Project not found.", 404);
 
-    private static void RequireLeader(Project project, Guid actorId) =>
+    private static void RequireLeader(ContributionProject project, Guid actorId) =>
         Require(project.CreatorId == actorId, "FORBIDDEN", "Only the project leader can manage experimental Git Contribution.", 403);
 
     private static IReadOnlyList<SnapshotEvidenceEntry> SelectLatestEvidence(
@@ -397,7 +676,7 @@ internal sealed class GitExperimentalContributionService(
         Guid projectId,
         ProjectGitEvidenceSnapshotRead snapshot,
         SnapshotEvidenceEntry entry,
-        IReadOnlyDictionary<long, IReadOnlyList<PrCommitRelation>> relations,
+        IReadOnlyDictionary<(Guid RepositoryId, long PrNumber), IReadOnlyList<PrCommitRelation>> relations,
         IReadOnlyCollection<Guid> roster,
         IReadOnlyCollection<ProjectGitMemberIdentityHistory> history,
         ICollection<AttributedWork> results,
@@ -423,7 +702,7 @@ internal sealed class GitExperimentalContributionService(
             exclusions.Add(Excluded(entry, "Incomplete", "ActivityAfterSnapshotCutoff"));
             return;
         }
-        if (!relations.TryGetValue(prNumber.Value, out var commits))
+        if (!relations.TryGetValue((entry.RepositoryId, prNumber.Value), out var commits))
         {
             exclusions.Add(Excluded(entry, "Incomplete", "PullRequestCommitEvidenceMissing"));
             return;
@@ -446,7 +725,7 @@ internal sealed class GitExperimentalContributionService(
         results.Add(new(activity, Input(entry, activity, actorId.Value)));
     }
 
-    private static IReadOnlyDictionary<long, IReadOnlyList<PrCommitRelation>> BuildPullRequestCommitRelations(
+    private static IReadOnlyDictionary<(Guid RepositoryId, long PrNumber), IReadOnlyList<PrCommitRelation>> BuildPullRequestCommitRelations(
         IReadOnlyCollection<SnapshotEvidenceEntry> entries)
     {
         return entries.Where(x => x.Category == "pull-request-commits" && x.Status is SnapshotEvidenceStatus.Valid or SnapshotEvidenceStatus.Incomplete &&
@@ -455,10 +734,10 @@ internal sealed class GitExperimentalContributionService(
             {
                 var facts = x.Facts!;
                 var prNumber = facts.Details?.RelatedPullRequestNumber ?? ParsePositiveLong(x.ScopeKey);
-                return (PrNumber: prNumber, Sha: x.ExternalObjectId.ToLowerInvariant(), AuthorId: ActorId(facts, "author"));
+                return (x.RepositoryId, PrNumber: prNumber, Sha: x.ExternalObjectId.ToLowerInvariant(), AuthorId: ActorId(facts, "author"));
             })
             .Where(x => x.PrNumber is not null)
-            .GroupBy(x => x.PrNumber!.Value)
+            .GroupBy(x => (x.RepositoryId, x.PrNumber!.Value))
             .ToDictionary(x => x.Key, x => (IReadOnlyList<PrCommitRelation>)x
                 .Select(y => new PrCommitRelation(y.Sha, y.AuthorId)).ToArray());
     }
@@ -656,6 +935,7 @@ internal sealed class GitExperimentalContributionService(
         if (!condition) throw Error(code, message, status);
     }
 
+    private sealed record ContributionProject(Guid Id, Guid CreatorId, ProjectStatus Status, DateTimeOffset CreatedAt);
     private sealed record PrCommitRelation(string Sha, long? AuthorProviderAccountId);
     private sealed record EligibleActivityInput(
         string Category,

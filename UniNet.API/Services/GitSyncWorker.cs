@@ -5,6 +5,7 @@ using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Application.Services;
 using UniNet.Infrastructure.Data;
+using UniNet.Domain.Enums;
 
 namespace UniNet.API.Services;
 
@@ -15,8 +16,22 @@ public sealed class GitSyncWorker(
     IOptions<GitHubAppOptions>? appOptions = null,
     GitHubWorkerProgress? progress = null) : BackgroundService
 {
+    public string? ScopedStopReason { get; private set; }
+    public GitSyncJobStatus? ScopedJobStatus { get; private set; }
+
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (options.Value.ScopedManual.Enabled)
+        {
+            options.Value.ScopedManual.Validate(options.Value.Enabled);
+            if (options.Value.ScopedManual.JobId is null)
+            {
+                ScopedStopReason = "AwaitingJobId";
+                logger.LogInformation("Scoped manual consumer is idle until an approved JobId is configured.");
+                return Task.CompletedTask;
+            }
+            return RunScopedManualAsync(stoppingToken);
+        }
         if (!options.Value.Enabled) return Task.CompletedTask;
         var concurrency = Math.Clamp(options.Value.WorkerConcurrency, 1, 16);
         var workers = Enumerable.Range(0, concurrency).Select(_ => RunWorkerAsync(stoppingToken));
@@ -26,6 +41,85 @@ public sealed class GitSyncWorker(
             if (progress is not null) workers = workers.Append(RunDurableHeartbeatAsync(stoppingToken));
         }
         return Task.WhenAll(workers);
+    }
+
+    private async Task RunScopedManualAsync(CancellationToken stoppingToken)
+    {
+        var settings = options.Value;
+        var target = settings.ScopedManual;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(target.ExecutionTimeoutSeconds));
+        var ct = deadline.Token;
+        var leaseDuration = TimeSpan.FromSeconds(Math.Clamp(settings.JobLeaseDurationSeconds, 30, 3600));
+        GitSyncJobStatus? lastStatus = null;
+        try
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                await using var scope = scopes.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+                if (!db.Database.IsNpgsql()) throw new NotSupportedException("Scoped claiming requires PostgreSQL.");
+                var state = await (from job in db.GitSyncJobs.AsNoTracking()
+                    join association in db.ProjectGitRepositories.AsNoTracking() on job.ProjectGitRepositoryId equals association.Id
+                    where job.Id == target.JobId
+                    select new { Job = job, association.ProjectId }).SingleOrDefaultAsync(ct);
+                if (state is null || state.ProjectId != target.ProjectId ||
+                    state.Job.ProjectGitRepositoryId != target.AssociationId || state.Job.SyncType != GitSyncType.Manual)
+                {
+                    ScopedStopReason = "TargetMismatch";
+                    return;
+                }
+                lastStatus = state.Job.Status;
+                if (lastStatus is GitSyncJobStatus.Completed or GitSyncJobStatus.Failed or GitSyncJobStatus.Cancelled or GitSyncJobStatus.Paused)
+                {
+                    ScopedStopReason = lastStatus.ToString();
+                    return;
+                }
+                var jobs = scope.ServiceProvider.GetRequiredService<IGitSyncJobService>();
+                var claimed = await jobs.ClaimScopedManualAsync(target.ProjectId, target.AssociationId, target.JobId!.Value, leaseDuration, ct);
+                if (claimed is not null)
+                {
+                    lastStatus = claimed.Status;
+                    await ProcessClaimedJobAsync(scope.ServiceProvider, jobs, claimed, leaseDuration, ct);
+                    // A fresh scope/context observes the persisted failure/retry/completion, never tracked pre-claim state.
+                    continue;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(settings.PollSeconds, 1, 30)), ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Cancellation leaves real durable job/checkpoint state intact. An in-flight lease can expire/reclaim.
+            ScopedStopReason = stoppingToken.IsCancellationRequested ? "Cancelled" : "DeadlineExceeded";
+        }
+        catch (Exception)
+        {
+            ScopedStopReason = "ExecutionError";
+            logger.LogError("Scoped manual consumer stopped; inspect its durable job state before recovery.");
+        }
+        finally
+        {
+            try
+            {
+                using var reportTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await using var reportScope = scopes.CreateAsyncScope();
+                var db = reportScope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+                lastStatus = await (from job in db.GitSyncJobs.AsNoTracking()
+                    join association in db.ProjectGitRepositories.AsNoTracking() on job.ProjectGitRepositoryId equals association.Id
+                    where job.Id == target.JobId && job.SyncType == GitSyncType.Manual &&
+                        job.ProjectGitRepositoryId == target.AssociationId && association.ProjectId == target.ProjectId
+                    select (GitSyncJobStatus?)job.Status).SingleOrDefaultAsync(reportTimeout.Token);
+            }
+            catch (Exception)
+            {
+                // Do not present a stale observation as the current persisted state when the final read fails.
+                lastStatus = null;
+            }
+            ScopedJobStatus = lastStatus;
+            logger.LogInformation("Scoped manual consumer stopped for job {JobId}: {Reason}; persisted state {JobStatus} (null means unavailable)",
+                target.JobId, ScopedStopReason, lastStatus);
+        }
     }
 
     private async Task RunDurableHeartbeatAsync(CancellationToken ct)
@@ -128,48 +222,7 @@ public sealed class GitSyncWorker(
                     continue;
                 }
 
-                var leaseId = claimed.LeaseId
-                    ?? throw new InvalidOperationException("Claimed Git sync job has no lease.");
-                logger.LogInformation("Claimed Git sync job {JobId} for repository association {AssociationId} source {CredentialSource}",
-                    claimed.Id, claimed.ProjectGitRepositoryId, claimed.CredentialSource);
-                var processor = scope.ServiceProvider.GetRequiredService<IGitSyncJobProcessor>();
-                try
-                {
-                    await ProcessWithHeartbeatAsync(processor, claimed, leaseId, leaseDuration, ct);
-                    await jobs.CompleteAsync(claimed.Id, leaseId, ct);
-                    logger.LogInformation("Completed Git sync job {JobId}", claimed.Id);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (GitHubIntegrationException exception)
-                {
-                    logger.LogWarning("Git sync job {JobId} deferred with code {ErrorCode}", claimed.Id, exception.Code);
-                    await ScheduleFailureAsync(jobs, claimed.Id, leaseId,
-                        claimed.RetryCount, exception.Code, exception.Message, exception.RetryAfter,
-                        exception.Code is not ("GITHUB_REPOSITORY_ACCESS_LOST" or
-                            "GITHUB_REAUTH_REQUIRED" or "GITHUB_SYNC_ASSOCIATION_CHANGED" or
-                            "GITHUB_REPOSITORY_NOT_AUTHORIZED" or "GITHUB_SYNC_EVIDENCE_SCHEMA_REQUIRED" or
-                            "GITHUB_EVIDENCE_HASH_CONFLICT"), ct);
-                }
-                catch (Exception exception) when (exception.GetBaseException() is PostgresException
-                    { SqlState: "23503", ConstraintName: { } constraint } &&
-                    (constraint.StartsWith("FK_ProjectEvidenceObservations_", StringComparison.Ordinal) ||
-                     constraint.StartsWith("FK_GitEvidenceVersions_", StringComparison.Ordinal)))
-                {
-                    logger.LogError("Git sync job {JobId} failed evidence integrity validation.", claimed.Id);
-                    await ScheduleFailureAsync(jobs, claimed.Id, leaseId, claimed.RetryCount,
-                        "GITHUB_SYNC_EVIDENCE_INTEGRITY", "Synchronization failed evidence integrity validation.",
-                        null, false, ct);
-                }
-                catch (Exception)
-                {
-                    logger.LogError("Git sync job {JobId} failed with an internal error.", claimed.Id);
-                    await ScheduleFailureAsync(jobs, claimed.Id, leaseId, claimed.RetryCount,
-                        "GITHUB_SYNC_INTERNAL", "Synchronization failed due to an internal processing error.",
-                        null, true, ct);
-                }
+                await ProcessClaimedJobAsync(scope.ServiceProvider, jobs, claimed, leaseDuration, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -180,6 +233,55 @@ public sealed class GitSyncWorker(
                 logger.LogError("Git synchronization worker loop failed; durable jobs remain queued.");
                 await Task.Delay(pollDelay, ct);
             }
+        }
+    }
+
+    // Normal and scoped execution share exactly the same heartbeat, processor and failure lifecycle.
+    private async Task ProcessClaimedJobAsync(IServiceProvider services, IGitSyncJobService jobs,
+        UniNet.Domain.Entities.GitSyncJob claimed, TimeSpan leaseDuration, CancellationToken ct)
+    {
+        var leaseId = claimed.LeaseId
+            ?? throw new InvalidOperationException("Claimed Git sync job has no lease.");
+        logger.LogInformation("Claimed Git sync job {JobId} for repository association {AssociationId} source {CredentialSource}",
+            claimed.Id, claimed.ProjectGitRepositoryId, claimed.CredentialSource);
+        var processor = services.GetRequiredService<IGitSyncJobProcessor>();
+        try
+        {
+            await ProcessWithHeartbeatAsync(processor, claimed, leaseId, leaseDuration, ct);
+            ct.ThrowIfCancellationRequested();
+            await jobs.CompleteAsync(claimed.Id, leaseId, ct);
+            logger.LogInformation("Completed Git sync job {JobId}", claimed.Id);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (GitHubIntegrationException exception)
+        {
+            logger.LogWarning("Git sync job {JobId} deferred with code {ErrorCode}", claimed.Id, exception.Code);
+            await ScheduleFailureAsync(jobs, claimed.Id, leaseId,
+                claimed.RetryCount, exception.Code, exception.Message, exception.RetryAfter,
+                exception.Code is not ("GITHUB_REPOSITORY_ACCESS_LOST" or
+                    "GITHUB_REAUTH_REQUIRED" or "GITHUB_SYNC_ASSOCIATION_CHANGED" or
+                    "GITHUB_REPOSITORY_NOT_AUTHORIZED" or "GITHUB_SYNC_EVIDENCE_SCHEMA_REQUIRED" or
+                    "GITHUB_EVIDENCE_HASH_CONFLICT"), ct);
+        }
+        catch (Exception exception) when (exception.GetBaseException() is PostgresException
+            { SqlState: "23503", ConstraintName: { } constraint } &&
+            (constraint.StartsWith("FK_ProjectEvidenceObservations_", StringComparison.Ordinal) ||
+             constraint.StartsWith("FK_GitEvidenceVersions_", StringComparison.Ordinal)))
+        {
+            logger.LogError("Git sync job {JobId} failed evidence integrity validation.", claimed.Id);
+            await ScheduleFailureAsync(jobs, claimed.Id, leaseId, claimed.RetryCount,
+                "GITHUB_SYNC_EVIDENCE_INTEGRITY", "Synchronization failed evidence integrity validation.",
+                null, false, ct);
+        }
+        catch (Exception)
+        {
+            logger.LogError("Git sync job {JobId} failed with an internal error.", claimed.Id);
+            await ScheduleFailureAsync(jobs, claimed.Id, leaseId, claimed.RetryCount,
+                "GITHUB_SYNC_INTERNAL", "Synchronization failed due to an internal processing error.",
+                null, true, ct);
         }
     }
 

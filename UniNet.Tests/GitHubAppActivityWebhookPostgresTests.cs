@@ -41,7 +41,7 @@ public sealed class EvidenceHostedSchemaFactAttribute : FactAttribute
 }
 
 [Collection("GitHub App activity PostgreSQL")]
-public sealed class GitHubAppActivityWebhookPostgresTests
+public sealed partial class GitHubAppActivityWebhookPostgresTests
 {
     private sealed class LeaseLossLogger : ILogger<GitSyncWorker>
     {
@@ -173,11 +173,13 @@ public sealed class GitHubAppActivityWebhookPostgresTests
         public Gate? FirstRead;
         public int Reads;
         public bool FailSync;
+        public int TransientFailuresRemaining;
         public bool AcceptReplacementToken;
         public long CommitAuthorId = 9;
         public bool DuplicateBranchAcrossPages;
         public bool CommitVersionAcrossPages;
         public bool IncludeContributionRelationships;
+        public bool IncludeIssueComments;
         public string BranchName = "main";
         public string RepositoryName = "repo";
         public Gate? ConcurrentBranches;
@@ -196,6 +198,8 @@ public sealed class GitHubAppActivityWebhookPostgresTests
             Assert.True(token == "installation-scoped-fixture" || (AcceptReplacementToken && token == "replacement-fixture"));
             Assert.Equal($"fixture/{RepositoryName}", repo);
             if (FailSync) throw new GitHubIntegrationException("GITHUB_TEMPORARY", "Temporary fixture failure.", 503);
+            if (TransientFailuresRemaining > 0 && Interlocked.Decrement(ref TransientFailuresRemaining) >= 0)
+                throw new GitHubIntegrationException("GITHUB_TEMPORARY", "Temporary fixture failure.", 503);
             if (category == "branches" && ConcurrentBranches is { } gate)
             {
                 if (Interlocked.Increment(ref branchReads) == 2) gate.Release.TrySetResult();
@@ -203,6 +207,7 @@ public sealed class GitHubAppActivityWebhookPostgresTests
             }
             var value = category switch
             {
+                "issue-comments" when IncludeIssueComments => """[{"id":8100,"user":{"id":9},"created_at":"2026-11-04T10:00:00Z","body":"private fixture text"}]""",
                 "branches" => JsonSerializer.Serialize(new[] { new { name = BranchName, commit = new { sha = "activity-sha" } } }),
                 "commits" => JsonSerializer.Serialize(new[] { new { sha = "activity-sha", commit = new { message = "fixture", committer = new { date = "2026-11-04T10:00:00Z" } }, author = new { id = CommitVersionAcrossPages && page > 1 ? CommitAuthorId + 1 : CommitAuthorId, login = "fixture" } } }),
                 "pull-requests" => """[{"id":7001,"number":7,"state":"open","updated_at":"2026-11-04T10:00:00Z","user":{"id":9,"login":"fixture"}}]""",
@@ -524,7 +529,10 @@ public sealed class GitHubAppActivityWebhookPostgresTests
             await seed.Set<GitHubAppInstallation>().Where(x => x.Id == f.Installation.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.NextReconciliationAt, DateTimeOffset.UtcNow.AddHours(1)));
         }
         var gate = new Gate(); f.Provider.BeforePageReturn = gate; f.Provider.GateOnlyFirstPage = true;
-        var sync = Options.Create(new GitSyncOptions { Enabled = true, WorkerConcurrency = 1, PollSeconds = 1, ReconciliationPollSeconds = 300, JobLeaseDurationSeconds = 30 });
+        // This test's 25s deadline must include a genuine transaction-conflict retry;
+        // the production default backoff starts at 30s, beyond that deadline.
+        var sync = Options.Create(new GitSyncOptions { Enabled = true, WorkerConcurrency = 1, PollSeconds = 1,
+            ReconciliationPollSeconds = 300, JobLeaseDurationSeconds = 30, RetryBaseDelaySeconds = 1, MaxRetryAttempts = 3 });
         var services = new ServiceCollection(); using var http = new HttpClient(f.Http, false);
         services.AddDbContext<UniNetDbContext>(o => o.UseNpgsql(Connection));
         services.AddSingleton<IOptions<GitSyncOptions>>(sync); services.AddSingleton<IOptions<GitHubAppOptions>>(f.App);
@@ -684,7 +692,7 @@ public sealed class GitHubAppActivityWebhookPostgresTests
         await using var db = Open();
         var source = await db.GitHubProviderObjects.SingleAsync(x => x.GitHubRepositoryId == f.Repository.Id && x.Category == "commits");
         var versions = await db.GitEvidenceVersions.Where(x => x.GitHubProviderObjectId == source.Id).ToListAsync(); Assert.Equal(2, versions.Count);
-        Assert.All(versions, version => { Assert.Equal(2, version.EvidenceSchemaVersion);
+        Assert.All(versions, version => { Assert.Equal(4, version.EvidenceSchemaVersion);
             Assert.Equal(GitSnapshotEvidenceValidation.Valid, GitSnapshotEvidenceValidator.Validate(version, source));
             Assert.NotNull(JsonSerializer.Deserialize<GitFrozenFacts>(version.FrozenFactsJson)!.Details); });
         var jobs = await db.GitSyncJobs.Where(x => x.GitHubRepositoryId == f.Repository.Id).ToListAsync(); Assert.Equal(2, jobs.Count);
@@ -723,7 +731,7 @@ public sealed class GitHubAppActivityWebhookPostgresTests
         foreach (var (category, scope) in new[] { ("pull-request-commits", "7"), ("issue-events", "8") })
         {
             var source = await db.GitHubProviderObjects.SingleAsync(x => x.GitHubRepositoryId == f.Repository.Id && x.Category == category);
-            var version = await db.GitEvidenceVersions.SingleAsync(x => x.GitHubProviderObjectId == source.Id && x.EvidenceSchemaVersion == 2);
+            var version = await db.GitEvidenceVersions.SingleAsync(x => x.GitHubProviderObjectId == source.Id && x.EvidenceSchemaVersion == 4);
             Assert.Equal(GitSnapshotEvidenceValidation.Valid, GitSnapshotEvidenceValidator.Validate(version, source));
             var facts = JsonSerializer.Deserialize<GitFrozenFacts>(version.FrozenFactsJson)!;
             Assert.Equal("9", Assert.Single(facts.Actors).ProviderAccountId);
@@ -737,7 +745,29 @@ public sealed class GitHubAppActivityWebhookPostgresTests
         await using var readerDb = Open();
         var snapshot = await new ProjectGitEvidenceSnapshotReader(readerDb).ReadAsync(f.Projects[0].Id, snapshotId, f.Owner.Id, default);
         Assert.Contains(snapshot.Entries, x => x.Facts?.Category == "pull-request-commits" && x.Facts.Details!.RelatedPullRequestNumber == 7 && x.Status == SnapshotEvidenceStatus.Incomplete);
-        Assert.Contains(snapshot.Entries, x => x.Facts?.Category == "issue-events" && x.Facts.Details!.RelatedIssueNumber == 8 && x.Status == SnapshotEvidenceStatus.Incomplete);
+        Assert.Contains(snapshot.Entries, x => x.Facts?.Category == "issue-events" && x.Facts.Details!.RelatedIssueNumber == 8 &&
+            x.Facts.Completeness == "Complete" && x.Status == SnapshotEvidenceStatus.Valid);
+    }
+
+    [Step4cPostgresFact]
+    public async Task IssueCommentV5FlowsThroughAtomicWriterAndAuthorizedSnapshot()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Provider.IncludeContributionRelationships = true; f.Provider.IncludeIssueComments = true;
+        await f.StageAsync("push"); Assert.True(await f.ConsumeAsync()); await f.ProcessJobsAsync();
+        await using var db = Open();
+        var source = await db.GitHubProviderObjects.SingleAsync(x => x.GitHubRepositoryId == f.Repository.Id && x.Category == "issue-comments");
+        var version = await db.GitEvidenceVersions.SingleAsync(x => x.GitHubProviderObjectId == source.Id);
+        Assert.Equal(5, version.EvidenceSchemaVersion); Assert.Equal("Complete", version.EvidenceStatus);
+        Assert.Equal(GitSnapshotEvidenceValidation.Valid, GitSnapshotEvidenceValidator.Validate(version, source));
+        Assert.DoesNotContain("private fixture text", version.FrozenFactsJson);
+        Assert.Equal(2, await db.ProjectEvidenceObservations.CountAsync(x => x.GitEvidenceVersionId == version.Id));
+        var id = await new ProjectGitEvidenceSnapshotService(db).CaptureAsync(f.Projects[0].Id, f.Owner.Id, DateTimeOffset.UtcNow, default);
+        var read = await new ProjectGitEvidenceSnapshotReader(db).ReadAsync(f.Projects[0].Id, id, f.Owner.Id, default);
+        var entry = Assert.Single(read.Entries, x => x.Category == "issue-comments");
+        Assert.Equal(SnapshotEvidenceStatus.Valid, entry.Status);
+        Assert.Equal(8, entry.Facts!.Details!.RelatedIssueNumber);
+        Assert.All(read.Entries, x => Assert.Equal(f.Links[0].Id, x.AssociationId));
     }
 
     [Step4cPostgresFact]
@@ -1086,7 +1116,8 @@ public sealed class GitHubAppActivityWebhookPostgresTests
         var observations = await verify.ProjectEvidenceObservations.Where(x => x.GitHubRepositoryId == f.Repository.Id).ToListAsync();
         Assert.NotEmpty(observations);
         Assert.All(observations, x => Assert.Contains(x.ProjectGitRepositoryId, f.Links.Take(2).Select(l => l.Id)));
-        Assert.All(observations, x => Assert.Equal("Incomplete", x.RetrievalCompleteness));
+        // End-of-scope retrieval is complete even when the item's frozen facts remain incomplete.
+        Assert.All(observations, x => Assert.Equal("Complete", x.RetrievalCompleteness));
         Assert.True(f.Tokens.Calls > 0);
     }
 
@@ -1772,6 +1803,10 @@ public sealed class GitHubAppActivityWebhookPostgresTests
                 Assert.Single(await check.GitEvidenceVersions.Where(x => x.GitHubProviderObjectId == branch.Id).ToListAsync());
                 await check.GitSyncJobs.Where(x => x.Id == job.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.NextAttemptAt, DateTimeOffset.UtcNow.AddSeconds(-1)));
             }
+            // The initial long delay pins the genuine 23505 for assertions above.
+            // Recovery may also encounter PostgreSQL 40001; let the real bounded
+            // worker retry it within this test's deadline instead of waiting 300s.
+            sync.Value.RetryBaseDelaySeconds = 1;
             using var retryWorker = new GitSyncWorker(container.GetRequiredService<IServiceScopeFactory>(), sync, NullLogger<GitSyncWorker>.Instance, f.App);
             try
             {
