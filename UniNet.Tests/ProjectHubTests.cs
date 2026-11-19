@@ -14,6 +14,24 @@ namespace UniNet.Tests;
 
 public sealed class ProjectHubTests
 {
+    [Theory]
+    [InlineData("accept", "đã được chấp nhận")]
+    [InlineData("reject", "đã bị từ chối")]
+    [InlineData("cancel", "đã được hủy")]
+    public async Task RequestDecisionNotificationNamesTheActualOutcome(string decision, string outcome)
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        await f.Service.RecruitmentAsync(project.Id, f.Owner.Id, new() { Status = 1,
+            Positions = [new() { Id = "developer", Name = "Developer", Quantity = 1 }] }, default);
+        var request = await f.Service.RequestAsync(project.Id, f.Other.Id, new() { PositionId = "developer" }, default);
+        await f.Service.DecideAsync(request.Id, decision == "cancel" ? f.Other.Id : f.Owner.Id, new(decision), default);
+        var notification = await f.Db.Set<VerificationNotification>().SingleAsync(n => n.Type == "project.join-request.reviewed");
+        Assert.Equal($"Yêu cầu tham gia dự án {project.Title} {outcome}.", notification.Message);
+        Assert.DoesNotContain("vừa được xử lý", notification.Message);
+        Assert.Equal(decision == "cancel" ? f.Owner.Id : f.Other.Id, notification.RecipientUserId);
+    }
+
     [Fact]
     public async Task DocumentMetadataIsRecoveredFromRegistryAndSurvivesRename()
     {

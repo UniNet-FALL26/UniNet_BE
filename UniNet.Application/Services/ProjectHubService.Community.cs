@@ -247,9 +247,10 @@ public sealed partial class ProjectHubService
                 "reject" => ProjectJoinRequestStatus.Rejected, _ => ProjectJoinRequestStatus.Cancelled };
             r.ReviewedBy = actor.Id; r.ReviewedAt = now; r.UpdatedAt = now; p.UpdatedAt = now;
             var recipientId = actor.Id == r.UserId ? p.Creator.AccountId : r.User.AccountId;
+            var outcome = decision switch { "accept" => "đã được chấp nhận", "reject" => "đã bị từ chối", _ => "đã được hủy" };
             await NotificationService.EnqueueAsync(db, [recipientId],
                 new("project.join-request.reviewed", "Project", "Cập nhật yêu cầu tham gia dự án",
-                    $"Yêu cầu tham gia dự án {p.Title} vừa được xử lý.", "Project", p.Id,
+                    $"Yêu cầu tham gia dự án {p.Title} {outcome}.", "Project", p.Id,
                     EventKey: $"project-hub-request:{r.Id}:{decision}", SenderUserId: accountId), ct);
             await db.SaveChangesAsync(ct); return MapRequest(r, p, r.User);
         }, ct);
