@@ -253,7 +253,7 @@ public sealed class PortfolioHttpTests
         Assert.Equal(HttpStatusCode.NotFound, deniedWrite.StatusCode);
         var off = await owner.PutAsJsonAsync("api/profile/portfolio/display/me", new { showPortfolio = false }); off.EnsureSuccessStatusCode();
         var ownOff = await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me");
-        Assert.False(ownOff!.Portfolio.Appearance.Profile.ShowPortfolio); Assert.Single(ownOff.Portfolio.Projects); Assert.True(ownOff.Portfolio.IsPublic);
+        Assert.False(ownOff!.Portfolio.Appearance.Profile.ShowPortfolio); Assert.Single(ownOff.Portfolio.Projects);
         var publicOff = await anonymous.GetFromJsonAsync<PortfolioResponse>($"api/profile/portfolio/{server.ProfileId}");
         Assert.False(publicOff!.IsOwner); Assert.Empty(publicOff.Portfolio.Projects); Assert.Null(publicOff.SkillCatalog);
         var on = await owner.PutAsJsonAsync("api/profile/portfolio/display/me", new { showPortfolio = true }); on.EnsureSuccessStatusCode();
@@ -267,9 +267,9 @@ public sealed class PortfolioHttpTests
         var filtered = await anonymous.GetFromJsonAsync<PortfolioResponse>($"api/profile/portfolio/{server.ProfileId}");
         Assert.Empty(filtered!.Portfolio.Projects); Assert.Null(filtered.Portfolio.ContactEmail);
         Assert.DoesNotContain("private-code", System.Text.Json.JsonSerializer.Serialize(filtered));
-        var privateSave = await owner.PutAsJsonAsync("api/profile/portfolio/editor/me", new PortfolioEditorRequest(new("HTTP Owner", "Owner", null, null, null), restored.Portfolio with { IsPublic = false })); privateSave.EnsureSuccessStatusCode();
-        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync($"api/profile/portfolio/{server.ProfileId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await visitor.GetAsync($"api/profile/portfolio/{server.ProfileId}")).StatusCode);
+        var privateSave = await owner.PutAsJsonAsync("api/profile/portfolio/editor/me", new PortfolioEditorRequest(new("HTTP Owner", "Owner", null, null, null), restored.Portfolio)); privateSave.EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync($"api/profile/portfolio/{server.ProfileId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await visitor.GetAsync($"api/profile/portfolio/{server.ProfileId}")).StatusCode);
     }
 
     [Fact]
@@ -363,7 +363,7 @@ public sealed class PortfolioHttpTests
             await using (var scope = app.Services.CreateAsyncScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>(); await db.Database.EnsureCreatedAsync();
-                var owner = new Account { Email = "http-owner@example.org", Role = AccountRole.Student, Profile = new UserProfile { FullName = "HTTP Owner", Nickname = "Owner", StudentCode = "private-code", CareerProfile = new CareerProfile { IsPublic = true, ProjectsJson = "[{\"title\":\"Preserved\",\"technologies\":[]}]" } } };
+                var owner = new Account { Email = "http-owner@example.org", Role = AccountRole.Student, Profile = new UserProfile { FullName = "HTTP Owner", Nickname = "Owner", StudentCode = "private-code", CareerProfile = new CareerProfile { ProjectsJson = "[{\"title\":\"Preserved\",\"technologies\":[]}]" } } };
                 var company = new Account { Email = "http-company@example.org", Role = AccountRole.Partner, Profile = new UserProfile { FullName = "Company", Nickname = "Company" } };
                 db.Accounts.AddRange(owner, company); await db.SaveChangesAsync(); ownerId = owner.Id; profileId = owner.Profile.Id; companyId = company.Id;
             }

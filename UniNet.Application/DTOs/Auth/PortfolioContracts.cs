@@ -68,7 +68,6 @@ public sealed record PortfolioContent
     public string? Availability { get; init; }
     public string? ContactEmail { get; init; }
     public string? CvUrl { get; init; }
-    public bool IsPublic { get; init; }
     public PortfolioSkill[] Skills { get; init; } = [];
     public PortfolioProject[] Projects { get; init; } = [];
     public PortfolioMilestone[] Experience { get; init; } = [];

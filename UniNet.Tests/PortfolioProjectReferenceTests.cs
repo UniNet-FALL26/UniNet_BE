@@ -33,7 +33,7 @@ public sealed class PortfolioProjectReferenceTests
         await db.SaveChangesAsync();
         var service = new PortfolioService(db);
         var account = creator ? owner : member;
-        var request = new PortfolioContent { IsPublic = true, Projects = [new() { ProjectId = project.Id, Title = "Spoofed title", PersonalContribution = "Built APIs", Featured = true }] };
+        var request = new PortfolioContent { Projects = [new() { ProjectId = project.Id, Title = "Spoofed title", PersonalContribution = "Built APIs", Featured = true }] };
         Assert.Equal(allowed ? 1 : 0, (await service.EligibleProjectList(account.Id, default)).Length);
         await Assert.ThrowsAsync<AuthException>(() => service.Save(outsider.Id, request, default));
         if (!allowed)

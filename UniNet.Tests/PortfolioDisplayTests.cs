@@ -11,6 +11,25 @@ namespace UniNet.Tests;
 public sealed class PortfolioDisplayTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnotherAccountCanReadActiveStudentWithOrWithoutCareerProfile(bool hasCareerProfile)
+    {
+        var (connection, db, account) = await Setup();
+        await using var connectionScope = connection; await using var dbScope = db;
+        if (!hasCareerProfile) { db.CareerProfiles.Remove(account.Profile!.CareerProfile!); account.Profile.CareerProfile = null; }
+        await db.SaveChangesAsync();
+        var service = new PortfolioService(db);
+        var visitor = await service.Read(account.Profile!.Id, Guid.NewGuid(), default);
+        Assert.Equal(account.Profile.Id, visitor.Profile.Id); Assert.False(visitor.IsOwner);
+        Assert.Null(db.Model.FindEntityType(typeof(CareerProfile))!.FindProperty("IsPublic"));
+        var json = System.Text.Json.JsonSerializer.Serialize(visitor);
+        Assert.DoesNotContain("IsPublic", json); Assert.DoesNotContain("private-code", json);
+        account.Status = AccountStatus.Suspended; await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<AuthException>(() => service.Read(account.Profile.Id, Guid.NewGuid(), default));
+    }
+
+    [Theory]
     [InlineData("developer-modern", "blue")]
     [InlineData("developer-modern", "amber")]
     [InlineData("developer-showcase", "mint")]
@@ -32,7 +51,7 @@ public sealed class PortfolioDisplayTests
         Assert.Equal(theme, saved.Portfolio.Appearance.Profile.Theme);
         Assert.Equal("Updated", saved.Portfolio.Headline);
         Assert.Single(saved.Portfolio.Projects); Assert.Single(saved.Portfolio.Activities!);
-        Assert.True(saved.Portfolio.IsPublic);
+
         Assert.Contains("keep", (await db.CareerProfiles.SingleAsync()).AppearanceJson);
         Assert.Equal("private-code", (await db.UserProfiles.SingleAsync()).StudentCode);
     }
@@ -62,7 +81,7 @@ public sealed class PortfolioDisplayTests
         var projects = account.Profile!.CareerProfile!.ProjectsJson;
         await service.SaveDisplay(account.Id, false, default);
         db.ChangeTracker.Clear(); var off = await service.Me(account.Id, default);
-        Assert.False(off.Portfolio.Appearance.Profile.ShowPortfolio); Assert.True(off.Portfolio.IsPublic);
+        Assert.False(off.Portfolio.Appearance.Profile.ShowPortfolio);
         Assert.Equal(projects, (await db.CareerProfiles.SingleAsync()).ProjectsJson);
         var visitor = await service.Read(account.Profile.Id, null, default);
         Assert.False(visitor.IsOwner); Assert.Empty(visitor.Portfolio.Projects); Assert.Null(visitor.Portfolio.ContactEmail);
@@ -90,8 +109,8 @@ public sealed class PortfolioDisplayTests
         var serialized = System.Text.Json.JsonSerializer.Serialize(visitor);
         Assert.DoesNotContain("secret", serialized); Assert.DoesNotContain("private-code", serialized);
         Assert.Single((await service.Me(account.Id, default)).Portfolio.Projects);
-        account.Profile.CareerProfile!.IsPublic = false; await db.SaveChangesAsync();
-        await Assert.ThrowsAsync<AuthException>(() => service.Read(account.Profile.Id, Guid.NewGuid(), default));
+
+        Assert.False((await service.Read(account.Profile.Id, Guid.NewGuid(), default)).IsOwner);
         account.Role = AccountRole.Partner; await db.SaveChangesAsync();
         await Assert.ThrowsAsync<AuthException>(() => service.SaveDisplay(account.Id, true, default));
         await Assert.ThrowsAsync<AuthException>(() => service.Read(account.Profile.Id, null, default));
@@ -132,7 +151,7 @@ public sealed class PortfolioDisplayTests
         var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>().UseSqlite(connection).Options); await db.Database.EnsureCreatedAsync();
         var account = new Account { Email = "display-owner@example.org", Role = AccountRole.Student, Profile = new UserProfile {
             FullName = "Owner", Nickname = "Owner", StudentCode = "private-code", Bio = "secret bio",
-            CareerProfile = new CareerProfile { Headline = "secret headline", IsPublic = true, ProjectsJson = "[{\"title\":\"secret project\",\"technologies\":[],\"featured\":false}]", ActivitiesJson = "[{\"title\":\"secret activity\"}]", BasicInfoJson = "{\"contactEmail\":\"secret@example.org\",\"gpa\":\"secret GPA\"}", AppearanceJson = "{\"cv\":{\"font\":\"keep\"}}" }
+            CareerProfile = new CareerProfile { Headline = "secret headline", ProjectsJson = "[{\"title\":\"secret project\",\"technologies\":[],\"featured\":false}]", ActivitiesJson = "[{\"title\":\"secret activity\"}]", BasicInfoJson = "{\"contactEmail\":\"secret@example.org\",\"gpa\":\"secret GPA\"}", AppearanceJson = "{\"cv\":{\"font\":\"keep\"}}" }
         } };
         db.Accounts.Add(account); await db.SaveChangesAsync(); return (connection, db, account);
     }

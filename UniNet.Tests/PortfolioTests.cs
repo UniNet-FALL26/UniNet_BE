@@ -21,7 +21,7 @@ public sealed class PortfolioTests
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
         var result = await new PortfolioService(db).Save(account.Id, new PortfolioContent(), default);
-        Assert.False(result.Portfolio.IsPublic);
+
         Assert.Single(await db.CareerProfiles.ToListAsync());
     }
     [Fact]
@@ -43,9 +43,8 @@ public sealed class PortfolioTests
         await db.SaveChangesAsync();
         var payload = new PortfolioContent { Headline = "Developer", Projects = [new() { Title = "Real project", Technologies = ["React"] }], Articles = [new() { Title = "Real article", Url = "https://example.com/article" }] };
         await service.Save(account.Id, payload, default);
-        var denial = await Assert.ThrowsAsync<AuthException>(() => service.Read(account.Profile.Id, Guid.NewGuid(), default));
-        Assert.Equal(404, denial.Status);
-        var published = await service.Save(account.Id, payload with { IsPublic = true }, default);
+        Assert.False((await service.Read(account.Profile.Id, Guid.NewGuid(), default)).IsOwner);
+        var published = await service.Save(account.Id, payload, default);
         Assert.Single(published.Portfolio.Projects);
         var visitor = await service.Read(account.Profile.Id, Guid.NewGuid(), default);
         Assert.False(visitor.IsOwner);

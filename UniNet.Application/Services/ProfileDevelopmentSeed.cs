@@ -65,7 +65,7 @@ public sealed class ProfileDevelopmentSeed(UniNetDbContext db)
             new() { Title="Microsoft Certified Azure Fundamentals", Issuer="Microsoft" }, new() { Title="EF Standard Certificate", Issuer="FPT University" },
             new() { Title="English Certificate (TOEIC)", Issuer="IIG Vietnam" }, new() { Title="React Native Certificate", Issuer="Udemy" } }, "career.certificates");
         c.AppearanceJson = Section(c.AppearanceJson, new ProfileAppearance(), "career.appearance");
-        // Verification, student code, documents, contact privacy and IsPublic are untouched.
+        // Verification, student code, documents and contact privacy are untouched.
         if (changes.Count > 0) { c.UpdatedAt = DateTimeOffset.UtcNow; user.UpdatedAt = DateTimeOffset.UtcNow; }
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
         return new { accountFound=true, userFound=true, careerProfileCreated=created, careerProfileCount=await db.CareerProfiles.CountAsync(x => x.UserId == user.Id, ct), added=changes };
