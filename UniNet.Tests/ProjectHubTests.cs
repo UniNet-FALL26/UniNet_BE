@@ -15,6 +15,34 @@ namespace UniNet.Tests;
 public sealed class ProjectHubTests
 {
     [Theory]
+    [InlineData(false, false, ProjectMemberStatus.Left)]
+    [InlineData(false, true, ProjectMemberStatus.Kicked)]
+    [InlineData(true, false, ProjectMemberStatus.Left)]
+    [InlineData(true, true, ProjectMemberStatus.Kicked)]
+    public async Task HubRejectsLeavingAndKicking(bool completed, bool asOwner, ProjectMemberStatus status)
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        var member = new ProjectMember
+        {
+            ProjectId = project.Id, UserId = f.Other.Profile!.Id,
+            Role = "Developer", Status = ProjectMemberStatus.Active
+        };
+        f.Db.ProjectMembers.Add(member);
+        await f.Db.SaveChangesAsync();
+        if (completed)
+            await f.Service.CompleteAsync(project.Id, f.Owner.Id, default);
+
+        var error = await Assert.ThrowsAsync<ProjectException>(() => f.Service.MemberAsync(
+            project.Id, member.UserId, asOwner ? f.Owner.Id : f.Other.Id, new(Status: (short)status), default));
+
+        Assert.Equal("PROJECT_HUB_MEMBER_REMOVAL_DISABLED", error.Code);
+        await f.Db.Entry(member).ReloadAsync();
+        Assert.Equal(ProjectMemberStatus.Active, member.Status);
+        Assert.Null(member.LeftAt);
+    }
+
+    [Theory]
     [InlineData("accept", "đã được chấp nhận")]
     [InlineData("reject", "đã bị từ chối")]
     [InlineData("cancel", "đã được hủy")]
