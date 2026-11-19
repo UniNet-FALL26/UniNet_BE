@@ -40,7 +40,6 @@ public static class ProjectMapping
             project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
-            project.ExpectedOutput,
             project.Visibility,
             project.Status,
             project.RecruitmentStatus,
@@ -53,7 +52,7 @@ public static class ProjectMapping
             isCreator,
             isMember,
             members,
-            Origin: project.Origin, Leader: ProjectIdentityMapping.Leader(project), ExternalDetails: ProjectIdentityMapping.ExternalDetails(project), Specialization: SpecializationMapping.ToResponse(project.Specialization)
+             Leader: ProjectIdentityMapping.Leader(project), ExternalDetails: ProjectIdentityMapping.ExternalDetails(project), Specialization: SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -74,7 +73,7 @@ public static class ProjectMapping
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
             project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
+             ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 

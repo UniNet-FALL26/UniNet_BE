@@ -17,7 +17,6 @@ public sealed class CareerProfile
     public string? LanguagesJson { get; set; }
     public string? SocialLinksJson { get; set; }
     public string? AppearanceJson { get; set; }
-    public bool IsPublic { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

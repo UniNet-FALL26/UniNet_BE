@@ -34,9 +34,13 @@ public sealed class ProjectJoinRequestCapacityTests
             Description = "Test", MemberTarget = 5, Status = ProjectStatus.Active,
             Visibility = ProjectVisibility.Public, RecruitmentStatus = RecruitmentStatus.Open,
             RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(1),
-            RoleRequirements = [new() { Id = Guid.NewGuid(), Role = "Developer", Quantity = quantity, Requirements = "Code" },
-                new() { Id = Guid.NewGuid(), Role = "Tester", Quantity = 1, Requirements = "Test" }] };
+            RoleRequirements = [new() { Id = Guid.NewGuid().ToString(), Role = "Developer", Quantity = quantity, Requirements = "Code" },
+                new() { Id = Guid.NewGuid().ToString(), Role = "Tester", Quantity = 1, Requirements = "Test" }] };
         db.Projects.Add(project);
+        await db.SaveChangesAsync();
+        db.Friendships.AddRange(
+            new() { RequesterAccountId = owner.Id, ReceiverAccountId = selected.Id, Status = FriendshipStatus.Accepted },
+            new() { RequesterAccountId = owner.Id, ReceiverAccountId = applicant.Id, Status = FriendshipStatus.Accepted });
         await db.SaveChangesAsync();
         var joins = new ProjectJoinRequestService(db);
         var invites = new ProjectInvitationService(db);
@@ -58,10 +62,10 @@ public sealed class ProjectJoinRequestCapacityTests
             Assert.Equal("project.join-request.reviewed", acceptedNotice.Type);
             Assert.Equal(project.Id, acceptedNotice.TargetId);
         }
-        Assert.Equal(quantity == 1 ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
+        Assert.Equal(quantity == 1 && !viaInvitation ? ProjectJoinRequestStatus.Cancelled : ProjectJoinRequestStatus.Pending,
             (await db.ProjectJoinRequests.FindAsync(competing.Id))!.Status);
-        Assert.Equal(quantity == 1 ? ProjectInvitationStatus.Cancelled : ProjectInvitationStatus.Sent,
-            (await db.ProjectInvitations.FindAsync(competingInvite.Id))!.Status);
+        Assert.Equal(ProjectJoinRequestStatus.Pending,
+            (await db.ProjectJoinRequests.SingleAsync(i => i.Id == competingInvite.Id))!.Status);
         if (quantity == 1)
         {
             // Simulate a legacy pending request left behind before automatic cancellation existed.
@@ -75,7 +79,7 @@ public sealed class ProjectJoinRequestCapacityTests
             Assert.Equal("JOIN_REQUEST_EXISTS", duplicate.Code);
             var blocked = await Assert.ThrowsAsync<ProjectInvitationException>(() =>
                 invites.SendAsync(project.Id, owner.Id, new(applicant.Profile.Id, "Developer")));
-            Assert.Equal("PROJECT_ROLE_FULL", blocked.Code);
+            Assert.Equal("INVITATION_EXISTS", blocked.Code);
         }
     }
 
@@ -99,7 +103,7 @@ public sealed class ProjectJoinRequestCapacityTests
             Description = "Test", MemberTarget = 4, Status = ProjectStatus.Active,
             Visibility = ProjectVisibility.Public, RecruitmentStatus = RecruitmentStatus.Open,
             RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(1),
-            RoleRequirements = [new() { Id = Guid.NewGuid(), Role = "Developer", Quantity = quantity,
+            RoleRequirements = [new() { Id = Guid.NewGuid().ToString(), Role = "Developer", Quantity = quantity,
                 Requirements = "Code" }] };
         db.Projects.Add(project);
         db.ProjectMembers.Add(new() { Id = Guid.NewGuid(), Project = project, User = member.Profile!,

@@ -17,7 +17,6 @@ public record CreateProjectRequest(
     int MemberTarget,
     int MinimumQuantity,
     DateTimeOffset RecruitmentDeadline,
-    DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
     List<RoleRequirementRequest>? RoleRequirements = null,
     List<Guid>? SkillIds = null,
@@ -32,7 +31,6 @@ public record UpdateProjectRequest(
     string? ProjectField = null,
     string? Description = null,
     DateTimeOffset? RecruitmentDeadline = null,
-    DateTimeOffset? ExpectedOutput = null,
     Guid? SpecializationId = null
 
 );
@@ -47,7 +45,6 @@ public record ProjectDetailResponse(
     int? MinimumQuantity,
     int CurrentMemberCount,
     DateTimeOffset? RecruitmentDeadline,
-    DateTimeOffset? ExpectedOutput,
     ProjectVisibility Visibility,
     ProjectStatus Status,
     RecruitmentStatus RecruitmentStatus,
@@ -61,7 +58,6 @@ public record ProjectDetailResponse(
     List<ProjectMemberInfo>? Members = null,
     List<ProjectInvitationResponse>? Invitations = null,
     List<ProjectJoinRequestResponse>? JoinRequests = null,
-    ProjectOrigin Origin = ProjectOrigin.Internal,
     ProjectLeaderInfo? Leader = null,
     UniNet.Application.DTOs.Projects.ExternalProjectDraftData? ExternalDetails = null,
     SpecializationResponse? Specialization = null
@@ -75,7 +71,7 @@ public record CreatorInfo(
 );
 
 public record RoleRequirementInfo(
-    Guid Id,
+    string Id,
     string RoleName,
     int Quantity,
     string Requirements
@@ -107,7 +103,6 @@ public record ProjectListItemResponse(
     DateTimeOffset CreatedAt,
     CreatorInfo Creator,
     List<ProjectSkillInfo> Skills,
-    ProjectOrigin Origin = ProjectOrigin.Internal,
     ProjectLeaderInfo? Leader = null,
     SpecializationResponse? Specialization = null
 );

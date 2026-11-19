@@ -40,7 +40,7 @@ public sealed class PortfolioProductionTests
         Assert.Equal("New name",result.Profile.FullName); Assert.Equal("New nickname",result.Profile.Nickname); Assert.Equal("New bio",result.Profile.Bio);
         Assert.Equal(5.5,result.Portfolio.YearsOfExperience); Assert.Equal("8.5/10",result.Portfolio.Gpa);
         var identity=await db.UserProfiles.SingleAsync(); Assert.Equal("private",identity.StudentCode); Assert.False(identity.IsVerified);
-        Assert.False(result.Portfolio.IsPublic); Assert.Contains("keep",(await db.CareerProfiles.SingleAsync()).AppearanceJson);
+         Assert.Contains("keep",(await db.CareerProfiles.SingleAsync()).AppearanceJson);
         Assert.Single(result.Portfolio.Projects);
     }
     [Fact] public async Task InvalidEditorIdentityCannotPartiallyPersistContent()
@@ -67,14 +67,14 @@ public sealed class PortfolioProductionTests
         await service.SaveAppearance(a.Id,new ProfileAppearance { Profile=new() { Theme="orange", HiddenSections=["certificates"] } },default);
         db.ChangeTracker.Clear(); var result=await service.Me(a.Id,default);
         Assert.Equal("amber",result.Portfolio.Appearance.Profile.Theme); Assert.Equal(before,(await db.CareerProfiles.SingleAsync()).ProjectsJson);
-        Assert.False(result.Portfolio.IsPublic); Assert.Contains("keep",(await db.CareerProfiles.SingleAsync()).AppearanceJson); Assert.Single(await db.CareerProfiles.ToListAsync());
+         Assert.Contains("keep",(await db.CareerProfiles.SingleAsync()).AppearanceJson); Assert.Single(await db.CareerProfiles.ToListAsync());
         await Assert.ThrowsAsync<AuthException>(()=>service.SaveAppearance(Guid.NewGuid(),new(),default));
-        await Assert.ThrowsAsync<AuthException>(()=>service.Read(a.Profile.Id,null,default));
+        Assert.False((await service.Read(a.Profile.Id,null,default)).IsOwner);
     }
     [Fact] public async Task ProfileIdentityIncludesFullNameAndNicknameForPublicDisplay()
     {
         var (connection,db,a)=await Setup(); await using var connectionScope=connection; await using var dbScope=db;
-        a.Profile!.CareerProfile!.IsPublic=true;await db.SaveChangesAsync();
+
         var response=await new PortfolioService(db).Read(a.Profile.Id,null,default);
         var json=System.Text.Json.JsonSerializer.SerializeToElement(response.Profile,new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
         Assert.Equal("Existing identity",json.GetProperty("fullName").GetString());
@@ -85,7 +85,7 @@ public sealed class PortfolioProductionTests
     {
         var (connection,db,a)=await Setup(); await using var connectionScope=connection; await using var dbScope=db;
         var skill=new Skill {Name="React",Category=SkillCategory.Frontend};db.Skills.Add(skill);await db.SaveChangesAsync();
-        var service=new PortfolioService(db); var saved=await service.Save(a.Id,new PortfolioContent { IsPublic=true,Skills=[new() {SkillId=skill.Id,Level=1}] },default);
+        var service=new PortfolioService(db); var saved=await service.Save(a.Id,new PortfolioContent { Skills=[new() {SkillId=skill.Id,Level=1}] },default);
         var json=a.Profile!.CareerProfile!.SkillsJson!;Assert.Contains("skillId",json);Assert.DoesNotContain("name",json);Assert.DoesNotContain("iconUrl",json);
         var visitor=await service.Read(a.Profile.Id,null,default);Assert.False(visitor.IsOwner);Assert.Equal("React",visitor.Portfolio.Skills.Single().Name);
         var serialized=System.Text.Json.JsonSerializer.Serialize(visitor);Assert.DoesNotContain("private",serialized);Assert.DoesNotContain("StudentCode",serialized);

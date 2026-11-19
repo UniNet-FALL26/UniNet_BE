@@ -29,8 +29,6 @@ public sealed class ProjectModerationService(
         var total = await query.CountAsync(ct);
         var pending = await query
             .Include(m => m.Project).ThenInclude(p => p.Creator)
-            .Include(m => m.Project).ThenInclude(p => p.RoleRequirements)
-            .Include(m => m.Project).ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
             .Include(m => m.Project).ThenInclude(p => p.Members)
             .OrderBy(m => m.CreatedAt).ThenBy(m => m.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
@@ -270,8 +268,7 @@ public sealed class ProjectModerationService(
 
     private async Task<Project> LoadAuthorizedProjectAsync(Guid projectId, Guid accountId, CancellationToken ct)
     {
-        var project = await db.Projects.Include(p => p.RoleRequirements)
-            .Include(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+        var project = await db.Projects
             .FirstOrDefaultAsync(p => p.Id == projectId, ct)
             ?? throw new ProjectException("PROJECT_NOT_FOUND", "Dự án không tồn tại.", 404);
         // CreatorId and member UserId reference profiles, while JWT contains AccountId.
@@ -294,7 +291,7 @@ public sealed class ProjectModerationService(
             .Select(m => m.Value.TrimEnd('.', ',', ';', ')', ']')).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
         return new(project.Title, project.Description, project.ProjectField,
             project.ProjectSkills.Select(s => s.Skill.Name).OrderBy(s => s, StringComparer.Ordinal).ToList(),
-            project.MemberTarget.GetValueOrDefault(), project.ExpectedOutput?.ToString("O"), roles, links);
+            project.MemberTarget.GetValueOrDefault(), roles, links);
     }
 
     private static ModerationCheckResult MapCheckResult(string? result) => result?.Trim().ToLowerInvariant() switch

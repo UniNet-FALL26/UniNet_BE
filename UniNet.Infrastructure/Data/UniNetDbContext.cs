@@ -102,10 +102,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
     public DbSet<PortraitAsset> PortraitAssets => Set<PortraitAsset>();
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
-    public DbSet<ExternalProjectDraft> ExternalProjectDrafts => Set<ExternalProjectDraft>();
     public DbSet<AssessorOnboarding> AssessorOnboardings => Set<AssessorOnboarding>();
     public DbSet<AssessorOnboardingEmail> AssessorOnboardingEmails => Set<AssessorOnboardingEmail>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<Friendship> Friendships => Set<Friendship>();
     public DbSet<VerificatorAvailability> VerificatorAvailabilities => Set<VerificatorAvailability>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
@@ -114,10 +114,11 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectDetail> ProjectDetails => Set<ProjectDetail>();
+    public DbSet<ProjectRecruitment> ProjectRecruitments => Set<ProjectRecruitment>();
+    public DbSet<ProjectPersonalReview> ProjectPersonalReviews => Set<ProjectPersonalReview>();
     public DbSet<Specialization> Specializations => Set<Specialization>();
     public DbSet<AssessorSpecialization> AssessorSpecializations => Set<AssessorSpecialization>();
-    public DbSet<ProjectRoleRequirement> ProjectRoleRequirements => Set<ProjectRoleRequirement>();
-    public DbSet<ProjectSkill> ProjectSkills => Set<ProjectSkill>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
     public DbSet<GitHubOAuthConnection> GitHubOAuthConnections => Set<GitHubOAuthConnection>();
     public DbSet<GitHubOAuthAuthorizationFlow> GitHubOAuthAuthorizationFlows => Set<GitHubOAuthAuthorizationFlow>();
@@ -140,15 +141,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
     public DbSet<GitHubAppWebhookDelivery> GitHubAppWebhookDeliveries => Set<GitHubAppWebhookDelivery>();
     public DbSet<ProjectGitActivityVisibility> ProjectGitActivityVisibilities => Set<ProjectGitActivityVisibility>();
-    public DbSet<WorkspaceChannel> WorkspaceChannels => Set<WorkspaceChannel>();
-    public DbSet<WorkspaceMessage> WorkspaceMessages => Set<WorkspaceMessage>();
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
-    public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
-    public DbSet<ProjectTask> ProjectTasks => Set<ProjectTask>();
-    public DbSet<ProjectTaskAssignment> ProjectTaskAssignments => Set<ProjectTaskAssignment>();
-    public DbSet<TaskReport> TaskReports => Set<TaskReport>();
-    public DbSet<TaskEvidence> TaskEvidence => Set<TaskEvidence>();
-    public DbSet<TaskReportReview> TaskReportReviews => Set<TaskReportReview>();
     public DbSet<ContributionCycle> ContributionCycles => Set<ContributionCycle>();
     public DbSet<ContributionParticipant> ContributionParticipants => Set<ContributionParticipant>();
     public DbSet<ContributionPeerEvaluation> ContributionPeerEvaluations => Set<ContributionPeerEvaluation>();
@@ -185,13 +178,14 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         model.ApplyConfiguration(new OfficialAuditConfiguration());
         model.ApplyConfiguration(new OfficialPublicationConfiguration());
         SpecializationConfiguration.Configure(model);
+        SimplifiedProjectConfiguration.Configure(model);
         AssessorOnboardingConfiguration.Configure(model);
         model.ApplyConfiguration(new UploadedFileConfiguration());
-        model.ApplyConfiguration(new ExternalProjectDraftConfiguration());
         AdminManagementConfiguration.Configure(model);
         FinanceConfiguration.Configure(model);
         model.ApplyConfiguration(new VerificationNotificationConfiguration());
         NotificationConfiguration.Configure(model);
+        FriendshipConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
         GitHubIntegrationConfiguration.Configure(model);
         GitHubAppInstallationConfiguration.Configure(model);
@@ -309,10 +303,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 
                 t.HasCheckConstraint("CK_Projects_MinimumQuantity",
                     "\"MinimumQuantity\" >= 1 AND \"MinimumQuantity\" <= \"MemberTarget\"");
-                t.HasCheckConstraint("CK_Projects_Origin", "\"Origin\" IN (0, 1)");
-                t.HasCheckConstraint("CK_Projects_RecruitmentApplicability",
-                    "(\"Origin\" = 0 AND \"MemberTarget\" IS NOT NULL AND \"MinimumQuantity\" IS NOT NULL AND \"RecruitmentDeadline\" IS NOT NULL) OR " +
-                    "(\"Origin\" = 1 AND \"MemberTarget\" IS NULL AND \"MinimumQuantity\" IS NULL AND \"RecruitmentDeadline\" IS NULL AND \"RecruitmentStatus\" = 2 AND \"Status\" = 2)");
 
                 t.HasCheckConstraint(
                     "CK_Projects_Status",
@@ -343,7 +333,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.MemberTarget).IsRequired(false);
 
             e.Property(x => x.RecruitmentDeadline).IsRequired(false);
-            e.Property(x => x.Origin).HasConversion<short>().HasDefaultValue(ProjectOrigin.Internal);
             e.Property(x => x.ImplementationStartDate).HasMaxLength(10);
             e.Property(x => x.ImplementationEndDate).HasMaxLength(10);
             e.Property(x => x.ExternalLeaderName).HasMaxLength(255);
@@ -351,7 +340,6 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
             e.Property(x => x.SubmitterContribution).HasMaxLength(4000);
             e.Property(x => x.ExternalDetailsJson).HasColumnType("jsonb");
 
-            e.Property(x => x.ExpectedOutput);
 
             e.Property(x => x.Visibility)
                 .HasConversion<short>()
@@ -398,57 +386,8 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 .HasForeignKey<ContributionCycle>(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        model.Entity<ProjectRoleRequirement>(e =>
-        {
-            e.ToTable("ProjectRoleRequirements", t =>
-            {
-                t.HasCheckConstraint(
-                    "CK_ProjectRoleRequirements_Quantity",
-                    "\"Quantity\" > 0");
-            });
 
-            e.HasKey(x => x.Id);
 
-            e.Property(x => x.Role)
-                .HasMaxLength(150)
-                .IsRequired();
-
-            e.Property(x => x.Quantity)
-                .IsRequired();
-
-            e.Property(x => x.Requirements)
-                .HasColumnType("text")
-                .IsRequired();
-
-            e.Property(x => x.CreatedAt)
-                .IsRequired();
-
-            e.Property(x => x.UpdatedAt)
-                .IsRequired();
-
-            e.HasOne(x => x.Project)
-                .WithMany(x => x.RoleRequirements)
-                .HasForeignKey(x => x.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasIndex(x => x.ProjectId);
-        });
-        model.Entity<ProjectSkill>(e =>
-        {
-            e.ToTable("ProjectSkills");
-
-            e.HasKey(x => new { x.ProjectId, x.SkillId });
-
-            e.HasOne(x => x.Project)
-                .WithMany(x => x.ProjectSkills)
-                .HasForeignKey(x => x.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasOne(x => x.Skill)
-                .WithMany(x => x.ProjectSkills)
-                .HasForeignKey(x => x.SkillId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
         model.Entity<ProjectMember>(e =>
         {
             e.ToTable("ProjectMembers", t =>
@@ -510,62 +449,15 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 x.Status
             });
         });
-        model.Entity<WorkspaceChannel>(e =>
-        {
-            e.ToTable("WorkspaceChannels", t => t.HasCheckConstraint(
-                "CK_WorkspaceChannels_DeletedMetadata",
-                "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR " +
-                "(\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)"));
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Name).HasMaxLength(100).IsRequired();
-            e.Property(x => x.Description).HasMaxLength(500);
-            e.Property(x => x.CreatedAt).IsRequired();
-            e.Property(x => x.UpdatedAt).IsRequired();
-            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
-                e.Property(x => x.CreatedAt).HasConversion<long>(
-                    value => value.UtcTicks,
-                    ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
-            e.HasOne(x => x.Project)
-                .WithMany(x => x.WorkspaceChannels)
-                .HasForeignKey(x => x.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.CreatedBy)
-                .WithMany()
-                .HasForeignKey(x => x.CreatedById)
-                .OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.DeletedBy)
-                .WithMany()
-                .HasForeignKey(x => x.DeletedById)
-                .OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => new { x.ProjectId, x.IsDeleted });
-        });
-        model.Entity<WorkspaceMessage>(e =>
-        {
-            e.ToTable("WorkspaceMessages");
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Content).HasMaxLength(4000).IsRequired();
-            e.Property(x => x.CreatedAt).IsRequired();
-            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
-                e.Property(x => x.CreatedAt).HasConversion<long>(
-                    value => value.UtcTicks,
-                    ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
-            e.HasOne(x => x.Channel)
-                .WithMany(x => x.Messages)
-                .HasForeignKey(x => x.ChannelId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Sender)
-                .WithMany()
-                .HasForeignKey(x => x.SenderId)
-                .OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => new { x.ChannelId, x.CreatedAt, x.Id });
-        });
+
+
         model.Entity<ProjectJoinRequest>(e =>
         {
             e.ToTable("ProjectJoinRequests", t =>
             {
                 t.HasCheckConstraint(
                     "CK_ProjectJoinRequests_Status",
-                    "\"Status\" BETWEEN 0 AND 3");
+                    "\"Status\" BETWEEN 0 AND 4");
             });
 
             e.HasKey(x => x.Id);
@@ -611,195 +503,13 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
                 x.Status
             });
         });
-        model.Entity<ProjectInvitation>(e =>
-        {
-            e.ToTable("ProjectInvitations", t =>
-            {
-                t.HasCheckConstraint(
-                    "CK_ProjectInvitations_Status",
-                    "\"Status\" BETWEEN 0 AND 4");
-            });
 
-            e.HasKey(x => x.Id);
 
-            e.Property(x => x.Role)
-                .HasMaxLength(150)
-                .IsRequired();
 
-            e.Property(x => x.Message)
-                .HasColumnType("text");
 
-            e.Property(x => x.Status)
-                .HasConversion<short>()
-                .IsRequired();
 
-            e.Property(x => x.CreatedAt)
-                .IsRequired();
 
-            e.Property(x => x.UpdatedAt)
-                .IsRequired();
 
-            // Project
-            e.HasOne(x => x.Project)
-                .WithMany(x => x.Invitations)
-                .HasForeignKey(x => x.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Person who sends the invitation
-            e.HasOne(x => x.Inviter)
-                .WithMany(x => x.SentInvitations)
-                .HasForeignKey(x => x.InviterId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            // Person who receives the invitation
-            e.HasOne(x => x.Invitee)
-                .WithMany(x => x.ReceivedInvitations)
-                .HasForeignKey(x => x.InviteeId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasIndex(x => new
-            {
-                x.ProjectId,
-                x.Status
-            });
-
-            e.HasIndex(x => new
-            {
-                x.InviteeId,
-                x.Status
-            });
-        });
-        model.Entity<ProjectTask>(e =>
-        {
-            e.ToTable("ProjectTasks", t =>
-            {
-                t.HasCheckConstraint("CK_ProjectTasks_Status", "\"Status\" BETWEEN 0 AND 4");
-            });
-
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Title).HasMaxLength(255).IsRequired();
-            e.Property(x => x.Description).HasColumnType("text").IsRequired();
-            e.Property(x => x.Status).HasConversion<short>().IsRequired();
-            e.Property(x => x.Deadline).IsRequired();
-            e.Property(x => x.CreatedAt).IsRequired();
-            e.Property(x => x.UpdatedAt).IsRequired();
-
-            e.HasOne(x => x.Project)
-                .WithMany()
-                .HasForeignKey(x => x.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasOne(x => x.Creator)
-                .WithMany()
-                .HasForeignKey(x => x.CreatorId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasIndex(x => x.ProjectId);
-            e.HasIndex(x => x.CreatorId);
-            e.HasIndex(x => x.Deadline);
-        });
-
-        model.Entity<ProjectTaskAssignment>(e =>
-        {
-            e.ToTable("ProjectTaskAssignments");
-            e.HasKey(x => x.Id);
-            e.Property(x => x.AssignedAt).IsRequired();
-
-            e.HasOne(x => x.ProjectTask)
-                .WithMany(x => x.Assignments)
-                .HasForeignKey(x => x.ProjectTaskId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasOne(x => x.User)
-                .WithMany()
-                .HasForeignKey(x => x.UserId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasIndex(x => new { x.ProjectTaskId, x.UserId }).IsUnique();
-            e.HasIndex(x => x.UserId);
-        });
-        model.Entity<TaskReport>(e =>
-        {
-            e.ToTable("TaskReports", t =>
-            {
-                t.HasCheckConstraint("CK_TaskReports_Status", "\"Status\" BETWEEN 0 AND 4");
-                t.HasCheckConstraint("CK_TaskReports_Version", "\"Version\" > 0");
-                t.HasCheckConstraint(
-                    "CK_TaskReports_DeletedMetadata",
-                    "(\"IsDeleted\" = FALSE AND \"DeletedAt\" IS NULL AND \"DeletedById\" IS NULL) OR " +
-                    "(\"IsDeleted\" = TRUE AND \"DeletedAt\" IS NOT NULL AND \"DeletedById\" IS NOT NULL)");
-            });
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Content).HasMaxLength(5000).IsRequired();
-            e.Property(x => x.Status).HasConversion<short>().IsRequired();
-            e.Property(x => x.SubmittedAt).IsRequired();
-            e.Property(x => x.UpdatedAt).IsRequired();
-            e.Property(x => x.ConcurrencyToken).IsConcurrencyToken();
-            e.Property(x => x.IsDeleted).IsRequired();
-
-            e.HasOne(x => x.ProjectTask)
-                .WithMany(x => x.Reports)
-                .HasForeignKey(x => x.ProjectTaskId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasOne(x => x.SubmittedBy)
-                .WithMany()
-                .HasForeignKey(x => x.SubmittedById)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasOne(x => x.ParentReport)
-                .WithMany(x => x.ChildReports)
-                .HasForeignKey(x => x.ParentReportId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasOne(x => x.DeletedBy)
-                .WithMany()
-                .HasForeignKey(x => x.DeletedById)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasIndex(x => new { x.ReportGroupId, x.Version }).IsUnique();
-            e.HasIndex(x => new { x.ProjectTaskId, x.SubmittedAt });
-        });
-        model.Entity<TaskEvidence>(e =>
-        {
-            e.ToTable("TaskEvidence");
-            e.HasKey(x => x.Id);
-            e.Property(x => x.FileUrl).HasMaxLength(2048).IsRequired();
-            e.Property(x => x.PublicId).HasMaxLength(255);
-            e.Property(x => x.ResourceType).HasMaxLength(10);
-            e.Property(x => x.FileName).HasMaxLength(255);
-            e.Property(x => x.Format).HasMaxLength(10);
-            e.Property(x => x.CreatedAt).IsRequired();
-
-            e.HasOne(x => x.TaskReport)
-                .WithMany(x => x.Evidence)
-                .HasForeignKey(x => x.TaskReportId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasIndex(x => x.TaskReportId);
-        });
-        model.Entity<TaskReportReview>(e =>
-        {
-            e.ToTable("TaskReportReviews", t =>
-                t.HasCheckConstraint("CK_TaskReportReviews_Decision", "\"Decision\" BETWEEN 0 AND 1"));
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Decision).HasConversion<short>().IsRequired();
-            e.Property(x => x.Feedback).HasMaxLength(2000);
-            e.Property(x => x.ReviewedAt).IsRequired();
-
-            e.HasOne(x => x.TaskReport)
-                .WithMany(x => x.Reviews)
-                .HasForeignKey(x => x.TaskReportId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasOne(x => x.Reviewer)
-                .WithMany()
-                .HasForeignKey(x => x.ReviewerId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasIndex(x => x.TaskReportId).IsUnique();
-            e.HasIndex(x => x.ReviewerId);
-        });
         model.Entity<ContributionCycle>(e =>
         {
             e.ToTable("ContributionCycles", t =>

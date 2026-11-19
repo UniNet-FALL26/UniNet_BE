@@ -11,10 +11,12 @@ public sealed class ProjectRecruitmentTasks(UniNetDbContext db)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var projects = await db.Projects
-            .Where(p => p.Status == ProjectStatus.Active &&
+            .Where(p => (p.Status == ProjectStatus.Active &&
                 (p.RecruitmentStatus == RecruitmentStatus.Open || p.RecruitmentStatus == RecruitmentStatus.Full) &&
-                p.RecruitmentDeadline <= now)
-            .Include(p => p.Members).Include(p => p.JoinRequests).Include(p => p.Invitations)
+                p.RecruitmentDeadline <= now) ||
+                ((p.Status == ProjectStatus.Active || p.Status == ProjectStatus.Pending) && p.Recruitment != null &&
+                 p.Recruitment.Status == ProjectRecruitmentStatus.Open && p.Recruitment.Deadline <= now))
+            .Include(p => p.Members).Include(p => p.JoinRequests)
             .AsSplitQuery().ToListAsync(ct);
         foreach (var project in projects)
         {
@@ -23,15 +25,16 @@ public sealed class ProjectRecruitmentTasks(UniNetDbContext db)
             project.RecruitmentStatus = count >= project.MinimumQuantity
                 ? RecruitmentStatus.Closed : RecruitmentStatus.Expired;
             project.UpdatedAt = now;
-            foreach (var request in project.JoinRequests.Where(r => r.Status == ProjectJoinRequestStatus.Pending))
+            var modern = project.Recruitment?.PublishedAt != null;
+            if (project.Recruitment is { Status: ProjectRecruitmentStatus.Open } recruitment)
             {
-                request.Status = ProjectJoinRequestStatus.Cancelled;
-                request.UpdatedAt = now;
+                recruitment.Status = ProjectRecruitmentStatus.Closed;
+                recruitment.UpdatedAt = now;
             }
-            foreach (var invitation in project.Invitations.Where(i => i.Status == ProjectInvitationStatus.Sent))
+            foreach (var request in project.JoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply && r.Status == ProjectJoinRequestStatus.Pending))
             {
-                invitation.Status = ProjectInvitationStatus.Cancelled;
-                invitation.UpdatedAt = now;
+                request.Status = modern ? ProjectJoinRequestStatus.Expired : ProjectJoinRequestStatus.Cancelled;
+                request.UpdatedAt = now;
             }
         }
         await db.SaveChangesAsync(ct);

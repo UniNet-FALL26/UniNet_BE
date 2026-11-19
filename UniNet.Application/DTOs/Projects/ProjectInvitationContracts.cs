@@ -2,7 +2,7 @@ using UniNet.Domain.Enums;
 
 namespace UniNet.Application;
 
-// InviteeId identifies a UserProfile, as in ProjectInvitation.
+// InviteeId identifies a UserProfile; invitations are stored as Invite requests.
 public record CreateProjectInvitationRequest(Guid InviteeId, string Role, string? Message = null);
 
 public record ProjectInvitationResponse(

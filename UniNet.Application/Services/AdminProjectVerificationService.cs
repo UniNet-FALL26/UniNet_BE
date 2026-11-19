@@ -112,7 +112,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
             .AsSplitQuery();
         if (includeProjectTeam)
             query = query
-                .Include(v => v.Project).ThenInclude(p => p.ProjectSkills).ThenInclude(s => s.Skill)
+                .Include(v => v.Project)
                 .Include(v => v.Project).ThenInclude(p => p.Members.Where(m => m.Status == ProjectMemberStatus.Active))
                 .ThenInclude(m => m.User);
 

@@ -27,28 +27,13 @@ public sealed class PortfolioProjectReferenceTests
         var member = new Account { Email = "member@example.com", Role = AccountRole.Student, Profile = new UserProfile { FullName = "Member", Nickname = "Member" } };
         var outsider = new Account { Email = "outsider@example.com", Role = AccountRole.Student, Profile = new UserProfile { FullName = "Outsider", Nickname = "Outsider" } };
         db.Accounts.AddRange(owner, member, outsider);
-        var project = new Project
-        {
-            Creator = owner.Profile!,
-            Title = "Source title",
-            Description = "Source description",
-            ProjectField = "Software",
-            Origin = ProjectOrigin.Internal,
-            MemberTarget = 3,
-            MinimumQuantity = 1,
-            RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(1),
-            ExpectedOutput = DateTimeOffset.UtcNow.AddDays(2),
-            RecruitmentStatus = RecruitmentStatus.Open,
-            Visibility = ProjectVisibility.Public,
-            Status = status,
-            CompletedAt = DateTimeOffset.UtcNow
-        };
+        var project = new Project { Creator = owner.Profile!, Title = "Source title", Description = "Source description", LogoUrl = "https://example.test/project-before.png", ProjectField = "Software", MemberTarget = 2, Status = status, CompletedAt = DateTimeOffset.UtcNow };
         project.Members.Add(new ProjectMember { Id = Guid.NewGuid(), User = member.Profile!, Role = "Developer", Status = ProjectMemberStatus.Active });
         db.Projects.Add(project);
         await db.SaveChangesAsync();
         var service = new PortfolioService(db);
         var account = creator ? owner : member;
-        var request = new PortfolioContent { IsPublic = true, Projects = [new() { ProjectId = project.Id, Title = "Spoofed title", PersonalContribution = "Built APIs", Featured = true }] };
+        var request = new PortfolioContent { Projects = [new() { ProjectId = project.Id, Title = "Spoofed title", PersonalContribution = "Built APIs", Featured = true }] };
         Assert.Equal(allowed ? 1 : 0, (await service.EligibleProjectList(account.Id, default)).Length);
         await Assert.ThrowsAsync<AuthException>(() => service.Save(outsider.Id, request, default));
         if (!allowed)
@@ -59,6 +44,7 @@ public sealed class PortfolioProjectReferenceTests
         var saved = await service.Save(account.Id, request, default);
         var item = Assert.Single(saved.Portfolio.Projects);
         Assert.Equal("Source title", item.Title);
+        Assert.Equal(project.LogoUrl, item.CoverUrl);
         Assert.Equal("Built APIs", item.PersonalContribution);
         Assert.Null(item.Verification);
         Assert.DoesNotContain("Spoofed title", account.Profile!.CareerProfile!.ProjectsJson!);
@@ -84,8 +70,10 @@ public sealed class PortfolioProjectReferenceTests
             await db.SaveChangesAsync();
         }
         project.Title = "Updated source";
+        project.LogoUrl = "https://example.test/project-after.png";
         await db.SaveChangesAsync();
         Assert.Equal("Updated source", Assert.Single((await service.Me(account.Id, default)).Portfolio.Projects).Title);
+        Assert.Equal(project.LogoUrl, Assert.Single((await service.Me(account.Id, default)).Portfolio.Projects).CoverUrl);
         project.Status = ProjectStatus.Active;
         await db.SaveChangesAsync();
         Assert.Empty((await service.Me(account.Id, default)).Portfolio.Projects);

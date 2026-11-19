@@ -401,45 +401,9 @@ public sealed class ContributionService(UniNetDbContext db) : IContributionServi
             []);
     }
 
-    private async Task<ContributionInputSnapshot> CaptureInputSnapshotAsync(
-        Guid projectId, Guid cycleId, DateTimeOffset now, CancellationToken ct)
-    {
-        var participantIds = await db.ContributionParticipants.AsNoTracking()
-            .Where(p => p.CycleId == cycleId)
-            .OrderBy(p => p.UserId)
-            .Select(p => p.UserId)
-            .ToArrayAsync(ct);
-        var tasks = await db.ProjectTasks.AsNoTracking()
-            .Where(t => t.ProjectId == projectId)
-            .Include(t => t.Assignments)
-            .OrderBy(t => t.Id)
-            .ToListAsync(ct);
-        var taskSnapshots = tasks.Select(task => new TaskInputSnapshot(
-            task.Id,
-            task.Status,
-            task.Deadline,
-            ProjectTaskStatusResolver.Resolve(task, now),
-            task.Assignments.Select(a => a.UserId).Distinct().Order().ToArray())).ToArray();
-        var reports = await db.TaskReports.AsNoTracking()
-            .Where(r => r.ProjectTask.ProjectId == projectId)
-            .OrderBy(r => r.ReportGroupId)
-            .ThenByDescending(r => r.Version)
-            .Select(r => new ReportVersionSnapshot(
-                r.Id, r.ProjectTaskId, r.ReportGroupId, r.Version, r.SubmittedById, r.Status, r.IsDeleted))
-            .ToListAsync(ct);
-        var latestReports = reports
-            .GroupBy(r => r.ReportGroupId)
-            .Select(group => group.First())
-            .OrderBy(r => r.ReportGroupId)
-            .ToArray();
-        var evaluations = await db.ContributionPeerEvaluations.AsNoTracking()
-            .Where(e => e.CycleId == cycleId)
-            .OrderBy(e => e.EvaluatorUserId)
-            .ThenBy(e => e.EvaluateeUserId)
-            .Select(e => new ContributionPeerEvaluationInput(e.EvaluatorUserId, e.EvaluateeUserId, e.Score))
-            .ToArrayAsync(ct);
-        return new(participantIds, taskSnapshots, latestReports, evaluations);
-    }
+    private Task<ContributionInputSnapshot> CaptureInputSnapshotAsync(
+        Guid projectId, Guid cycleId, DateTimeOffset now, CancellationToken ct) =>
+        throw new ProjectException("CONTRIBUTION_INPUTS_RETIRED", "Task-based contribution calculation has been retired; historical results remain available.", 410);
 
     private static string HashInputSnapshot(ContributionInputSnapshot snapshot)
     {

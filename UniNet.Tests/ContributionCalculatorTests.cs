@@ -115,18 +115,4 @@ public sealed class ContributionCalculatorTests
         Assert.Equal(100m, Assert.Single(result.Results).TaskExecutionScore);
     }
 
-    [Fact]
-    public void EffectiveOverdueStatusUsesTheSameDeadlineRuleAsTaskResponses()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var task = new ProjectTask
-        {
-            Status = ProjectTaskStatus.InProgress,
-            Deadline = now.AddTicks(-1)
-        };
-
-        Assert.Equal(ProjectTaskStatus.Overdue, ProjectTaskStatusResolver.Resolve(task, now));
-        task.Status = ProjectTaskStatus.Completed;
-        Assert.Equal(ProjectTaskStatus.Completed, ProjectTaskStatusResolver.Resolve(task, now));
-    }
 }

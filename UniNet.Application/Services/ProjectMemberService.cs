@@ -33,11 +33,8 @@ public sealed class ProjectMemberService(
         Require(project.CreatorId == actor.Id,
             "FORBIDDEN", "Only the project creator can access member recommendations.", 403);
 
-        var requiredSkills = await db.ProjectSkills.AsNoTracking()
-            .Where(s => s.ProjectId == projectId)
-            .Select(s => new { s.SkillId, s.Skill.Name })
-            .OrderBy(s => s.Name).ThenBy(s => s.SkillId)
-            .ToListAsync(ct);
+        var skillProject = await db.Projects.AsNoTracking().SingleAsync(p => p.Id == projectId, ct);
+        var requiredSkills = skillProject.ProjectSkills.Select(s => new { s.SkillId, s.Skill.Name }).OrderBy(s => s.Name).ThenBy(s => s.SkillId).ToList();
         if (requiredSkills.Count == 0) return [];
 
         var requiredSkillIds = requiredSkills.Select(s => s.SkillId).ToArray();
@@ -45,8 +42,6 @@ public sealed class ProjectMemberService(
             .Where(s => requiredSkillIds.Contains(s.SkillId) &&
                 s.User.Account.Role == AccountRole.Student && s.User.Account.Status == AccountStatus.Active &&
                 !ProjectMembership.EffectiveMemberIds(db, projectId).Contains(s.UserId) &&
-                !db.ProjectInvitations.Any(i => i.ProjectId == projectId && i.InviteeId == s.UserId &&
-                    i.Status == ProjectInvitationStatus.Sent) &&
                 !db.ProjectJoinRequests.Any(r => r.ProjectId == projectId && r.UserId == s.UserId &&
                     r.Status == ProjectJoinRequestStatus.Pending))
             .Select(s => new { s.UserId, s.User.FullName, s.User.AvatarUrl, s.SkillId })
@@ -122,7 +117,7 @@ public sealed class ProjectMemberService(
             project.Creator.FullName,
             project.Creator.Nickname,
             project.Creator.AvatarUrl,
-            project.Origin == ProjectOrigin.Internal ? "Creator" : project.SubmitterRole ?? "Submitter",
+            project.SubmitterRole ?? "Creator",
             ProjectMemberStatus.Active,
             project.CreatedAt
         ));

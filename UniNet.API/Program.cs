@@ -111,6 +111,7 @@ builder.Services.AddScoped<AdminVerificationQueries>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<VerificationNotifications>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<FriendshipService>();
 builder.Services.AddScoped<NotificationTargets>();
 builder.Services.AddScoped<NotificationBroadcastService>();
 if (!disableUnrelatedWorkers)
@@ -121,7 +122,6 @@ builder.Services.AddScoped<ProjectRecruitmentTasks>();
 builder.Services.AddScoped<VerificationReservationTasks>();
 builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<ExternalProjectDraftService>();
-builder.Services.AddScoped<ExternalProjectDraftTasks>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
 if (!disableUnrelatedWorkers)
@@ -135,6 +135,7 @@ builder.Services.AddScoped<PortfolioService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPackageService, PackageService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectService, ProjectService>();
 builder.Services.AddScoped<SpecializationService>();
+builder.Services.AddScoped<ProjectHubService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IContributionService, ContributionService>();
 builder.Services.AddGitExperimentalContributionServices();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectJoinRequestService, ProjectJoinRequestService>();
@@ -241,6 +242,7 @@ builder.Services.AddCors(options =>
     {
         policy
             .WithOrigins(allowedOrigins)
+            .AllowCredentials()
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

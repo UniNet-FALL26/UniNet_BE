@@ -20,7 +20,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         try { return JsonSerializer.Deserialize<T>(value, Json); }
         catch (JsonException) { return default; }
     }
-    private static AuthException Missing() => new("PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ công khai.", 404);
+    private static AuthException Missing() => new("PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ.", 404);
     private static void Text(string? value, int max = 2000, bool required = false)
     {
         if ((required && string.IsNullOrWhiteSpace(value)) || value?.Length > max)
@@ -67,7 +67,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         {
             Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = NormalizeAppearance(Decode<ProfileAppearance>(c?.AppearanceJson) ?? new()), YearsOfExperience = b?.YearsOfExperience, Gpa = b?.Gpa,
             Activities = Decode<PortfolioActivity[]>(c?.ActivitiesJson) ?? [], Languages = Decode<PortfolioLanguage[]>(c?.LanguagesJson) ?? [], Location = b?.Location, Availability = b?.Availability,
-            ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl, IsPublic = c?.IsPublic ?? false,
+            ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl,
             Skills = ResolveSkills(c?.SkillsJson, catalog), Projects = await ResolveProjects(p, ct),
             Experience = Decode<PortfolioMilestone[]>(c?.ExperienceJson) ?? [], Education = Decode<PortfolioMilestone[]>(c?.EducationJson) ?? [],
             Certificates = Decode<PortfolioCertificate[]>(c?.CertificatesJson) ?? [], Articles = b?.Articles ?? [],
@@ -109,7 +109,7 @@ public sealed class PortfolioService(UniNetDbContext db)
     }
     public async Task<PortfolioResponse> Read(Guid profileId, Guid? viewerId, CancellationToken ct)
     {
-        var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Role == AccountRole.Student && x.Account.Status == AccountStatus.Active && (x.AccountId == viewerId || (x.CareerProfile != null && x.CareerProfile.IsPublic)), ct) ?? throw Missing();
+        var p = await db.UserProfiles.AsNoTracking().Include(x => x.CareerProfile).SingleOrDefaultAsync(x => x.Id == profileId && x.Account.Role == AccountRole.Student && x.Account.Status == AccountStatus.Active, ct) ?? throw Missing();
         var response = await Map(p, p.AccountId == viewerId, await Catalog(ct), ct);
         return response.IsOwner ? response : ForVisitor(response);
     }
@@ -147,7 +147,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         }
         var c = p.CareerProfile;
         if (presentation is not null) ApplyAppearance(c, request.Appearance);
-        c.Headline = request.Headline?.Trim(); c.CareerObjective = request.CareerObjective?.Trim(); c.IsPublic = request.IsPublic;
+        c.Headline = request.Headline?.Trim(); c.CareerObjective = request.CareerObjective?.Trim();
         // Preserve unrelated existing basic metadata and extracurricular activities.
         var basic = Decode<JsonObject>(c.BasicInfoJson) ?? new JsonObject();
         var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles, request.YearsOfExperience, request.Gpa), Json)!.AsObject();
@@ -193,7 +193,7 @@ public sealed class PortfolioService(UniNetDbContext db)
     {
         var query = EligibleProjects(userId);
         if (ids is not null) query = query.Where(x => ids.Contains(x.Id));
-        var projects = await query.Include(x => x.ProjectSkills).ThenInclude(x => x.Skill)
+        var projects = await query
             .Include(x => x.Members).Include(x => x.Verifications).AsSplitQuery().ToListAsync(ct);
         return projects.OrderByDescending(x => x.CompletedAt).ThenBy(x => x.Id).ToDictionary(x => x.Id, x =>
         {
@@ -201,7 +201,7 @@ public sealed class PortfolioService(UniNetDbContext db)
                 .OrderByDescending(v => v.FinalizedAt).ThenByDescending(v => v.CreatedAt).ThenBy(v => v.Id).FirstOrDefault();
             return new PortfolioProject
             {
-                ProjectId = x.Id, Title = x.Title, Description = x.Description, Type = x.ProjectField,
+                ProjectId = x.Id, Title = x.Title, Description = x.Description, CoverUrl = x.LogoUrl, Type = x.ProjectField,
                 Technologies = x.ProjectSkills.Select(s => s.Skill.Name).Distinct().OrderBy(n => n).ToArray(),
                 Role = x.Members.FirstOrDefault(m => m.UserId == userId && m.Status == ProjectMemberStatus.Active)?.Role ?? x.SubmitterRole,
                 CompletedAt = x.CompletedAt,
@@ -296,8 +296,6 @@ public sealed class PortfolioService(UniNetDbContext db)
         var content = response.Portfolio;
         var hidden = (content.Appearance.Profile.HiddenSections ?? []).ToHashSet(StringComparer.Ordinal);
         var identity = response.Profile;
-        if (content.Appearance.Profile.ShowPortfolio == false)
-            return response with { Profile = identity with { Bio = null }, Portfolio = new() { Appearance = content.Appearance, IsPublic = content.IsPublic }, SkillCatalog = null };
         if (hidden.Contains("hero")) { identity = identity with { Bio = null, CoverUrl = null }; content = content with { Headline = null, CareerObjective = null, Location = null, Availability = null }; }
         if (hidden.Contains("contact")) content = content with { ContactEmail = null, CvUrl = null, Location = null, Availability = null, SocialLinks = [] };
         if (hidden.Contains("skills")) content = content with { Skills = [] };

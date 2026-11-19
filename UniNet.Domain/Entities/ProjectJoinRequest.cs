@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -14,6 +14,12 @@ namespace UniNet.Domain.Entities
         public Guid ProjectId { get; set; }
 
         public Guid UserId { get; set; }
+        public ProjectRequestType RequestType { get; set; }
+        public Guid? InviterId { get; set; }
+        public UserProfile? Inviter { get; set; }
+        public string? PositionId { get; set; }
+        public Guid? ReviewedBy { get; set; }
+        public DateTimeOffset? ReviewedAt { get; set; }
 
         public string Role { get; set; } = null!;
 

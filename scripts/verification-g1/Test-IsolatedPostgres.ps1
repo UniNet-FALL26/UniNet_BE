@@ -10,7 +10,10 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $run = Join-Path $repo ('artifacts/verification-' + $Stage + '/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
 New-Item -ItemType Directory -Path $run -Force | Out-Null
-$password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$passwordBytes = New-Object byte[] 32
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($passwordBytes) } finally { $rng.Dispose() }
+$password = [Convert]::ToBase64String($passwordBytes)
 $pwfile = Join-Path $run 'init-password.txt'
 $password | Set-Content -LiteralPath $pwfile -Encoding ascii
 $saved = @{}

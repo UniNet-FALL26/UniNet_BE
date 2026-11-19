@@ -34,6 +34,14 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                     .SetProperty(p => p.CompletedAt, now), ct);
             Require(updated == 1, "INVALID_STATUS_TRANSITION", "Only an Active project can become Completed.", 409);
 
+            await db.ProjectJoinRequests.Where(r => r.ProjectId == request.ProjectId && r.Status == ProjectJoinRequestStatus.Pending &&
+                    r.RequestType == ProjectRequestType.Apply)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, ProjectJoinRequestStatus.Expired)
+                    .SetProperty(r => r.UpdatedAt, now), ct);
+            await db.ProjectRecruitments.Where(r => r.ProjectId == request.ProjectId)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, ProjectRecruitmentStatus.Closed)
+                    .SetProperty(r => r.UpdatedAt, now), ct);
+
             var members = await db.ProjectMembers.AsNoTracking()
                 .Where(m => m.ProjectId == request.ProjectId &&
                     m.JoinedAt <= now &&
@@ -119,8 +127,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
 
         Require(request.RecruitmentDeadline > DateTimeOffset.UtcNow,
             "INVALID_DEADLINE", "Project recruitment deadline must be in the future.");
-        Require(request.ExpectedOutput > DateTimeOffset.UtcNow,
-            "INVALID_EXPECTED_OUTPUT", "Project expected output must be in the future.");
 
         Require(request.MinimumQuantity >= 2 && request.MinimumQuantity <= request.MemberTarget,
             "INVALID_MINIMUM_QUANTITY", "Minimum quantity must be between 2 and member target, including the creator.");
@@ -167,22 +173,26 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             MemberTarget = request.MemberTarget,
             MinimumQuantity = request.MinimumQuantity,
             RecruitmentDeadline = request.RecruitmentDeadline.ToUniversalTime(),
-            ExpectedOutput = request.ExpectedOutput?.ToUniversalTime(),
-            Visibility = request.Visibility,
-            Status = ProjectStatus.Pending,
+            Visibility = ProjectVisibility.Public,
+            Status = ProjectStatus.Active,
             RecruitmentStatus = RecruitmentStatus.Open,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
 
+        project.Details = new() { ProjectId = project.Id,
+            StartDate = DateOnly.FromDateTime(project.CreatedAt.ToOffset(TimeSpan.FromHours(7)).DateTime),
+            StartDateIsCreationDate = true };
+
+        var positions = new List<ProjectPosition>();
         // Add role requirements
         if (request.RoleRequirements?.Count > 0)
         {
             foreach (var roleReq in request.RoleRequirements)
             {
-                project.RoleRequirements.Add(new ProjectRoleRequirement
+                positions.Add(new ProjectPosition
                 {
-                    Id = Guid.NewGuid(),
+                    Id = Guid.NewGuid().ToString(),
                     ProjectId = project.Id,
                     Role = roleReq.Role.Trim(),
                     Quantity = roleReq.Quantity,
@@ -193,15 +203,18 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             }
         }
 
+        if (positions.Count > 0) project.RoleRequirements = positions;
+        var technologies = new List<ProjectTechnology>();
         // Add skills
         if (request.SkillIds?.Count > 0)
         {
             var skills = await db.Skills.Where(s => request.SkillIds.Contains(s.Id) && s.IsActive).ToListAsync(cancellationToken: ct);
             foreach (var skill in skills)
             {
-                project.ProjectSkills.Add(new ProjectSkill { ProjectId = project.Id, SkillId = skill.Id });
+                technologies.Add(new ProjectTechnology { ProjectId = project.Id, Skill = skill });
             }
         }
+        project.ProjectSkills = technologies;
         var projectLimit = configuration.GetValue<int>("Projects:MaxOngoingProjectsPerStudent", 3);
         if (projectLimit <= 0)
             throw new InvalidOperationException("Projects:MaxOngoingProjectsPerStudent must be greater than 0.");
@@ -229,8 +242,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
-        await moderation.ModerateNewProjectAsync(project.Id, userId, ct);
-
         return await GetProjectDetailsAsync(project.Id, userId, ct);
     }
 
@@ -239,12 +250,12 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     {
         var project = await db.Projects
             .Include(p => p.Creator)
-            .Include(p => p.RoleRequirements)
-            .Include(p => p.Invitations).ThenInclude(i => i.Inviter)
-            .Include(p => p.Invitations).ThenInclude(i => i.Invitee)
+
+            .Include(p => p.JoinRequests).ThenInclude(i => i.Inviter)
+            .Include(p => p.JoinRequests).ThenInclude(i => i.User)
             .Include(p => p.JoinRequests).ThenInclude(r => r.User)
             .AsSplitQuery()
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
 
             .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
@@ -259,8 +270,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
     {
         var project = await db.Projects
             .Include(p => p.Creator)
-            .Include(p => p.RoleRequirements)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
+
             .Include(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
@@ -312,11 +323,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
                 project.RecruitmentDeadline = request.RecruitmentDeadline.Value;
         }
 
-        if (request.ExpectedOutput.HasValue)
-        {
-            Require(request.ExpectedOutput > DateTimeOffset.UtcNow, "INVALID_EXPECTED_OUTPUT", "Expected completion time must be in the future.");
-            project.ExpectedOutput = request.ExpectedOutput;
-        }
 
         project.Status = ProjectStatus.Pending;
         project.UpdatedAt = DateTimeOffset.UtcNow;
@@ -372,8 +378,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         Require(!await db.ProjectModerations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission).AnyAsync(m => m.ProjectId == projectId &&
                 (m.Status == ProjectModerationStatus.Pending || m.Status == ProjectModerationStatus.Processing), ct),
             "MODERATION_IN_PROGRESS", "Cannot delete project while it is under moderation.", 409);
-        db.ProjectRoleRequirements.RemoveRange(project.RoleRequirements);
-        db.ProjectSkills.RemoveRange(project.ProjectSkills);
         db.ProjectMembers.RemoveRange(project.Members);
         db.ProjectModerations.RemoveRange(await db.ProjectModerations
             .Where(m => m.ProjectId == projectId && m.Purpose == ProjectModerationPurpose.ProjectSubmission).ToListAsync(ct));
@@ -396,7 +400,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var query = db.Projects
             .Include(p => p.Creator)
             .Include(p => p.Members)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
             .Where(p => p.CreatorId == userProfile.Id || p.Members.Any(m => m.UserId == userProfile.Id && m.Status == ProjectMemberStatus.Active))
             .OrderByDescending(p => p.CreatedAt);
 
@@ -422,7 +426,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var total = await query.CountAsync(ct);
         Require(total > 0, "PROJECT_NOT_FOUND", "Project not found.", 404);
         var projects = await query.Include(p => p.Creator)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
             .Include(p => p.Members).AsSplitQuery()
             .OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
             .Skip((int)Math.Min((long)(page - 1) * pageSize, int.MaxValue))
@@ -450,12 +454,12 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var query = db.Projects
             .AsNoTracking()
             .Include(p => p.Creator)
-            .Include(p => p.ProjectSkills).ThenInclude(ps => ps.Skill)
+
             .Include(p => p.Members)
             .AsQueryable();
 
         // Apply every eligibility filter before counting or paginating.
-        query = query.Where(p => p.Visibility == ProjectVisibility.Public && p.Status == ProjectStatus.Active);
+        query = query.Where(p => p.Status == ProjectStatus.Active);
         query = query.Where(p => p.Moderations.Where(m => m.Purpose == ProjectModerationPurpose.ProjectSubmission)
             .OrderByDescending(m => m.AttemptNumber)
             .Select(m => (ProjectModerationStatus?)m.Status)
@@ -487,7 +491,14 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .Select(name => name.Trim().ToLowerInvariant()).Distinct().ToList();
         if (normalizedSkillNames?.Count > 0)
         {
-            query = query.Where(p => p.ProjectSkills.Any(ps => normalizedSkillNames.Contains(ps.Skill.Name.ToLower())));
+            var catalogNames = await db.Skills.Where(s => normalizedSkillNames.Contains(s.Name.ToLower())).Select(s => s.Name).ToArrayAsync(ct);
+            var matching = query.Where(p => false).Select(p => p.Id);
+            foreach (var name in catalogNames)
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(new[] { new { name } });
+                matching = matching.Union(query.Where(p => p.Technologies != null && EF.Functions.JsonContains(p.Technologies, json)).Select(p => p.Id));
+            }
+            query = query.Where(p => matching.Contains(p.Id));
         }
 
         var total = await query.CountAsync(cancellationToken: ct);
@@ -555,7 +566,6 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.MinimumQuantity,
             1 + project.Members.Count(m => m.UserId != project.CreatorId && m.Status == ProjectMemberStatus.Active),
             project.RecruitmentDeadline,
-            project.ExpectedOutput,
             project.Visibility,
             project.Status,
             project.RecruitmentStatus,
@@ -568,8 +578,8 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             isMember,
             members,
             project.Invitations.Select(ProjectInvitationMapping.ToResponse).ToList(),
-            project.JoinRequests.Select(ProjectJoinRequestMapping.ToResponse).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project), SpecializationMapping.ToResponse(project.Specialization)
+            project.JoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply).Select(ProjectJoinRequestMapping.ToResponse).ToList(),
+            ProjectIdentityMapping.Leader(project), ProjectIdentityMapping.ExternalDetails(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 
@@ -590,7 +600,7 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             project.CreatedAt,
             new(project.Creator.Id, project.Creator.FullName, project.Creator.Nickname, project.Creator.AvatarUrl),
             project.ProjectSkills.Select(ps => new ProjectSkillInfo(ps.SkillId, ps.Skill.Name, ps.Skill.Category?.ToString() ?? string.Empty, ps.Skill.IconUrl, null)).ToList(),
-            project.Origin, ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
+            ProjectIdentityMapping.Leader(project), SpecializationMapping.ToResponse(project.Specialization)
         );
     }
 

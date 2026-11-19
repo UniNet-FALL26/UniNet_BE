@@ -25,7 +25,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         await RequireRecruitingAsync(project, request.Role, ct);
         Require(!await ProjectMembership.IsEffectiveMemberAsync(db, projectId, student.Id, ct),
             "ALREADY_PROJECT_MEMBER", "You are already a member of this project.", 409);
-        Require(!await db.ProjectJoinRequests.AnyAsync(r => r.ProjectId == projectId && r.UserId == student.Id &&
+        Require(!await db.ProjectJoinRequests.AnyAsync(r => r.RequestType == ProjectRequestType.Apply && r.ProjectId == projectId && r.UserId == student.Id &&
             r.Status == ProjectJoinRequestStatus.Pending, ct), "JOIN_REQUEST_EXISTS", "You already have a pending request.", 409);
 
         var now = DateTimeOffset.UtcNow;
@@ -54,7 +54,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     {
         var student = await GetStudentAsync(accountId, ct);
         return await ListAsync(Requests().Where(r => r.UserId == student.Id &&
-            r.Project.Visibility == ProjectVisibility.Public && r.Project.Status == ProjectStatus.Active),
+            r.Project.Status == ProjectStatus.Active),
             status, page, pageSize, ct);
     }
 
@@ -101,6 +101,8 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
                 };
                 db.ProjectMembers.Add(member);
             }
+            member.JoinRequestId = request.Id;
+            member.PositionId = request.PositionId;
             member.Role = request.Role;
             member.Status = ProjectMemberStatus.Active;
             member.JoinedAt = now;
@@ -110,15 +112,17 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
                 request.Project.RecruitmentStatus = RecruitmentStatus.Full;
             request.Project.UpdatedAt = now;
 
-            var invitations = await db.ProjectInvitations.Where(i =>
-                i.ProjectId == request.ProjectId && i.InviteeId == request.UserId &&
-                i.Status == ProjectInvitationStatus.Sent).ToListAsync(ct);
+            var invitations = await db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).Where(i =>
+                i.ProjectId == request.ProjectId && i.UserId == request.UserId &&
+                i.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
             foreach (var invitation in invitations)
             {
-                invitation.Status = ProjectInvitationStatus.Cancelled;
+                invitation.Status = ProjectJoinRequestStatus.Cancelled;
                 invitation.UpdatedAt = now;
             }
         }
+        request.ReviewedBy = actor.Id;
+        request.ReviewedAt = now;
         request.Status = decision;
         request.UpdatedAt = now;
         if (decision is ProjectJoinRequestStatus.Accepted or ProjectJoinRequestStatus.Rejected)
@@ -131,7 +135,7 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
         return request;
     }, ct);
 
-    private IQueryable<ProjectJoinRequest> Requests() => db.ProjectJoinRequests
+    private IQueryable<ProjectJoinRequest> Requests() => db.ProjectJoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply)
         .Include(r => r.Project).Include(r => r.User);
 
     private async Task<ProjectJoinRequestsResponse> ListAsync(IQueryable<ProjectJoinRequest> query,
@@ -166,15 +170,16 @@ public sealed class ProjectJoinRequestService(UniNetDbContext db) : IProjectJoin
     }
 
     private static void RequireEligible(Project project) => Require(
-        project.Visibility == ProjectVisibility.Public && project.Status == ProjectStatus.Active,
-        "INVALID_PROJECT_STATE", "Project must be Public and Active.", 409);
+        project.Status is ProjectStatus.Pending or ProjectStatus.Active,
+        "INVALID_PROJECT_STATE", "Project must be Pending or Active.", 409);
 
     private static void RequireCreator(Project project, Guid profileId) => Require(project.CreatorId == profileId,
         "FORBIDDEN", "Only the project creator can view and process join requests.", 403);
 
     private async Task RequireRecruitingAsync(Project project, string role, CancellationToken ct)
     {
-        Require(project.RecruitmentStatus == RecruitmentStatus.Open && project.RecruitmentDeadline > DateTimeOffset.UtcNow,
+        Require(project.RecruitmentStatus == RecruitmentStatus.Open &&
+            (project.RecruitmentDeadline == null || project.RecruitmentDeadline > DateTimeOffset.UtcNow),
             "RECRUITMENT_CLOSED", "Project is no longer accepting members.", 409);
         Require(await MemberCountAsync(project, ct) < project.MemberTarget,
             "PROJECT_FULL", "Project has reached its member limit.", 409);

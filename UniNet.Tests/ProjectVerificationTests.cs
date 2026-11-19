@@ -47,7 +47,8 @@ public sealed partial class ProjectVerificationTests
         verification.ScheduledEndAt = DateTimeOffset.UtcNow.AddHours(-1);
         var project = await f.Db.Projects.SingleAsync(p => p.Id == verification.ProjectId);
         var skill = new Skill { Name = "C#" };
-        f.Db.Add(new ProjectSkill { ProjectId = project.Id, Skill = skill });
+        f.Db.Skills.Add(skill);
+        project.ProjectSkills = [new ProjectTechnology { Skill = skill }];
         f.Db.Add(new ProjectMember { ProjectId = project.Id, UserId = f.Other.Profile!.Id,
             Role = "Developer", Status = ProjectMemberStatus.Active });
         await f.Db.SaveChangesAsync();

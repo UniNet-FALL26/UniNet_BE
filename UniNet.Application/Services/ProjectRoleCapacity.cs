@@ -12,14 +12,14 @@ internal static class ProjectRoleCapacity
     // Historical decisions remain unchanged; only outstanding applications expire their opportunity.
     public static async Task CancelUnavailableAsync(UniNetDbContext db, Project project, CancellationToken ct)
     {
-        var requests = await db.ProjectJoinRequests.Where(r => r.ProjectId == project.Id &&
+        var requests = await db.ProjectJoinRequests.Where(r => r.RequestType == ProjectRequestType.Apply && r.ProjectId == project.Id &&
             r.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
-        var invitations = await db.ProjectInvitations.Where(i => i.ProjectId == project.Id &&
-            i.Status == ProjectInvitationStatus.Sent).ToListAsync(ct);
+        var invitations = await db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).Where(i => i.ProjectId == project.Id &&
+            i.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
         var members = await ProjectMembership.EffectiveMemberIds(db, project.Id).ToListAsync(ct);
         var full = members.Count >= project.MemberTarget;
         var unavailable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var role in requests.Select(r => r.Role).Concat(invitations.Select(i => i.Role))
+        foreach (var role in requests.Select(r => r.Role)
                      .Select(r => r.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
             if (full || await CheckAsync(db, project, role, ct) != null)
                 unavailable.Add(role);
@@ -30,9 +30,9 @@ internal static class ProjectRoleCapacity
             request.Status = ProjectJoinRequestStatus.Cancelled;
             request.UpdatedAt = now;
         }
-        foreach (var invitation in invitations.Where(i => unavailable.Contains(i.Role.Trim()) || members.Contains(i.InviteeId)))
+        foreach (var invitation in invitations.Where(i => members.Contains(i.UserId)))
         {
-            invitation.Status = ProjectInvitationStatus.Cancelled;
+            invitation.Status = ProjectJoinRequestStatus.Cancelled;
             invitation.UpdatedAt = now;
         }
     }
@@ -40,8 +40,9 @@ internal static class ProjectRoleCapacity
     public static async Task<(string Code, string Message)?> CheckAsync(
         UniNetDbContext db, Project project, string role, CancellationToken ct)
     {
-        var requirements = await db.ProjectRoleRequirements.AsNoTracking()
-            .Where(r => r.ProjectId == project.Id).ToListAsync(ct);
+        var recruitment = await db.ProjectRecruitments.AsNoTracking().SingleOrDefaultAsync(r => r.ProjectId == project.Id, ct);
+        var requirements = recruitment == null ? [] : System.Text.Json.JsonSerializer.Deserialize<List<ProjectPosition>>(
+            recruitment.Positions, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? [];
         var normalizedRole = role.Trim();
         var matching = requirements.Where(r => string.Equals(r.Role.Trim(), normalizedRole,
             StringComparison.OrdinalIgnoreCase)).ToList();

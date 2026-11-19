@@ -21,6 +21,10 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
         var staff = account.Role is AccountRole.Admin or AccountRole.Moderator or AccountRole.Assessor or AccountRole.Verifier or AccountRole.Accountant;
         string? url = null;
         switch (n.TargetType) {
+            case "Friendship":
+                if (account.Role == AccountRole.Student && await db.Friendships.AnyAsync(f => f.Id == id && (f.RequesterAccountId == accountId || f.ReceiverAccountId == accountId), ct))
+                    url = "/profile/friends";
+                break;
             case "User":
                 if (id == accountId) url = account.Role == AccountRole.Partner ? "/(company)/profile" : "/settings?account=1";
                 else if (await NotificationPermissionPolicy.HasAsync(db, accountId, NotificationPermissionPolicy.UsersDetail, ct) && await db.Accounts.AnyAsync(a => a.Id == id, ct))
@@ -60,12 +64,11 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
                     url = account.Role == AccountRole.Admin ? "/admin/job-postings" : "/moderator/job-postings";
                 break;
             case "ProjectInvitation":
-                var invitation = await db.ProjectInvitations.AsNoTracking().SingleOrDefaultAsync(i => i.Id == id && (i.InviteeId == profileId || i.InviterId == profileId), ct);
+                var invitation = await db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).AsNoTracking().SingleOrDefaultAsync(i => i.Id == id && (i.UserId == profileId || i.InviterId == profileId), ct);
                 if (invitation != null && await db.Projects.AnyAsync(p => p.Id == invitation.ProjectId, ct)) url = $"/group/{invitation.ProjectId}";
                 break;
             case "Task":
-                var task = await db.ProjectTasks.AsNoTracking().SingleOrDefaultAsync(t => t.Id == id, ct);
-                if (task != null && await IsMemberAsync(task.ProjectId, profileId, ct)) url = $"/workspace/{task.ProjectId}?taskId={id}";
+                // Task storage has been retired; historical notifications remain readable.
                 break;
             case "ProjectVerification":
                 var projectVerification = await db.ProjectVerifications.AsNoTracking().SingleOrDefaultAsync(v => v.Id == id, ct);
