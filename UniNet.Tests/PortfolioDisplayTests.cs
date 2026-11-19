@@ -72,7 +72,7 @@ public sealed class PortfolioDisplayTests
     }
 
     [Fact]
-    public async Task DisplayOnlyUpdatePreservesContentsPrivacyAndOtherAppearanceKeys()
+    public async Task LegacyDisplaySettingDoesNotStripVisitorProfileContent()
     {
         var (connection, db, account) = await Setup();
         await using var connectionScope = connection; await using var dbScope = db;
@@ -84,8 +84,10 @@ public sealed class PortfolioDisplayTests
         Assert.False(off.Portfolio.Appearance.Profile.ShowPortfolio);
         Assert.Equal(projects, (await db.CareerProfiles.SingleAsync()).ProjectsJson);
         var visitor = await service.Read(account.Profile.Id, null, default);
-        Assert.False(visitor.IsOwner); Assert.Empty(visitor.Portfolio.Projects); Assert.Null(visitor.Portfolio.ContactEmail);
-        Assert.Null(visitor.Profile.Bio); Assert.Null(visitor.SkillCatalog);
+        Assert.False(visitor.IsOwner); Assert.Single(visitor.Portfolio.Projects);
+        Assert.Equal(off.Portfolio.Headline, visitor.Portfolio.Headline);
+        Assert.Equal(off.Portfolio.ContactEmail, visitor.Portfolio.ContactEmail);
+        Assert.Equal(off.Profile.Bio, visitor.Profile.Bio); Assert.Null(visitor.SkillCatalog);
         await service.SaveDisplay(account.Id, true, default);
         db.ChangeTracker.Clear(); var on = await service.Me(account.Id, default);
         Assert.True(on.Portfolio.Appearance.Profile.ShowPortfolio);

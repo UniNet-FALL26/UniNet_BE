@@ -255,7 +255,8 @@ public sealed class PortfolioHttpTests
         var ownOff = await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me");
         Assert.False(ownOff!.Portfolio.Appearance.Profile.ShowPortfolio); Assert.Single(ownOff.Portfolio.Projects);
         var publicOff = await anonymous.GetFromJsonAsync<PortfolioResponse>($"api/profile/portfolio/{server.ProfileId}");
-        Assert.False(publicOff!.IsOwner); Assert.Empty(publicOff.Portfolio.Projects); Assert.Null(publicOff.SkillCatalog);
+        Assert.False(publicOff!.IsOwner); Assert.Single(publicOff.Portfolio.Projects); Assert.Null(publicOff.SkillCatalog);
+        Assert.Equal(ownOff.Portfolio.Headline, publicOff.Portfolio.Headline);
         var on = await owner.PutAsJsonAsync("api/profile/portfolio/display/me", new { showPortfolio = true }); on.EnsureSuccessStatusCode();
         using var otherDevice = server.Client(server.OwnerId, "Student");
         var restored = await otherDevice.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me");

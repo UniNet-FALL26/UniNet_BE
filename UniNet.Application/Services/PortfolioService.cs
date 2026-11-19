@@ -295,8 +295,6 @@ public sealed class PortfolioService(UniNetDbContext db)
         var content = response.Portfolio;
         var hidden = (content.Appearance.Profile.HiddenSections ?? []).ToHashSet(StringComparer.Ordinal);
         var identity = response.Profile;
-        if (content.Appearance.Profile.ShowPortfolio == false)
-            return response with { Profile = identity with { Bio = null }, Portfolio = new() { Appearance = content.Appearance }, SkillCatalog = null };
         if (hidden.Contains("hero")) { identity = identity with { Bio = null, CoverUrl = null }; content = content with { Headline = null, CareerObjective = null, Location = null, Availability = null }; }
         if (hidden.Contains("contact")) content = content with { ContactEmail = null, CvUrl = null, Location = null, Availability = null, SocialLinks = [] };
         if (hidden.Contains("skills")) content = content with { Skills = [] };
