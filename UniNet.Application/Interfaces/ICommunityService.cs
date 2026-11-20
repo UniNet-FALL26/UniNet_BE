@@ -19,6 +19,9 @@ public interface ICommunityService
     Task<CommentResponse> CreateReplyAsync(Guid parentCommentId, Guid currentUserId, CreateReplyRequest request);
 
     Task ReportPostAsync(Guid postId, Guid currentUserId, CreateReportRequest request);
+    Task<List<ContentReportResponse>> GetContentReportsAsync(Guid accountId, short? status, int page, int pageSize, CancellationToken ct);
+    Task<ContentReportResponse> GetContentReportAsync(Guid accountId, Guid reportId, CancellationToken ct);
+    Task<ContentReportResponse> ReviewContentReportAsync(Guid accountId, Guid reportId, bool isViolation, CancellationToken ct);
     Task UpdatePostAsync(Guid postId, Guid currentUserId, UpdatePostRequest request, CancellationToken ct = default);
     Task DeletePostAsync(Guid postId, Guid currentUserId);
     Task UpdateCommentAsync(Guid commentId, Guid currentUserId, UpdateCommentRequest request);

@@ -135,6 +135,34 @@ public class CommunityController : ControllerBase
         }
     }
 
+    [HttpGet("reports")]
+    [Authorize(Roles = "Admin,Moderator")]
+    public async Task<IActionResult> GetContentReports(CancellationToken ct, [FromQuery] short? status = null,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    {
+        try { return Ok(await _communityService.GetContentReportsAsync(GetCurrentUserId(), status, page, pageSize, ct)); }
+        catch (CommunityException ex) { return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message }); }
+    }
+
+    [HttpGet("reports/{reportId:guid}")]
+    [Authorize(Roles = "Admin,Moderator")]
+    public async Task<IActionResult> GetContentReport(Guid reportId, CancellationToken ct)
+    {
+        try { return Ok(await _communityService.GetContentReportAsync(GetCurrentUserId(), reportId, ct)); }
+        catch (CommunityException ex) { return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message }); }
+    }
+
+    [HttpPatch("reports/{reportId:guid}/review")]
+    [Authorize(Roles = "Admin,Moderator")]
+    public async Task<IActionResult> ReviewContentReport(Guid reportId, [FromBody] ReviewContentReportRequest request, CancellationToken ct)
+    {
+        if (request.IsViolation is not bool isViolation)
+            return BadRequest(new { code = "REVIEW_DECISION_REQUIRED", message = "isViolation is required." });
+
+        try { return Ok(await _communityService.ReviewContentReportAsync(GetCurrentUserId(), reportId, isViolation, ct)); }
+        catch (CommunityException ex) { return StatusCode(ex.Status, new { code = ex.Code, message = ex.Message }); }
+    }
+
     [HttpPut("posts/{id}")]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> UpdatePost(Guid id, [FromForm] UpdatePostRequest request, CancellationToken ct)
