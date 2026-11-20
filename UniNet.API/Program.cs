@@ -15,8 +15,6 @@ var builder = WebApplication.CreateBuilder(args);
 UniNet.API.Services.LocalEnvConfiguration.Apply(builder.Configuration, builder.Environment.ContentRootPath, args);
 UniNet.API.Services.GitHubDeploymentReadiness.Validate(builder.Configuration);
 var phase3E2EEnvironment = builder.Environment.IsEnvironment("E2E");
-var disableUnrelatedWorkers = phase3E2EEnvironment &&
-    builder.Configuration.GetValue("GitHubE2E:DisableUnrelatedWorkers", false);
 builder.Services.Configure<GitHubIntegrationOptions>(
     builder.Configuration.GetSection(GitHubIntegrationOptions.SectionName));
 builder.Services.Configure<GitSyncOptions>(
@@ -67,8 +65,6 @@ builder.Services.AddScoped<AssessorContractTasks>();
 builder.Services.AddSingleton<AssessorContractSecrets>();
 builder.Services.AddScoped<IAssessorContractFiles, AssessorContractFiles>();
 builder.Services.AddScoped<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorSmtpSender>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService<UniNet.API.Services.AssessorContractWorker>();
 builder.Services.AddOptions<AssessorContractOptions>()
     .Bind(builder.Configuration.GetSection("AssessorOnboarding"))
     .Validate(o => !o.Enabled || (
@@ -114,8 +110,6 @@ builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<FriendshipService>();
 builder.Services.AddScoped<NotificationTargets>();
 builder.Services.AddScoped<NotificationBroadcastService>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService<UniNet.API.Services.NotificationBackgroundWorker>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.IUserIdProvider, UniNet.API.Hubs.AccountUserIdProvider>();
 builder.Services.AddScoped<VerificationDeadlineTasks>();
 builder.Services.AddScoped<ProjectRecruitmentTasks>();
@@ -124,8 +118,6 @@ builder.Services.AddScoped<VerificationRefundTasks>();
 builder.Services.AddScoped<ExternalProjectDraftService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IRefundProvider, ManualRefundProvider>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService<UniNet.API.Services.VerificationBackgroundWorker>();
 builder.Services.AddScoped<IAdminProjectVerificationService, AdminProjectVerificationService>();
 builder.Services.AddScoped<VerificatorAvailabilityService>();
 builder.Services.AddScoped<ProfileService>();
@@ -193,18 +185,11 @@ builder.Services.AddScoped<ProfileDevelopmentSeed>();
 builder.Services.AddScoped<ICommunityService,CommunityService>();
 builder.Services.AddScoped<IAdvertisementService, AdvertisementService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IAIModerationService, UniNet.Application.Services.GeminiModerationService>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService<UniNet.API.ExpiredTokenCleanup>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService<UniNet.API.Services.GitHubOAuthFlowCleanupWorker>();
-builder.Services.AddHostedService<UniNet.API.Services.GitSyncWorker>();
 builder.Services.AddControllers();
 builder.Services.AddHttpClient<IGitHubProviderClient, UniNet.API.Services.GitHubProviderClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(30))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<UniNet.API.Services.AccountSessionConnections>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<UniNet.API.Services.AccountSessionConnections>());
 builder.Services.AddSignalR(options => options.AddFilter<UniNet.API.Services.AccountSessionConnections>());
 builder.Services.AddSingleton<UniNet.API.Services.ProfileImageStorage>();
 builder.Services.AddHttpClient<UniNet.API.Services.GeminiPortraitProcessor>(client => client.Timeout = TimeSpan.FromSeconds(30))
@@ -219,8 +204,7 @@ builder.Services.AddHttpClient<UniNet.Application.Interfaces.ICloudImageStorage,
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddTransient<UniNet.API.Services.IPortraitCloudStorage, UniNet.API.Services.CloudinaryPortraitStorage>();
 builder.Services.AddSingleton<UniNet.API.Services.PortraitSessions>();
-if (!disableUnrelatedWorkers)
-    builder.Services.AddHostedService<UniNet.API.Services.PortraitCleanup>();
+UniNet.API.Services.RuntimeWorkerRegistration.AddRuntimeWorkers(builder.Services, builder.Configuration, phase3E2EEnvironment);
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 var figmaOrigins = phase3E2EEnvironment
     ? Array.Empty<string>()

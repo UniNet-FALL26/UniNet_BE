@@ -37,5 +37,6 @@ public static class LocalEnvConfiguration
         // Explicit deployment environment and CLI flags always override local file defaults.
         configuration.AddEnvironmentVariables();
         if (args.Length > 0) configuration.AddCommandLine(args);
+        GitHubPrivateKeyConfiguration.Apply(configuration, contentRoot);
     }
 }
