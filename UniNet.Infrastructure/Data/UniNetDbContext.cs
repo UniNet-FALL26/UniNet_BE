@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace UniNet.Infrastructure.Data;
 
-public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) : DbContext(options)
+public sealed partial class UniNetDbContext(DbContextOptions<UniNetDbContext> options) : DbContext(options)
 {
     private void GuardHistory()
     {
@@ -173,6 +173,7 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        ConfigureMessaging(model);
         model.ApplyConfiguration(new OfficialWorkflowConfiguration());
         model.ApplyConfiguration(new OfficialRunConfiguration());
         model.ApplyConfiguration(new OfficialAuditConfiguration());

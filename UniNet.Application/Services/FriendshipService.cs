@@ -115,6 +115,11 @@ public sealed class FriendshipService(UniNetDbContext db)
                 throw new ProjectException("USER_INACTIVE", "Tài khoản này không còn là sinh viên đang hoạt động.", 409);
             row.Status = action switch { "accept" => FriendshipStatus.Accepted, "reject" => FriendshipStatus.Rejected, "cancel" => FriendshipStatus.Cancelled, _ => FriendshipStatus.Removed };
             row.Version++; row.UpdatedAt = DateTimeOffset.UtcNow; row.RespondedAt = row.UpdatedAt;
+            if (action is "accept" or "remove") {
+                var direct = action == "accept" ? await MessagingService.EnsureDirect(db, accountId, other, ct) :
+                    await db.Conversations.SingleOrDefaultAsync(c => c.Type == 0 && (c.DirectAccountLowId == accountId && c.DirectAccountHighId == other || c.DirectAccountLowId == other && c.DirectAccountHighId == accountId), ct);
+                if (direct != null) foreach (var recipient in new[] { accountId, other }) db.Set<NotificationDelivery>().Add(new() { AccountId = recipient, ConversationId = direct.Id, Reason = "chat.relationship" });
+            }
             if (action == "accept") await NotificationService.EnqueueAsync(db, [other], new("friendship.accepted", "community", "Đã chấp nhận kết bạn",
                 $"{actor.FullName} đã chấp nhận lời mời kết bạn của bạn.", "Friendship", row.Id,
                 EventKey: $"friendship:{row.Id}:{row.Version}:accepted", SenderUserId: accountId), ct);

@@ -36,6 +36,9 @@ public sealed class ProjectHubController(ProjectHubService projects) : Controlle
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     { await projects.DeleteAsync(id, AccountId, ct); return NoContent(); }
+    [HttpPost("{id:guid}/resources/{kind}")]
+    public Task<HubProject> AddResource(Guid id, string kind, HubFile request, CancellationToken ct)
+        => projects.AddResourceAsync(id, AccountId, kind, request, ct);
     [HttpPut("{id:guid}/recruitment")]
     public Task<HubProject> Recruitment(Guid id, SaveHubRecruitmentRequest request, CancellationToken ct)
         => projects.RecruitmentAsync(id, AccountId, request, ct);
