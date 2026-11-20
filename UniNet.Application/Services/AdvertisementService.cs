@@ -200,7 +200,7 @@ public sealed class AdvertisementService(
             }
             else
             {
-                // Nếu đã quá hạn (hoặc user đã bấm hủy làm link chết), 
+                // Nếu đã quá hạn (hoặc user đã bấm hủy làm link chết),
                 // ta cập nhật transaction cũ thành Failed (hoặc bỏ qua nó) để tạo transaction mới bên dưới
                 var oldTx = await db.Transactions.FirstOrDefaultAsync(t => t.Id == existingTransaction.Id, ct);
                 if (oldTx != null)

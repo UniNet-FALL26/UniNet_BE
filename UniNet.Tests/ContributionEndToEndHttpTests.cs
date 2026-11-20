@@ -37,6 +37,42 @@ public sealed class ContributionEndToEndHttpTests
         Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         Assert.Equal("PROJECT_FEATURE_RETIRED", body.GetProperty("code").GetString());
+        var task = Guid.NewGuid(); var report = Guid.NewGuid();
+        var root = $"/api/projects/{api.ProjectId}/tasks";
+        var calls = new (HttpMethod Method, string Path, object? Body)[]
+        {
+            (HttpMethod.Get, $"{root}/{task}", null),
+            (HttpMethod.Post, root, new { title = "Retired", description = "fixture", deadline = DateTimeOffset.UtcNow }),
+            (HttpMethod.Put, $"{root}/{task}", new { title = "Retired" }),
+            (HttpMethod.Patch, $"{root}/{task}/status", new { status = 1 }),
+            (HttpMethod.Delete, $"{root}/{task}", null),
+            (HttpMethod.Patch, $"{root}/{task}/assignments", Array.Empty<Guid>()),
+            (HttpMethod.Post, $"{root}/{task}/reports", new { content = "Retired", evidence = Array.Empty<object>() }),
+            (HttpMethod.Post, $"{root}/{task}/reports/drafts", new { content = "Retired", evidence = Array.Empty<object>() }),
+            (HttpMethod.Get, $"{root}/{task}/reports", null),
+            (HttpMethod.Get, $"{root}/{task}/reports/{report}", null),
+            (HttpMethod.Put, $"{root}/{task}/reports/{report}", new { content = "Retired", evidence = Array.Empty<object>() }),
+            (HttpMethod.Put, $"{root}/{task}/reports/{report}/draft", new { content = "Retired", evidence = Array.Empty<object>() }),
+            (HttpMethod.Post, $"{root}/{task}/reports/{report}/submit", null),
+            (HttpMethod.Post, $"{root}/{task}/reports/{report}/withdraw", null),
+            (HttpMethod.Delete, $"{root}/{task}/reports/{report}", null),
+            (HttpMethod.Post, $"{root}/{task}/reports/{report}/reviews", new { decision = 0, feedback = "fixture" })
+        };
+        foreach (var call in calls)
+        {
+            using var request = new HttpRequestMessage(call.Method, call.Path);
+            if (call.Body is not null) request.Content = JsonContent.Create(call.Body);
+            using var rejected = await leader.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Gone, rejected.StatusCode);
+            var error = await rejected.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            Assert.Equal("PROJECT_FEATURE_RETIRED", error.GetProperty("code").GetString());
+        }
+        leader.DefaultRequestHeaders.Authorization = null;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await leader.GetAsync(root)).StatusCode);
+        await using var scope = api.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), x => x.GetTableName() is "ProjectTasks" or "TaskEvidence" or "TaskReports");
+        Assert.Empty(await db.ContributionCalculationRuns.ToListAsync());
     }
 
     private sealed class TestApi(WebApplication app, string databasePath, Guid projectId,
@@ -84,7 +120,6 @@ public sealed class ContributionEndToEndHttpTests
             builder.Services.AddScoped<AuthService>();
             builder.Services.AddScoped<ProjectModerationService>();
             builder.Services.AddScoped<IProjectService, ProjectService>();
-            builder.Services.AddScoped<IProjectTaskService, ProjectTaskService>();
             builder.Services.AddScoped<IContributionService, ContributionService>();
             builder.Services.AddSingleton<IAIModerationService, FakeModerationService>();
             builder.Services.AddControllers().AddApplicationPart(typeof(ContributionController).Assembly);

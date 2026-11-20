@@ -15,11 +15,43 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
 {
     private void GuardHistory()
     {
+        if (ChangeTracker.Entries<ExperimentalPeerSnapshot>().Any(e => e.State is EntityState.Modified or EntityState.Deleted) ||
+            ChangeTracker.Entries<ExperimentalPeerRevision>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Peer snapshot and revision history are immutable.");
+        foreach (var entry in ChangeTracker.Entries<ExperimentalPeerCohort>().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
+            if (entry.State == EntityState.Deleted || entry.OriginalValues.GetValue<ExperimentalPeerCohortStatus>(nameof(ExperimentalPeerCohort.Status)) == ExperimentalPeerCohortStatus.Closed ||
+                entry.Property(x => x.RosterJson).IsModified || entry.Property(x => x.RosterHash).IsModified || entry.Property(x => x.ProjectId).IsModified)
+                throw new InvalidOperationException("Closed cohorts and frozen rosters are immutable.");
+        if (ChangeTracker.Entries<GitEvidenceVersion>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Git evidence versions are immutable.");
+        if (ChangeTracker.Entries<GitContributionRun>().Any(e =>
+            (e.State is EntityState.Modified or EntityState.Deleted) &&
+            e.OriginalValues.GetValue<GitContributionRunStatus>(nameof(GitContributionRun.Status)) == GitContributionRunStatus.Finalized))
+            throw new InvalidOperationException("Finalized Git contribution runs are immutable.");
         if (ChangeTracker.Entries<WalletEntry>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Wallet ledger entries are immutable.");
 
         if (ChangeTracker.Entries<AccountStatusChange>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Account status history cannot be changed or deleted.");
+        if (ChangeTracker.Entries<ProjectGitRepositoryHistory>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Repository integration history cannot be changed or deleted.");
+        if (ChangeTracker.Entries<ProjectGitMemberIdentityHistory>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Project Git identity history cannot be changed or deleted.");
+        foreach (var entry in ChangeTracker.Entries<ProjectGitMemberIdentity>())
+        {
+            if (entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Project Git identities cannot be deleted.");
+            if (entry.State == EntityState.Modified && new[]
+                {
+                    nameof(ProjectGitMemberIdentity.ProjectId),
+                    nameof(ProjectGitMemberIdentity.UserProfileId),
+                    nameof(ProjectGitMemberIdentity.Provider),
+                    nameof(ProjectGitMemberIdentity.ExternalAccountId),
+                    nameof(ProjectGitMemberIdentity.LinkedAt),
+                    nameof(ProjectGitMemberIdentity.CreatedAt)
+                }.Any(property => entry.Property(property).IsModified))
+                throw new InvalidOperationException("Project Git identity ownership cannot be rewritten.");
+        }
         foreach (var entry in ChangeTracker.Entries<VerificationNotification>().Where(e => e.State == EntityState.Added).ToList())
         {
             if (!Set<NotificationDelivery>().Local.Any(x => x.NotificationId == entry.Entity.Id && x.Reason == "created"))
@@ -88,6 +120,27 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<Specialization> Specializations => Set<Specialization>();
     public DbSet<AssessorSpecialization> AssessorSpecializations => Set<AssessorSpecialization>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<GitHubOAuthConnection> GitHubOAuthConnections => Set<GitHubOAuthConnection>();
+    public DbSet<GitHubOAuthAuthorizationFlow> GitHubOAuthAuthorizationFlows => Set<GitHubOAuthAuthorizationFlow>();
+    public DbSet<GitHubRepository> GitHubRepositories => Set<GitHubRepository>();
+    public DbSet<ProjectGitManagerGrant> ProjectGitManagerGrants => Set<ProjectGitManagerGrant>();
+    public DbSet<ProjectGitRepository> ProjectGitRepositories => Set<ProjectGitRepository>();
+    public DbSet<ProjectGitRepositoryHistory> ProjectGitRepositoryHistory => Set<ProjectGitRepositoryHistory>();
+    public DbSet<ProjectGitMemberIdentity> ProjectGitMemberIdentities => Set<ProjectGitMemberIdentity>();
+    public DbSet<ProjectGitMemberIdentityHistory> ProjectGitMemberIdentityHistory => Set<ProjectGitMemberIdentityHistory>();
+    public DbSet<GitSyncJob> GitSyncJobs => Set<GitSyncJob>();
+    public DbSet<GitSyncCheckpoint> GitSyncCheckpoints => Set<GitSyncCheckpoint>();
+    public DbSet<GitHubProviderObject> GitHubProviderObjects => Set<GitHubProviderObject>();
+    public DbSet<GitEvidenceVersion> GitEvidenceVersions => Set<GitEvidenceVersion>();
+    public DbSet<GitContributionRun> GitContributionRuns => Set<GitContributionRun>();
+    public DbSet<ProjectEvidenceObservation> ProjectEvidenceObservations => Set<ProjectEvidenceObservation>();
+    public DbSet<GitActivity> GitActivities => Set<GitActivity>();
+    public DbSet<GitActivityActor> GitActivityActors => Set<GitActivityActor>();
+    public DbSet<ProjectGitActivityGrant> ProjectGitActivityGrants => Set<ProjectGitActivityGrant>();
+    public DbSet<GitCommitBranchReference> GitCommitBranchReferences => Set<GitCommitBranchReference>();
+    public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
+    public DbSet<GitHubAppWebhookDelivery> GitHubAppWebhookDeliveries => Set<GitHubAppWebhookDelivery>();
+    public DbSet<ProjectGitActivityVisibility> ProjectGitActivityVisibilities => Set<ProjectGitActivityVisibility>();
     public DbSet<ProjectJoinRequest> ProjectJoinRequests => Set<ProjectJoinRequest>();
     public DbSet<ContributionCycle> ContributionCycles => Set<ContributionCycle>();
     public DbSet<ContributionParticipant> ContributionParticipants => Set<ContributionParticipant>();
@@ -120,6 +173,10 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
     public DbSet<AdvertisementTransaction> AdvertisementTransactions => Set<AdvertisementTransaction>();
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.ApplyConfiguration(new OfficialWorkflowConfiguration());
+        model.ApplyConfiguration(new OfficialRunConfiguration());
+        model.ApplyConfiguration(new OfficialAuditConfiguration());
+        model.ApplyConfiguration(new OfficialPublicationConfiguration());
         SpecializationConfiguration.Configure(model);
         SimplifiedProjectConfiguration.Configure(model);
         AssessorOnboardingConfiguration.Configure(model);
@@ -130,6 +187,15 @@ public sealed class UniNetDbContext(DbContextOptions<UniNetDbContext> options) :
         NotificationConfiguration.Configure(model);
         FriendshipConfiguration.Configure(model);
         model.ApplyConfiguration(new UnifiedProjectModerationConfiguration());
+        GitHubIntegrationConfiguration.Configure(model);
+        GitHubAppInstallationConfiguration.Configure(model);
+        ProjectGitMemberIdentityConfiguration.Configure(model);
+        GitSyncConfiguration.Configure(model);
+        GitActivityConfiguration.Configure(model);
+        GitEvidenceConfiguration.Configure(model);
+        ProjectGitEvidenceSnapshotConfiguration.Configure(model);
+        GitContributionConfiguration.Configure(model);
+        ExperimentalPeerConfiguration.Configure(model, Database.IsNpgsql());
         model.Entity<PortraitAsset>(e =>
         {
             e.ToTable("PortraitAssets"); e.HasKey(x => x.Id);

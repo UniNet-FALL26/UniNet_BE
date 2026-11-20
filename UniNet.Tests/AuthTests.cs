@@ -151,16 +151,16 @@ public sealed class AuthTests
         }
     }
     [Fact]
-    public async Task PartnerRegistrationSeparatesOrganizationAndPersonalNames()
+    public async Task PartnerRegistrationUsesOrganizationIdentityAndIgnoresRetiredPersonalInputs()
     {
         var (connection, db, auth, _) = await Setup();
         await using (connection) await using (db)
         {
             var registered = await auth.RegisterPartner(new(" ABC Company ", "partner@example.com", "Password123", "Password123", PartnerType.Company, " Nguyen Van A ", " Partner A "), default);
             Assert.Equal("ABC Company", registered.Account.Profile!.OrganizationName);
-            Assert.Equal("Nguyen Van A", registered.Account.Profile.FullName);
-            Assert.Equal("Partner A", registered.Account.Profile.Nickname);
-            Assert.Equal("Partner A", registered.Account.Profile.DisplayName);
+            Assert.Equal("ABC Company", registered.Account.Profile.FullName);
+            Assert.Equal("ABC Company", registered.Account.Profile.Nickname);
+            Assert.Equal("ABC Company", registered.Account.Profile.DisplayName);
             Assert.False(registered.Account.Profile.IsVerified);
             Assert.Empty(await db.CareerProfiles.ToListAsync());
             var login = await auth.Login(new("partner@example.com", "Password123"), default);
@@ -169,8 +169,8 @@ public sealed class AuthTests
     }
     [Theory]
     [InlineData("", "Representative", "Partner")]
-    [InlineData("Company", "", "Partner")]
-    [InlineData("Company", "Representative", " ")]
+    [InlineData(" ", "", "Partner")]
+    [InlineData("\t", "Representative", " ")]
     public async Task InvalidPartnerNamesDoNotCreateAnAccount(string organization, string fullName, string nickname)
     {
         var (connection, db, auth, _) = await Setup();

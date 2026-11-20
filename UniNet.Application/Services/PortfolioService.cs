@@ -2,6 +2,7 @@ using System.Net.Mail;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using UniNet.Application.Common;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
@@ -164,7 +165,7 @@ public sealed class PortfolioService(UniNetDbContext db)
 
     private IQueryable<Project> EligibleProjects(Guid userId) => db.Projects.AsNoTracking()
         .Where(x => x.Status == ProjectStatus.Completed &&
-            (x.CreatorId == userId || x.Members.Any(m => m.UserId == userId && m.Status == ProjectMemberStatus.Active)));
+            ProjectMembership.EffectiveProjectIds(db, userId).Contains(x.Id));
 
     private async Task ValidateProjectReferences(UserProfile profile, PortfolioProject[] items, CancellationToken ct)
     {
