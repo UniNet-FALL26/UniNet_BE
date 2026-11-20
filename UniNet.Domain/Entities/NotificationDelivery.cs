@@ -11,6 +11,9 @@ public sealed class NotificationDelivery
     public DateTimeOffset? DeliveredAt { get; set; }
     public DateTimeOffset? RetryAt { get; set; }
     public int Attempts { get; set; }
+    public Guid? ConversationId { get; set; }
+    public Guid? MessageId { get; set; }
+    public Guid? PushDeviceId { get; set; }
 }
 
 public sealed class NotificationPermissionOverride

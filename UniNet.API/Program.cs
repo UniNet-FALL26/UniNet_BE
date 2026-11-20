@@ -22,6 +22,12 @@ var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationExceptio
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<MessagingService>();
+builder.Services.AddHttpClient("ChatPush", client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddSingleton<IChatPushSender, UniNet.API.Services.FcmChatPushSender>();
+builder.Services.AddHostedService<UniNet.API.Services.ChatDeliveryWorker>();
+builder.Services.AddHttpClient<IChatAttachmentStorage, UniNet.API.Services.ChatCloudStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<AssessorOnboardingService>();
 builder.Services.AddScoped<AssessorContractService>();
 builder.Services.AddScoped<AssessorActivationService>();
@@ -57,6 +63,9 @@ builder.Services.AddOptions<UniNet.API.Services.AssessorSmtpOptions>()
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("Messaging", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     o.AddPolicy("AssessorContracts", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -219,7 +228,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
         },
         OnMessageReceived = context =>
         {
-            if ((context.Request.Path.StartsWithSegments("/hubs/workspace") || context.Request.Path.StartsWithSegments("/hubs/notifications")) &&
+            if ((context.Request.Path.StartsWithSegments("/hubs/workspace") || context.Request.Path.StartsWithSegments("/hubs/notifications") || context.Request.Path.StartsWithSegments("/hubs/messaging")) &&
                 context.Request.Query.TryGetValue("access_token", out var token))
                 context.Token = token;
             return Task.CompletedTask;
@@ -352,8 +361,8 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseCors("Frontend");
 
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -364,6 +373,7 @@ app.MapHub<UniNet.API.Hubs.WorkspaceChatHub>(
     options => options.CloseOnAuthenticationExpiration = true)
     .RequireAuthorization();
 app.MapHub<UniNet.API.Hubs.NotificationsHub>("/hubs/notifications", options => options.CloseOnAuthenticationExpiration = true).RequireAuthorization();
+app.MapHub<UniNet.API.Hubs.MessagingHub>("/hubs/messaging", options => options.CloseOnAuthenticationExpiration = true).RequireAuthorization();
 app.Run();
 
 public partial class Program { }

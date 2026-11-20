@@ -197,15 +197,30 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
     }
     public async Task Logout(Guid accountId, string rawToken, CancellationToken ct)
     {
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var hash = Hash(rawToken);
         var token = await db.RefreshTokens.SingleOrDefaultAsync(x => x.AccountId == accountId && x.TokenHash == hash, ct);
-        if (token is not null && token.RevokedAt is null) { token.RevokedAt = DateTimeOffset.UtcNow; await db.SaveChangesAsync(ct); }
+        if (token != null) {
+            token.RevokedAt ??= DateTimeOffset.UtcNow;
+            if (!string.IsNullOrWhiteSpace(token.DeviceId)) {
+                var devices = await db.PushDevices.Where(d => d.AccountId == accountId && d.DeviceId == token.DeviceId && d.IsActive).ToListAsync(ct);
+                foreach (var device in devices) { device.IsActive = false; device.UpdatedAt = DateTimeOffset.UtcNow; }
+                db.ChatDeviceSessions.RemoveRange(await db.ChatDeviceSessions.Where(s => s.AccountId == accountId && s.DeviceId == token.DeviceId).ToListAsync(ct));
+            }
+            await db.SaveChangesAsync(ct);
+        }
+        await tx.CommitAsync(ct);
     }
     public async Task LogoutAll(Guid accountId, CancellationToken ct)
     {
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var revokedAt = DateTimeOffset.UtcNow;
+        await db.Accounts.Where(a => a.Id == accountId).ExecuteUpdateAsync(s => s.SetProperty(a => a.SessionVersion, a => a.SessionVersion + 1).SetProperty(a => a.UpdatedAt, revokedAt), ct);
         await db.RefreshTokens.Where(x => x.AccountId == accountId && x.RevokedAt == null)
             .ExecuteUpdateAsync(x => x.SetProperty(t => t.RevokedAt, revokedAt), ct);
+        await db.PushDevices.Where(x => x.AccountId == accountId && x.IsActive).ExecuteUpdateAsync(x => x.SetProperty(d => d.IsActive, false), ct);
+        await db.ChatDeviceSessions.Where(x => x.AccountId == accountId).ExecuteDeleteAsync(ct);
+        await tx.CommitAsync(ct);
     }
     public async Task<AccountResponse> Me(Guid accountId, CancellationToken ct)
     {

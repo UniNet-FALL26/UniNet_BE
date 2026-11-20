@@ -1251,6 +1251,353 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.ToTable("JobSkills", (string)null);
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.AccountBlock", b =>
+                {
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BlockedAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("AccountId", "BlockedAccountId");
+
+                    b.HasIndex("BlockedAccountId");
+
+                    b.ToTable("AccountBlocks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountBlocks_NotSelf", "\"AccountId\" <> \"BlockedAccountId\"");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.ChatDeviceSession", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ActiveConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DeviceId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsForeground")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActiveConversationId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("AccountId", "DeviceId");
+
+                    b.ToTable("ChatDeviceSessions", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.ChatMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ClientMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EditedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Number")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("RecalledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReplyToMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SenderAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId", "Number")
+                        .IsUnique();
+
+                    b.HasIndex("ConversationId", "ReplyToMessageId");
+
+                    b.HasIndex("ConversationId", "SenderAccountId");
+
+                    b.HasIndex("SenderAccountId", "ClientMessageId")
+                        .IsUnique();
+
+                    b.HasIndex("ConversationId", "CreatedAt", "Id");
+
+                    b.ToTable("Messages", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Messages_Number", "\"Number\" > 0");
+
+                            t.HasCheckConstraint("CK_Messages_Type", "\"Type\" BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.Conversation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DirectAccountHighId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DirectAccountLowId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LastMessageAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<long>("NextMessageNumber")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByAccountId");
+
+                    b.HasIndex("DirectAccountHighId");
+
+                    b.HasIndex("LastMessageAt");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique()
+                        .HasFilter("\"ProjectId\" IS NOT NULL");
+
+                    b.HasIndex("DirectAccountLowId", "DirectAccountHighId")
+                        .IsUnique()
+                        .HasFilter("\"Type\" = 0");
+
+                    b.ToTable("Conversations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Conversations_DirectPair", "(\"Type\" = 0 AND \"DirectAccountLowId\" IS NOT NULL AND \"DirectAccountHighId\" IS NOT NULL AND \"DirectAccountLowId\" < \"DirectAccountHighId\" AND \"ProjectId\" IS NULL) OR (\"Type\" = 1 AND \"DirectAccountLowId\" IS NULL AND \"DirectAccountHighId\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_Conversations_Type", "\"Type\" IN (0,1)");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.ConversationMember", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastReadMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeftAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("MutedUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<short>("Role")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("ConversationId", "AccountId");
+
+                    b.HasIndex("ConversationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ConversationMembers_ActiveOwner")
+                        .HasFilter("\"Role\" = 2 AND \"LeftAt\" IS NULL");
+
+                    b.HasIndex("AccountId", "LeftAt");
+
+                    b.HasIndex("ConversationId", "LastReadMessageId");
+
+                    b.ToTable("ConversationMembers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ConversationMembers_Role", "\"Role\" BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.MessageAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<short>("FileType")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("FileUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MimeType")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId");
+
+                    b.ToTable("MessageAttachments", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.MessageReaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReactionType")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("MessageId", "AccountId")
+                        .IsUnique();
+
+                    b.ToTable("MessageReactions", (string)null);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.PushDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeviceId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("LastActiveAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<int>("SessionVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ShowPreview")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "DeviceId")
+                        .IsUnique();
+
+                    b.ToTable("PushDevices", (string)null);
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcast", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1352,13 +1699,22 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("DeliveredAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("NotificationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PushDeviceId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Reason")
@@ -1373,7 +1729,15 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                     b.HasIndex("AccountId");
 
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("PushDeviceId");
+
                     b.HasIndex("DeliveredAt", "CreatedAt");
+
+                    b.HasIndex("Reason", "DeliveredAt", "RetryAt");
 
                     b.ToTable("NotificationDeliveries", (string)null);
                 });
@@ -3553,6 +3917,134 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Navigation("Skill");
                 });
 
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.AccountBlock", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("BlockedAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.ChatDeviceSession", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ActiveConversationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.ChatMessage", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Messaging.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "ReplyToMessageId")
+                        .HasPrincipalKey("ConversationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.ConversationMember", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "SenderAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.Conversation", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("DirectAccountHighId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("DirectAccountLowId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UniNet.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.ConversationMember", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId", "LastReadMessageId")
+                        .HasPrincipalKey("ConversationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.MessageAttachment", b =>
+                {
+                    b.HasOne("UniNet.Domain.Entities.Messaging.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.MessageReaction", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UniNet.Domain.Entities.Messaging.PushDevice", b =>
+                {
+                    b.HasOne("UniNet.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UniNet.Domain.Entities.NotificationBroadcast", b =>
                 {
                     b.HasOne("UniNet.Domain.Account", null)
@@ -3584,6 +4076,21 @@ namespace UniNet.Infrastructure.Data.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("UniNet.Domain.Entities.Messaging.PushDevice", null)
+                        .WithMany()
+                        .HasForeignKey("PushDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("UniNet.Domain.Entities.NotificationPermissionOverride", b =>
