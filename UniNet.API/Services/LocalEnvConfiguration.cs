@@ -24,10 +24,16 @@ public static class LocalEnvConfiguration
 
     public static void Apply(ConfigurationManager configuration, string contentRoot, string[] args)
     {
-        var path = Path.Combine(contentRoot, ".env");
-        var parent = Directory.GetParent(contentRoot)?.FullName;
-        if (!File.Exists(path) && parent is not null && File.Exists(Path.Combine(parent, "UniNet.sln"))) path = Path.Combine(parent, ".env");
-        configuration.AddInMemoryCollection(Read(path));
+        var skipLocalEnvFile = string.Equals(
+            Environment.GetEnvironmentVariable("UNINET_SKIP_LOCAL_ENV_FILE"), "true", StringComparison.OrdinalIgnoreCase);
+        if (!skipLocalEnvFile)
+        {
+            var path = Path.Combine(contentRoot, ".env");
+            var parent = Directory.GetParent(contentRoot)?.FullName;
+            if (!File.Exists(path) && parent is not null && File.Exists(Path.Combine(parent, "UniNet.sln")))
+                path = Path.Combine(parent, ".env");
+            configuration.AddInMemoryCollection(Read(path));
+        }
         // Explicit deployment environment and CLI flags always override local file defaults.
         configuration.AddEnvironmentVariables();
         if (args.Length > 0) configuration.AddCommandLine(args);

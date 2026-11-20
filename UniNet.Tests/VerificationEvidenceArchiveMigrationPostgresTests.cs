@@ -59,12 +59,14 @@ public sealed class VerificationEvidenceArchiveMigrationPostgresTests
             Type = PackageType.Verification, Role = TargetRole.Student, IsActive = true };
         var verification = new ProjectVerification { Id = Guid.NewGuid(), Project = project, RequestByUser = owner.Profile!,
             Package = package, Status = ProjectVerificationStatus.Pending, SubmittedAt = now, CreatedAt = now, UpdatedAt = now };
-        db.Accounts.Add(owner); db.ProjectVerifications.Add(verification);
+        await HistoricalFixtureSeed.AccountAsync(db, owner);
+        await HistoricalFixtureSeed.ProjectAsync(db, project);
+        db.ProjectVerifications.Add(verification);
         db.Transactions.Add(new() { Id = Guid.NewGuid(), UserId = owner.Profile!.Id, Package = package, Amount = 15000,
             Verification = verification, Status = PaymentStatus.Success, PaidAt = now, CreatedAt = now, UpdatedAt = now });
-        await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         db.Set<VerificationNotification>().Add(new() { Id = Guid.NewGuid(), RecipientUserId = owner.Id, Message = "Retain inbox", CreatedAt = now });
-        await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         const string payload = "[{\"url\":\"https://example.com/demo\",\"note\":\"Bằng chứng gốc\"}]";
         for (var version = 1; version <= 3; version++)
             await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -167,6 +169,7 @@ public sealed class VerificationEvidenceArchiveMigrationPostgresTests
 
     private static async Task RunPostgresTool(UniNetDbContext db, string tool, params string[] arguments)
     {
+        if (await DockerPostgresFixtureTools.TryRunAsync(tool, new NpgsqlConnectionStringBuilder(db.Database.GetConnectionString()), arguments)) return;
         var bin = Environment.GetEnvironmentVariable("UNINET_POSTGRES_BIN") ?? @"C:\Program Files\PostgreSQL\18\bin";
         var executable = Path.Combine(bin, tool + ".exe");
         Assert.True(File.Exists(executable), "Set UNINET_POSTGRES_BIN to the PostgreSQL tools directory for dump/restore validation.");

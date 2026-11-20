@@ -48,8 +48,8 @@ public sealed class UnifiedModerationMigrationPostgresTests
         var project = new Project { Creator = account.Profile!, Title = "Project", Description = "Work",
             ProjectField = "IT", MemberTarget = 1, Status = ProjectStatus.Completed };
         var package = new Package { Id = Guid.NewGuid(), Code = "g1", Name = "Verification" };
-        db.Accounts.Add(account); db.Projects.Add(project); db.Packages.Add(package);
-        await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.AccountAsync(db, account); await HistoricalFixtureSeed.ProjectAsync(db, project); db.Packages.Add(package);
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         return (project.Id, account.Profile!.Id, package.Id);
     }
 

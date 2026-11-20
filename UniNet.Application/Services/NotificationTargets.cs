@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using UniNet.Application.Common;
 using UniNet.Domain;
 using UniNet.Domain.Enums;
 using UniNet.Infrastructure.Data;
@@ -101,6 +102,6 @@ public sealed class NotificationTargets(UniNetDbContext db, NotificationService 
         return url;
     }
 
-    private Task<bool> IsMemberAsync(Guid projectId, Guid? profileId, CancellationToken ct) => db.Projects.AnyAsync(p => p.Id == projectId &&
-        (p.CreatorId == profileId || p.Members.Any(m => m.UserId == profileId && m.Status == ProjectMemberStatus.Active)), ct);
+    private async Task<bool> IsMemberAsync(Guid projectId, Guid? profileId, CancellationToken ct) =>
+        profileId is Guid id && await ProjectMembership.IsEffectiveMemberAsync(db, projectId, id, ct);
 }

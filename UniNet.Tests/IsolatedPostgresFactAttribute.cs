@@ -10,4 +10,3 @@ public sealed class IsolatedPostgresFactAttribute : FactAttribute
             Skip = "Set UNINET_TEST_POSTGRES to an isolated PostgreSQL test database; never use the application's connection string.";
     }
 }
-

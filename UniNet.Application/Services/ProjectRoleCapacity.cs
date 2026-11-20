@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using UniNet.Application.Common;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Enums;
 using UniNet.Infrastructure.Data;
@@ -15,9 +16,8 @@ internal static class ProjectRoleCapacity
             r.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
         var invitations = await db.ProjectJoinRequests.Where(i => i.RequestType == ProjectRequestType.Invite).Where(i => i.ProjectId == project.Id &&
             i.Status == ProjectJoinRequestStatus.Pending).ToListAsync(ct);
-        var members = await db.ProjectMembers.Where(m => m.ProjectId == project.Id &&
-            m.Status == ProjectMemberStatus.Active).Select(m => m.UserId).ToListAsync(ct);
-        var full = 1 + members.Count(id => id != project.CreatorId) >= project.MemberTarget;
+        var members = await ProjectMembership.EffectiveMemberIds(db, project.Id).ToListAsync(ct);
+        var full = members.Count >= project.MemberTarget;
         var unavailable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var role in requests.Select(r => r.Role)
                      .Select(r => r.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))

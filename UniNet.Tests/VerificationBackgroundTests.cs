@@ -91,17 +91,6 @@ public sealed partial class ProjectVerificationTests
             CreatedAt = joinedAt,
             UpdatedAt = joinedAt.AddDays(1)
         });
-        f.Db.ProjectMembers.Add(new ProjectMember
-        {
-            Id = Guid.NewGuid(),
-            ProjectId = f.Project.Id,
-            UserId = f.Project.CreatorId,
-            Role = "Creator",
-            Status = ProjectMemberStatus.Active,
-            JoinedAt = joinedAt,
-            CreatedAt = joinedAt,
-            UpdatedAt = joinedAt
-        });
         await f.Db.SaveChangesAsync();
         var forbidden = await Assert.ThrowsAsync<ProjectException>(() => service.UpdateStatusAsync(f.Other.Id, new(f.Project.Id, ProjectStatus.Completed), default));
         Assert.Equal(403, forbidden.Status);
@@ -122,6 +111,8 @@ public sealed partial class ProjectVerificationTests
         Assert.Single(cycle.Participants, p => p.IsLeader && p.UserId == f.Project.CreatorId);
         Assert.Single(cycle.Participants, p => p.UserId == f.Other.Profile!.Id && p.LeftAt != null);
         Assert.DoesNotContain(cycle.Participants, p => p.UserId == kickedAccount.Profile.Id);
+        Assert.False(await f.Db.ProjectMembers.AnyAsync(m =>
+            m.ProjectId == f.Project.Id && m.UserId == f.Project.CreatorId));
     }
 
     [Fact]

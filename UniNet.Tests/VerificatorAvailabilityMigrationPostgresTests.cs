@@ -19,21 +19,28 @@ public sealed class VerificatorAvailabilityMigrationPostgresTests
     {
         var connection = Environment.GetEnvironmentVariable("UNINET_TEST_POSTGRES")!;
         var schema = "availability_migration_" + Guid.NewGuid().ToString("N");
+        var database = "availability_test_" + Guid.NewGuid().ToString("N");
         var archive = "verification_archive_" + Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(schema))).ToLowerInvariant();
         await using var adminConnection = new NpgsqlConnection(connection);
         await adminConnection.OpenAsync();
         // Identifiers are generated here, never supplied by a caller or configuration.
 #pragma warning disable EF1002
-        await new NpgsqlCommand($"CREATE SCHEMA {schema}", adminConnection).ExecuteNonQueryAsync();
+        await new NpgsqlCommand($"CREATE DATABASE {database}", adminConnection).ExecuteNonQueryAsync();
         try
         {
+            var isolatedConnection = new NpgsqlConnectionStringBuilder(connection) { Database = database, Pooling = false }.ConnectionString;
+            await using (var isolated = new NpgsqlConnection(isolatedConnection))
+            {
+                await isolated.OpenAsync();
+                await new NpgsqlCommand($"CREATE SCHEMA {schema}", isolated).ExecuteNonQueryAsync();
+            }
             var options = new DbContextOptionsBuilder<UniNetDbContext>().UseNpgsql(
-                new NpgsqlConnectionStringBuilder(connection) { SearchPath = schema }.ConnectionString,
+                new NpgsqlConnectionStringBuilder(isolatedConnection) { SearchPath = schema }.ConnectionString,
                 o => o.MigrationsHistoryTable("__EFMigrationsHistory", schema)).Options;
             Guid verificationId, staffId, assignmentId;
             await using (var db = new UniNetDbContext(options))
             {
-                await db.GetService<IMigrator>().MigrateAsync();
+                await db.GetService<IMigrator>().MigrateAsync("20261023021306_AddVerificatorAvailability");
                 Account User(string name, AccountRole role) => new()
                 {
                     Email = name + "@migration.test", Role = role,
@@ -42,7 +49,7 @@ public sealed class VerificatorAvailabilityMigrationPostgresTests
                 var owner = User("Owner", AccountRole.Student);
                 var staff = User("Staff", AccountRole.Assessor);
                 var admin = User("Admin", AccountRole.Admin);
-                db.Accounts.AddRange(owner, staff, admin);
+                foreach (var account in new[] { owner, staff, admin }) await HistoricalFixtureSeed.AccountAsync(db, account);
                 var project = new Project { Creator = owner.Profile!, Title = "Completed", Description = "Done",
                     ProjectField = "IT", MemberTarget = 2, Status = ProjectStatus.Completed };
                 var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verification", IsActive = true,
@@ -53,9 +60,13 @@ public sealed class VerificatorAvailabilityMigrationPostgresTests
                 var assignment = new VerificationAssignment { Id = Guid.NewGuid(), ProjectVerification = verification,
                     AssignedToUserId = staff.Profile!.Id, AdminId = admin.Profile!.Id, AssignedAt = DateTimeOffset.UtcNow };
                 db.VerificationAssignments.Add(assignment);
-                await db.SaveChangesAsync();
+                await HistoricalFixtureSeed.ProjectAsync(db, project);
+                await HistoricalFixtureSeed.SaveAddedAsync(db);
                 (verificationId, staffId, assignmentId) = (verification.Id, staff.Profile.Id, assignment.Id);
                 await db.GetService<IMigrator>().MigrateAsync("20261020024442_AddVerificationMeetingRoom");
+                await db.GetService<IMigrator>().MigrateAsync("20261023021306_AddVerificatorAvailability");
+                // Only round-trip the availability migration. Newer archive and
+                // official-workflow migrations intentionally prohibit destructive Down.
                 await db.GetService<IMigrator>().MigrateAsync();
             }
             await using var check = new UniNetDbContext(options);
@@ -66,7 +77,7 @@ public sealed class VerificatorAvailabilityMigrationPostgresTests
         }
         finally
         {
-            await new NpgsqlCommand($"DROP SCHEMA IF EXISTS {archive} CASCADE; DROP SCHEMA IF EXISTS {schema} CASCADE", adminConnection).ExecuteNonQueryAsync();
+            await new NpgsqlCommand($"DROP DATABASE {database} WITH (FORCE)", adminConnection).ExecuteNonQueryAsync();
         }
 #pragma warning restore EF1002
     }
