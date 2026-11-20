@@ -111,6 +111,44 @@ public sealed class MessagingTests
         await f.Chat.Role(f.A.Id, group.Id, f.B.Id, 2, default); await f.Chat.RemoveMember(f.A.Id, group.Id, f.A.Id, default);
         await Assert.ThrowsAsync<ProjectException>(() => f.Chat.History(f.A.Id, group.Id, null, 50, default));
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApprovedProjectApplicantCanBeManuallyAddedToLinkedChatWithoutFriendship(bool linkExistingGroup)
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Project();
+        ChatConversation group;
+        if (linkExistingGroup)
+        {
+            await f.Befriend(f.A, f.B); await f.Befriend(f.A, f.C);
+            group = await f.Chat.CreateGroup(f.A.Id, new("Existing group", null, [f.B.Id, f.C.Id]), default);
+            await f.Chat.LinkProject(f.A.Id, group.Id, project.Id, default);
+        }
+        else group = await f.Chat.CreateGroup(f.A.Id, new("Project group", null, [f.B.Id], project.Id), default);
+
+        var hub = new ProjectHubService(f.Db);
+        await hub.RecruitmentAsync(project.Id, f.A.Id, new() { Status = 1,
+            Positions = [new() { Id = "developer", Name = "Developer", Quantity = 5 }] }, default);
+        var application = await hub.RequestAsync(project.Id, f.D.Id, new() { PositionId = "developer" }, default);
+        var pending = await Assert.ThrowsAsync<ProjectException>(() => f.Chat.AddMembers(f.A.Id, group.Id, new([], [f.D.Profile!.Id]), default));
+        Assert.Equal("CHAT_MEMBER_FORBIDDEN", pending.Code);
+
+        await hub.DecideAsync(application.Id, f.A.Id, new("accept"), default);
+        Assert.Contains((await hub.GetAsync(project.Id, f.A.Id, default)).Members,
+            member => member.UserId == f.D.Profile!.Id && member.Status == 0);
+        Assert.DoesNotContain((await f.Chat.Get(f.A.Id, group.Id, default)).Members,
+            member => member.Person.AccountId == f.D.Id && member.LeftAt == null);
+        Assert.False(await f.Db.Friendships.AnyAsync(friendship =>
+            friendship.RequesterAccountId == f.D.Id || friendship.ReceiverAccountId == f.D.Id));
+        var forbidden = await Assert.ThrowsAsync<ProjectException>(() => f.Chat.AddMembers(f.B.Id, group.Id, new([], [f.D.Profile!.Id]), default));
+        Assert.Equal("CHAT_ADMIN_REQUIRED", forbidden.Code);
+
+        await f.Chat.AddMembers(f.A.Id, group.Id, new([], [f.D.Profile!.Id]), default);
+        await f.Chat.AddMembers(f.A.Id, group.Id, new([], [f.D.Profile!.Id]), default);
+        Assert.Single((await f.Chat.Get(f.D.Id, group.Id, default)).Members,
+            member => member.Person.AccountId == f.D.Id && member.LeftAt == null);
+    }
     [Fact]
     public async Task MessagingFilesAndRepliesRequireMembershipAndSameConversation()
     {
