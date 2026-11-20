@@ -1,6 +1,5 @@
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using UniNet.Application;
 using UniNet.Application.Interfaces;
 using UniNet.Application.Services;
@@ -16,9 +15,7 @@ public sealed class RetiredProjectFeaturesTests
     {
         using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
             .UseNpgsql("Host=localhost;Database=never_opened").Options);
-        var configuration = new ConfigurationBuilder().Build();
-        object[] services = [new ProjectTaskService(db, configuration),
-            new WorkspaceChatService(db, new WorkspaceAccessService(db)), new ExternalProjectDraftService(db)];
+        object[] services = [new WorkspaceChatService(db, new WorkspaceAccessService(db)), new ExternalProjectDraftService(db)];
         foreach (var service in services)
         foreach (var method in service.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
         {

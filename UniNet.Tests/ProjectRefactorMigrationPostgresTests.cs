@@ -141,8 +141,20 @@ public sealed class ProjectRefactorMigrationPostgresTests
                 Assert.Equal("", await Scalar($"SELECT COALESCE(to_regclass('public.\"{table}\"')::text,'')"));
                 Assert.Equal(originals[table], await Scalar($"SELECT \"Data\"::text FROM {archive}.\"Snapshots\" WHERE \"TableName\"='{table}'"));
             }
+            Assert.Equal("5", await Scalar($"SELECT sum(\"RowCount\")::text FROM {archive}.\"Snapshots\" WHERE \"TableName\" IN ('ProjectTasks','ProjectTaskAssignments','TaskReports','TaskEvidence','TaskReportReviews')"));
+            Assert.Equal("11", await Scalar($"SELECT count(*)::text FROM {archive}.\"Snapshots\" WHERE md5(\"Data\"::text)=\"Checksum\" AND jsonb_array_length(\"Data\")=\"RowCount\""));
             var readonlyError = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync($"TRUNCATE {archive}.\"Snapshots\""));
             Assert.Contains("read-only", readonlyError.MessageText);
+            foreach (var operation in new[]
+            {
+                $"UPDATE {archive}.\"Snapshots\" SET \"RowCount\"=\"RowCount\"",
+                $"DELETE FROM {archive}.\"Snapshots\"",
+                $"INSERT INTO {archive}.\"Snapshots\" SELECT * FROM {archive}.\"Snapshots\""
+            })
+            {
+                var immutable = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync(operation));
+                Assert.Contains("read-only", immutable.MessageText);
+            }
             db.ChangeTracker.Clear();
             var migratedProject = await db.Projects.SingleAsync(p => p.Id == project.Id);
             Assert.Equal(skill.Id, Assert.Single(migratedProject.ProjectSkills).SkillId);

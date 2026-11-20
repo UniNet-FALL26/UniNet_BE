@@ -17,10 +17,20 @@ public sealed partial class ProjectVerificationTests
         await f.Db.SaveChangesAsync();
         await new ProjectService(f.Db, null!, f.Configuration).UpdateStatusAsync(f.Owner.Id,
             new(f.Project.Id, ProjectStatus.Completed), default);
-        var tasks = new ProjectTaskService(f.Db, f.Configuration);
-        var error = await Assert.ThrowsAsync<ProjectException>(() => tasks.CreateProjectTaskAsync(f.Project.Id, f.Owner.Id,
+        var tasks = new UniNet.API.Controllers.ProjectTasksController
+        {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+                {
+                    User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                        [new System.Security.Claims.Claim("sub", f.Owner.Id.ToString())], "fixture"))
+                }
+            }
+        };
+        var result = Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(tasks.CreateProjectTask(f.Project.Id,
             new("Retired task", "Task storage was removed.", DateTimeOffset.UtcNow.AddDays(3))));
-        Assert.Equal(410, error.Status);
+        Assert.Equal(410, result.StatusCode);
         Assert.Empty(await f.Db.ProjectModerations.ToListAsync());
     }
 

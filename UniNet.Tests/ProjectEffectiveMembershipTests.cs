@@ -32,7 +32,6 @@ public sealed class ProjectEffectiveMembershipTests
             MemberTarget = 5,
             MinimumQuantity = 1,
             RecruitmentDeadline = DateTimeOffset.UtcNow.AddDays(1),
-            ExpectedOutput = DateTimeOffset.UtcNow.AddDays(2),
             Status = ProjectStatus.Active,
             RecruitmentStatus = RecruitmentStatus.Open,
             Visibility = ProjectVisibility.Public

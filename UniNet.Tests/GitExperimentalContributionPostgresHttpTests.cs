@@ -382,7 +382,6 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
             MemberTarget = 3,
             MinimumQuantity = 1,
             RecruitmentDeadline = now.AddDays(-1),
-            ExpectedOutput = now.AddDays(-1),
             Visibility = ProjectVisibility.Private,
             Status = ProjectStatus.Completed,
             RecruitmentStatus = RecruitmentStatus.Closed,

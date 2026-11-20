@@ -7,10 +7,20 @@ namespace UniNet.Tests;
 
 public sealed class GitHubAppHostIntegrationTests
 {
+    private static string ApiAssembly()
+    {
+        var candidates = new[]
+        {
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../UniNet.API/debug/UniNet.API.dll")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../UniNet.API/bin/Debug/net8.0/UniNet.API.dll"))
+        };
+        return candidates.FirstOrDefault(File.Exists)
+            ?? throw new FileNotFoundException("Build the API into the same isolated artifacts root before host tests.");
+    }
     [Fact]
     public async Task EnabledMisconfiguredRealHostExitsWithoutPrintingSecret()
     {
-        var api = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../UniNet.API/bin/Debug/net8.0/UniNet.API.dll"));
+        var api = ApiAssembly();
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         start.ArgumentList.Add(api); start.Environment.Clear();
         foreach (var key in new[] { "PATH", "SystemRoot", "TEMP", "TMP", "DOTNET_ROOT" })
@@ -33,7 +43,7 @@ public sealed class GitHubAppHostIntegrationTests
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
-        var api = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../UniNet.API/bin/Debug/net8.0/UniNet.API.dll"));
+        var api = ApiAssembly();
         Assert.True(File.Exists(api));
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         start.ArgumentList.Add(api); start.ArgumentList.Add("--urls"); start.ArgumentList.Add($"http://127.0.0.1:{port}");

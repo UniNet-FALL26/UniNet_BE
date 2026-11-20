@@ -175,7 +175,6 @@ builder.Services.AddScoped<GitHubOAuthFlowCleanupService>();
 builder.Services.AddSingleton<IGitHubTokenProtector, UniNet.API.Services.GitHubTokenProtector>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IPartnerService, UniNet.Application.Services.PartnerService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IStudentOpportunityService, UniNet.Application.Services.StudentOpportunityService>();
-builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectTaskService, UniNet.Application.Services.ProjectTaskService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IProjectVerificationService, ProjectVerificationService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IAssignmentService, AssignmentService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.IMeetingService, MeetingService>();

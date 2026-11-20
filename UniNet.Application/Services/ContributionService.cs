@@ -1,7 +1,5 @@
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using UniNet.Application.Interfaces;
@@ -14,7 +12,6 @@ namespace UniNet.Application.Services;
 
 public sealed class ContributionService(UniNetDbContext db) : IContributionService
 {
-    private const string FormulaVersion = "1";
     private const int MaximumCommentLength = 2000;
 
     public async Task<ContributionCycleResponse> GetCycleAsync(Guid projectId, Guid accountId, CancellationToken ct)
@@ -126,82 +123,9 @@ public sealed class ContributionService(UniNetDbContext db) : IContributionServi
         var actor = await GetActiveStudentAsync(accountId, ct);
         var (project, cycle) = await GetRequiredCycleAsync(projectId, ct);
         Require(project.CreatorId == actor.Id, "FORBIDDEN", "Only the project leader can calculate contribution.", 403);
-
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var locked = await db.ContributionCycles
-            .Where(c => c.Id == cycle.Id && c.Status == ContributionCycleStatus.CollectingEvaluations)
-            .ExecuteUpdateAsync(update => update.SetProperty(c => c.Status, c => c.Status), ct);
-        Require(locked == 1,
+        Require(cycle.Status == ContributionCycleStatus.CollectingEvaluations,
             "CONTRIBUTION_CYCLE_NOT_OPEN", "The contribution cycle is not accepting a calculation.", 409);
-        var trackedCycle = await db.ContributionCycles.SingleAsync(c => c.Id == cycle.Id, ct);
-
-        var participants = await db.ContributionParticipants.AsNoTracking()
-            .Include(p => p.User)
-            .Where(p => p.CycleId == cycle.Id)
-            .OrderBy(p => p.UserId)
-            .ToListAsync(ct);
-        var now = DateTimeOffset.UtcNow;
-        var inputSnapshot = await CaptureInputSnapshotAsync(projectId, cycle.Id, now, ct);
-        var taskInputs = inputSnapshot.Tasks.Select(task => new ContributionTaskInput(
-            task.TaskId, task.EffectiveStatus, task.AssigneeIds)).ToArray();
-        var deliverableInputs = inputSnapshot.LatestReportVersions
-            .Where(r => !r.IsDeleted && r.Status == TaskReportStatus.Approved)
-            .Select(r => new ContributionDeliverableInput(r.ReportGroupId, r.SubmittedById))
-            .ToArray();
-        var evaluations = inputSnapshot.PeerEvaluations;
-
-        var calculated = ContributionCalculator.Calculate(inputSnapshot.ParticipantUserIds, taskInputs, deliverableInputs, evaluations);
-        var runNumber = (await db.ContributionCalculationRuns.AsNoTracking()
-            .Where(r => r.CycleId == cycle.Id)
-            .Select(r => (int?)r.RunNumber)
-            .MaxAsync(ct) ?? 0) + 1;
-        var run = new ContributionCalculationRun
-        {
-            CycleId = cycle.Id,
-            RunNumber = runNumber,
-            FormulaVersion = cycle.FormulaVersion,
-            InputSnapshot = JsonSerializer.Serialize(inputSnapshot),
-            InputHash = HashInputSnapshot(inputSnapshot),
-            WarningsJson = JsonSerializer.Serialize(calculated.Warnings),
-            CalculatedById = actor.Id,
-            CalculatedAt = now,
-            Status = ContributionCalculationRunStatus.PendingReview
-        };
-        db.ContributionCalculationRuns.Add(run);
-        foreach (var score in calculated.Results)
-        {
-            var memberTasks = taskInputs
-                .Where(t => t.AssigneeIds.Contains(score.UserId) && t.EffectiveStatus != ProjectTaskStatus.Cancelled)
-                .Select(t => new { t.TaskId, t.EffectiveStatus });
-            var memberDeliverables = deliverableInputs
-                .Where(d => d.SubmittedById == score.UserId)
-                .Select(d => d.ReportGroupId);
-            var receivedScores = evaluations
-                .Where(e => e.EvaluateeUserId == score.UserId)
-                .Select(e => e.Score)
-                .ToArray();
-            db.ContributionResults.Add(new ContributionResult
-            {
-                CycleId = cycle.Id,
-                RunId = run.Id,
-                UserId = score.UserId,
-                TaskExecutionScore = score.TaskExecutionScore,
-                ApprovedDeliverablesScore = score.ApprovedDeliverablesScore,
-                PeerEvaluationScore = score.PeerEvaluationScore,
-                TotalScore = score.TotalScore,
-                CalculationDetails = JsonSerializer.Serialize(new
-                {
-                    Tasks = memberTasks,
-                    ApprovedReportGroups = memberDeliverables,
-                    AverageReceivedPeerRating = receivedScores.Length == 0 ? (decimal?)null : receivedScores.Average(score => (decimal)score)
-                })
-            });
-        }
-
-        trackedCycle.Status = ContributionCycleStatus.AwaitingReview;
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return ToRunResponse(run, calculated.Results, participants);
+        throw InputsRetired();
     }
 
     public async Task<ContributionRunResponse> GetRunAsync(Guid projectId, Guid runId, Guid accountId, CancellationToken ct)
@@ -251,23 +175,13 @@ public sealed class ContributionService(UniNetDbContext db) : IContributionServi
         Require(run.RunNumber == latestRunNumber, "CONTRIBUTION_RUN_NOT_REVIEWABLE", "Only the latest calculation run can be reviewed.", 409);
         if (decision == ContributionReviewDecision.Confirmed)
         {
-            var currentSnapshot = await CaptureInputSnapshotAsync(
-                projectId, cycle.Id, DateTimeOffset.UtcNow, ct);
-            Require(
-                HashInputSnapshot(currentSnapshot) == run.InputHash,
-                "CONTRIBUTION_INPUTS_CHANGED",
-                "Calculation inputs changed after this run was generated. Request a revision and calculate again.",
-                409);
+            throw InputsRetired();
         }
 
         var now = DateTimeOffset.UtcNow;
-        run.Status = decision == ContributionReviewDecision.Confirmed
-            ? ContributionCalculationRunStatus.Confirmed
-            : ContributionCalculationRunStatus.RevisionRequested;
-        cycle.Status = decision == ContributionReviewDecision.Confirmed
-            ? ContributionCycleStatus.Finalized
-            : ContributionCycleStatus.CollectingEvaluations;
-        cycle.FinalizedAt = decision == ContributionReviewDecision.Confirmed ? now : null;
+        run.Status = ContributionCalculationRunStatus.RevisionRequested;
+        cycle.Status = ContributionCycleStatus.CollectingEvaluations;
+        cycle.FinalizedAt = null;
         db.ContributionReviews.Add(new ContributionReview
         {
             RunId = run.Id,
@@ -382,54 +296,6 @@ public sealed class ContributionService(UniNetDbContext db) : IContributionServi
                 .ToArray());
     }
 
-    private static ContributionRunResponse ToRunResponse(
-        ContributionCalculationRun run,
-        IReadOnlyList<ContributionParticipantScore> scores,
-        IReadOnlyCollection<ContributionParticipant> participants)
-    {
-        var participantById = participants.ToDictionary(p => p.UserId);
-        return new(run.Id, run.CycleId, run.RunNumber, run.FormulaVersion, run.Status, run.CalculatedAt,
-            JsonSerializer.Deserialize<string[]>(run.WarningsJson) ?? [],
-            scores.OrderBy(s => s.UserId).Select(score =>
-            {
-                var participant = participantById[score.UserId];
-                var details = run.Results.Single(r => r.UserId == score.UserId).CalculationDetails;
-                return new ContributionRunResultResponse(
-                    score.UserId, participant.User.FullName, score.TaskExecutionScore,
-                    score.ApprovedDeliverablesScore, score.PeerEvaluationScore, score.TotalScore, details);
-            }).ToArray(),
-            []);
-    }
-
-    private Task<ContributionInputSnapshot> CaptureInputSnapshotAsync(
-        Guid projectId, Guid cycleId, DateTimeOffset now, CancellationToken ct) =>
-        throw new ProjectException("CONTRIBUTION_INPUTS_RETIRED", "Task-based contribution calculation has been retired; historical results remain available.", 410);
-
-    private static string HashInputSnapshot(ContributionInputSnapshot snapshot)
-    {
-        var json = JsonSerializer.Serialize(snapshot);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
-    }
-
-    private sealed record ContributionInputSnapshot(
-        Guid[] ParticipantUserIds,
-        TaskInputSnapshot[] Tasks,
-        ReportVersionSnapshot[] LatestReportVersions,
-        ContributionPeerEvaluationInput[] PeerEvaluations);
-
-    private sealed record TaskInputSnapshot(
-        Guid TaskId,
-        ProjectTaskStatus Status,
-        DateTimeOffset Deadline,
-        ProjectTaskStatus EffectiveStatus,
-        Guid[] AssigneeIds);
-
-    private sealed record ReportVersionSnapshot(
-        Guid Id,
-        Guid ProjectTaskId,
-        Guid ReportGroupId,
-        int Version,
-        Guid SubmittedById,
-        TaskReportStatus Status,
-        bool IsDeleted);
+    private static ProjectException InputsRetired() => new("CONTRIBUTION_INPUTS_RETIRED",
+        "Task-based contribution calculation has been retired; historical results remain available.", 410);
 }

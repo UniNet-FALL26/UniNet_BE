@@ -11,7 +11,7 @@ internal static class ProjectMembership
             .Where(project => project.Id == projectId)
             .Select(project => project.CreatorId)
             .Union(db.ProjectMembers.AsNoTracking()
-                .Where(member => member.ProjectId == projectId && member.Status == ProjectMemberStatus.Active)
+                .Where(member => member.ProjectId == projectId && member.Status == ProjectMemberStatus.Active && member.LeftAt == null)
                 .Select(member => member.UserId));
 
     public static IQueryable<Guid> EffectiveProjectIds(UniNetDbContext db, Guid userProfileId) =>
@@ -19,7 +19,7 @@ internal static class ProjectMembership
             .Where(project => project.CreatorId == userProfileId)
             .Select(project => project.Id)
             .Union(db.ProjectMembers.AsNoTracking()
-                .Where(member => member.UserId == userProfileId && member.Status == ProjectMemberStatus.Active)
+                .Where(member => member.UserId == userProfileId && member.Status == ProjectMemberStatus.Active && member.LeftAt == null)
                 .Select(member => member.ProjectId));
 
     public static Task<bool> IsEffectiveMemberAsync(

@@ -127,6 +127,14 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
     public async Task OfficialV2UsesFrozenRosterWithoutLegacyCycleAndPublishesOnlyAfterApproval()
     {
         var f = await OfficialFixture();
+        await using (var schema = OfficialDb())
+        {
+            Assert.Equal(0, await schema.Database.SqlQueryRaw<int>("""
+                SELECT count(*)::int AS "Value" FROM information_schema.tables
+                WHERE table_schema='public' AND table_name IN
+                  ('ProjectTasks','ProjectTaskAssignments','TaskEvidence','TaskReports','TaskReportReviews')
+                """).SingleAsync());
+        }
         Assert.Equal("OfficialV2", (await OfficialCall(s => s.StatusAsync(f.Project, f.Accounts[0], default))).Mode);
         var request = new OfficialRunRequest(Guid.NewGuid(), f.Snapshot, f.Peer);
         var run = await OfficialCall(s => s.CreateAsync(f.Project, f.Accounts[0], request, default));

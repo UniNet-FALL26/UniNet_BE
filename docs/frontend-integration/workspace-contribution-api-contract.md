@@ -1,5 +1,18 @@
 # UniNet Workspace and Contribution API Contract
 
+> **Historical contract — superseded for Task/Workspace writes (2026-11-20).**
+> Project Task, assignment, Task Evidence and Task Report operations are retired.
+> Their authenticated legacy routes return HTTP410 `PROJECT_FEATURE_RETIRED`; they
+> do not create tasks, upload evidence, manage report versions or access retired tables.
+> Legacy Task-based Contribution calculation/confirmation returns410
+> `CONTRIBUTION_INPUTS_RETIRED`; authorized historical V1 reads remain supported.
+> Workspace channel storage was independently retired by the Project refactor.
+> This does not retire Verification/Assessor reports, Meeting APIs or generic storage.
+> Use the [Official V2 contract](../api/UNINET_OFFICIAL_CONTRIBUTION_V2_API.md) for
+> Git/Peer workflows and [cleanup/compatibility notes](../agent-handoff/UNINET_REMOVE_LEGACY_TASK_REPORT_CLEANUP.md)
+> for the retained410 routes. The older success contracts below are historical,
+> not a description of currently available Task/Workspace functionality.
+
 ## 1. Overview
 
 This document describes the Project workspace, persistent chat, LiveKit token, task, task-report, evidence-upload, and Contribution APIs exposed by the current UniNet backend. It is intended for a React Native + Expo client that targets web and mobile.

@@ -984,7 +984,11 @@ public sealed class GitHubIntegrationServiceTests
                 (observation, version) => new { observation.Category, observation.RetrievalCompleteness, version.EvidenceStatus })
             .ToArrayAsync();
         Assert.All(syncObservations, x => Assert.Equal("Complete", x.RetrievalCompleteness));
-        Assert.Equal("Complete", syncObservations.Single(x => x.Category == "commits").EvidenceStatus);
+        Assert.Equal("Incomplete", syncObservations.Single(x => x.Category == "commits").EvidenceStatus);
+        var commitFacts = System.Text.Json.JsonSerializer.Deserialize<GitFrozenFacts>(
+            (await db.GitEvidenceVersions.AsNoTracking().SingleAsync(x =>
+                x.GitHubProviderObjectId == db.GitHubProviderObjects.Where(o => o.Category == "commits").Select(o => o.Id).Single())).FrozenFactsJson)!;
+        Assert.Contains("CommitParents", commitFacts.Details!.MissingFacts);
         Assert.Equal("Complete", syncObservations.Single(x => x.Category == "pull-requests").EvidenceStatus);
         Assert.Equal("Complete", syncObservations.Single(x => x.Category == "pull-request-files").EvidenceStatus);
         Assert.Equal("Incomplete", syncObservations.Single(x => x.Category == "branches").EvidenceStatus);

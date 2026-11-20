@@ -29,7 +29,7 @@ public sealed class VerificationHistoryArchivePostgresTests
 {
     private const string Before = "20261019072056_UnifyProjectModerationPurposes";
     private const string BeforeDE = "20261018033831_AddVerificationSlotReservations";
-    private const string After = "20261024095804_AddWorkspaceChat";
+    private const string After = "20261019131816_ArchiveVerificationHistory";
 
     private sealed class Store : IAsyncDisposable
     {
@@ -63,7 +63,7 @@ public sealed class VerificationHistoryArchivePostgresTests
         var owner = User("Owner", AccountRole.Student); var admin = User("Admin", AccountRole.Admin); var staff = User("Staff", AccountRole.Assessor);
         var project = new Project { Creator = owner.Profile!, Title = "Legacy", Description = "History", ProjectField = "IT", MemberTarget = 1, Status = ProjectStatus.Completed };
         var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verify", Price = 100, IsActive = true };
-        db.Accounts.AddRange(owner, admin, staff); db.Projects.Add(project); db.Packages.Add(package); await db.SaveChangesAsync();
+        foreach (var account in new[] { owner, admin, staff }) await HistoricalFixtureSeed.AccountAsync(db, account); await HistoricalFixtureSeed.ProjectAsync(db, project); db.Packages.Add(package); await HistoricalFixtureSeed.SaveAddedAsync(db);
         var verification = new ProjectVerification { Id = Guid.NewGuid(), ProjectId = project.Id, RequestByUserId = owner.Profile!.Id,
             PackageId = package.Id, Status = ProjectVerificationStatus.Verified, SubmittedAt = time, CreatedAt = time, UpdatedAt = time,
             FinalizedAt = time.AddHours(4), FinalizedByUserId = staff.Profile!.Id };
@@ -72,7 +72,7 @@ public sealed class VerificationHistoryArchivePostgresTests
         var report = new VerificationReport { Id = Guid.NewGuid(), AssignmentId = assignment.Id, ProjectVerificationId = verification.Id,
             Summary = "original", Findings = "original findings", Recommendations = "original recommendations", Outcome = ProjectVerificationStatus.Failed,
             SubmittedByUserId = staff.Profile.Id, SubmittetAt = time, CreatedAt = time, UpdatedAt = time };
-        db.VerificationAssignments.Add(assignment); db.VerificationReports.Add(report); await db.SaveChangesAsync();
+        db.VerificationAssignments.Add(assignment); db.VerificationReports.Add(report); await HistoricalFixtureSeed.SaveAddedAsync(db);
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"VerificationReports\" r SET \"LegacyOriginalJson\" = to_jsonb(r) WHERE \"Id\" = {report.Id};");
         foreach (var version in new[] { 2, 3 })
         {
@@ -103,7 +103,7 @@ VALUES ({transaction.Id},{verification.Id},{time},{time});
 """);
             db.RefundTransactions.Add(refund); refunds.Add(refund);
         }
-        await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
 INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Decision","Reason","RefundId","CreatedAt") VALUES
 ({Guid.NewGuid()},{verification.Id},{admin.Profile.Id},'RefundRequested','original refund action',{refunds[0].Id},{time.AddHours(5)}),
@@ -126,6 +126,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
 
     private static async Task RunPostgresToolAsync(string name, NpgsqlConnectionStringBuilder connection, params string[] args)
     {
+        if (await DockerPostgresFixtureTools.TryRunAsync(name, connection, args)) return;
         var bin = Environment.GetEnvironmentVariable("UNINET_POSTGRES_BIN") ?? (OperatingSystem.IsWindows() ? @"C:\Program Files\PostgreSQL\18\bin" : "");
         var start = new ProcessStartInfo(Path.Combine(bin, name + (OperatingSystem.IsWindows() ? ".exe" : "")))
             { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
@@ -188,7 +189,7 @@ INSERT INTO "VerificationAdminAction" ("Id","VerificationId","ActorUserId","Deci
         foreach (var table in tables)
             Assert.Equal(before[table], await RowsAsync(db, table, table is "VerificationAdminAction" or "VerificationReportVersions" ? store.Archive : null));
         Assert.DoesNotContain(db.Model.GetEntityTypes(), e => e.ClrType.Name is "VerificationAdminAction" or "VerificationReportVersion");
-        var refunds = await db.RefundTransactions.ToListAsync();
+        var refunds = await db.RefundTransactions.Select(r => new { r.RequestSource, r.RequestedByUserId }).ToListAsync();
         Assert.Equal(2, refunds.Count(r => r.RequestSource == RefundRequestSource.Admin));
         Assert.Single(refunds, r => r.RequestSource == RefundRequestSource.System && r.RequestedByUserId == null);
         Assert.Single(refunds, r => r.RequestSource == RefundRequestSource.LegacyUnknown && r.RequestedByUserId == null);

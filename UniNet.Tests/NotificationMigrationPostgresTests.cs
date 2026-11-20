@@ -26,7 +26,7 @@ public sealed class NotificationMigrationPostgresTests
     {
         await using var f = await Store.Create(); await using var db = f.Open();
         var seed = await SeedAsync(db);
-        await db.Database.MigrateAsync();
+        await db.GetService<IMigrator>().MigrateAsync("20261101140846_StaffRolesAndFinance");
         Assert.Equal(0, await db.Accounts.Where(a => a.Id == seed.Account).Select(a => a.SessionVersion).SingleAsync());
         var actor = new Account { Email = "migration-admin@test.test", Role = AccountRole.Admin };
         db.Accounts.Add(actor); await db.SaveChangesAsync();
@@ -42,7 +42,7 @@ public sealed class NotificationMigrationPostgresTests
     {
         await using var f = await Store.Create(); await using var db = f.Open();
         var seed = await SeedAsync(db);
-        await db.Database.MigrateAsync();
+        await db.GetService<IMigrator>().MigrateAsync("20261101140846_StaffRolesAndFinance");
         Assert.False(db.Database.HasPendingModelChanges());
         var notices = await db.Set<VerificationNotification>().AsNoTracking().ToListAsync();
         Assert.Equal(3, notices.Count);
@@ -53,7 +53,7 @@ public sealed class NotificationMigrationPostgresTests
         await db.GetService<IMigrator>().MigrateAsync(Before);
         Assert.Equal(3, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*)::int AS \"Value\" FROM \"VerificationNotification\"").SingleAsync());
         Assert.Equal(3, await db.Database.SqlQuery<Guid>($"SELECT \"RecipientUserId\" AS \"Value\" FROM \"VerificationNotification\" WHERE \"RecipientUserId\" = {seed.Profile}").CountAsync());
-        await db.Database.MigrateAsync();
+        await db.GetService<IMigrator>().MigrateAsync("20261101140846_StaffRolesAndFinance");
         Assert.Equal(3, await db.Set<VerificationNotification>().CountAsync());
         // Actual PostgreSQL inbox queries and bulk update, not only SQLite equivalents.
         var service = new NotificationService(db);
@@ -76,7 +76,7 @@ public sealed class NotificationMigrationPostgresTests
     public async Task BroadcastOnPostgresIsBatchedAndRollbackRefusesNewHistory()
     {
         await using var f = await Store.Create(); await using var db = f.Open(); var seed = await SeedAsync(db);
-        await db.Database.MigrateAsync();
+        await db.GetService<IMigrator>().MigrateAsync("20261101140846_StaffRolesAndFinance");
         var admin = new Account { Email = "notice-admin@test.local", Role = AccountRole.Admin };
         db.Accounts.Add(admin); await db.SaveChangesAsync();
         var service = new NotificationBroadcastService(db);
@@ -91,7 +91,7 @@ public sealed class NotificationMigrationPostgresTests
     public async Task ConcurrentSameEventHasOneNotificationAndOneOutboxWithoutAbortingEitherWriter()
     {
         await using var f = await Store.Create(); Guid recipient;
-        await using (var db = f.Open()) { var seed = await SeedAsync(db); recipient = seed.Account; await db.Database.MigrateAsync(); }
+        await using (var db = f.Open()) { var seed = await SeedAsync(db); recipient = seed.Account; await db.GetService<IMigrator>().MigrateAsync("20261101140846_StaffRolesAndFinance"); }
         await using var first = f.Open(); await using var second = f.Open();
         var content = new NotificationContent("Concurrent", "system", "Title", "Content", EventKey: "concurrent-idempotent-event");
         await NotificationService.EnqueueAsync(first, [recipient], content);
@@ -111,8 +111,8 @@ public sealed class NotificationMigrationPostgresTests
         var verification = new UserVerification { User = account.Profile!, VerificationType = VerificationType.Student };
         var evidenceId = Guid.NewGuid();
         var projectVerification = new ProjectVerification { Id = Guid.NewGuid(), Project = project, RequestByUser = account.Profile!, Package = package, SubmittedAt = now, CreatedAt = now, UpdatedAt = now };
-        db.Accounts.Add(account); db.Projects.Add(project); db.Packages.Add(package); db.UserVerifications.Add(verification); db.ProjectVerifications.Add(projectVerification);
-        await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.AccountAsync(db, account); await HistoricalFixtureSeed.ProjectAsync(db, project); db.Packages.Add(package); db.UserVerifications.Add(verification); db.ProjectVerifications.Add(projectVerification);
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "ProjectModerations" ("Id","ProjectId","Purpose","Status","ContentResult","LinkResult","ContentHash","AttemptNumber","RetryCount","CreatedAt","UpdatedAt","Version","SourceHash","PolicyHash","SnapshotJson","PolicyJson")
             VALUES ({evidenceId},{project.Id},1,0,0,0,'',0,0,{now},{now},1,{new string('A',64)},{new string('B',64)},{"{}"}::jsonb,{"{}"}::jsonb);

@@ -102,7 +102,15 @@ public sealed class ProjectGitEvidenceSnapshotPostgresTests
         var otherLink = new ProjectGitRepository { ProjectId = otherProject.Id, GitHubRepositoryId = repo.Id, LinkedByProfileId = otherOwner.Profile!.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = grant.Id, SyncPaused = true, AccessStatus = ProjectGitRepositoryAccessStatus.PendingAuthorization };
         var otherJob = new GitSyncJob { ProjectGitRepositoryId = otherLink.Id, GitHubRepositoryId = repo.Id, CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = grant.Id, SyncType = GitSyncType.Initial };
         var otherObservation = new ProjectEvidenceObservation { ProjectGitRepositoryId = otherLink.Id, GitSyncJobId = otherJob.Id, GitEvidenceVersionId = version.Id, GitHubRepositoryId = repo.Id, Category = "commits", ScopeKey = "other", AuthorizationSource = "app", RetrievalCompleteness = "Incomplete", ObservedAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
-        db.AddRange(owner, project, otherOwner, otherProject, install, repo, grant, link, otherLink, job, otherJob, obj, version, first, otherObservation); await db.SaveChangesAsync();
+        if (upgrade)
+        {
+            await HistoricalFixtureSeed.AccountAsync(db, owner);
+            await HistoricalFixtureSeed.AccountAsync(db, otherOwner);
+            await HistoricalFixtureSeed.ProjectAsync(db, project);
+            await HistoricalFixtureSeed.ProjectAsync(db, otherProject);
+        }
+        else db.AddRange(owner, project, otherOwner, otherProject);
+        db.AddRange(install, repo, grant, link, otherLink, job, otherJob, obj, version, first, otherObservation); await db.SaveChangesAsync();
         if (upgrade)
         {
             Assert.DoesNotContain("20261114151603_AddProjectGitEvidenceSnapshots", await db.Database.GetAppliedMigrationsAsync());
