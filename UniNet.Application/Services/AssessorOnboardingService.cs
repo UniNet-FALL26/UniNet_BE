@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using UniNet.Domain;
 using UniNet.Infrastructure.Data;
@@ -29,8 +30,12 @@ public sealed record SubmitAssessorOnboardingProfile(
     [Required, RegularExpression("^[A-Za-z0-9]{1,34}$")] string BankAccountNumber,
     [Required, MaxLength(255)] string BankAccountHolder);
 
-public sealed class AssessorOnboardingService(UniNetDbContext db, IDataProtectionProvider protection, TimeProvider clock)
+public sealed class AssessorOnboardingService(
+    UniNetDbContext db, IDataProtectionProvider protection, TimeProvider clock,
+    AssessorOnboardingEmailQueue emails, IOptions<AssessorContractOptions> options)
 {
+    internal const string InvitationEmailKind = "ProfileInvitation";
+
     public async Task<AssessorOnboardingsResponse> List(Guid actor, AssessorOnboardingStatus? status = null,
         string? keyword = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
@@ -84,6 +89,16 @@ public sealed class AssessorOnboardingService(UniNetDbContext db, IDataProtectio
             .Where(x => x.EmailNormalized == email && x.Status == AssessorOnboardingStatus.Invited && x.ProfileTokenExpiresAt <= now)
             .ExecuteUpdateAsync(x => x.SetProperty(p => p.Status, AssessorOnboardingStatus.Expired), ct);
         db.AssessorOnboardings.Add(row);
+        var profileLink = $"/assessor-onboarding/profile.html#token={token}";
+        var settings = options.Value;
+        if (settings.Enabled)
+        {
+            var emailLink = settings.PublicBaseUrl.TrimEnd('/') + profileLink;
+            emails.Add(row.Id, InvitationEmailKind, row.ProfileTokenHash, row.ProfileTokenExpiresAt,
+                new(email, "UniNet - Lời mời làm thẩm định viên",
+                    $"Bạn được mời tham gia UniNet với vai trò thẩm định viên. Vui lòng điền hồ sơ tại liên kết dưới đây. Liên kết có hiệu lực 7 ngày kể từ khi tạo lời mời.\n\n{emailLink}"));
+        }
+
         try
         {
             await db.SaveChangesAsync(ct);
@@ -95,7 +110,7 @@ public sealed class AssessorOnboardingService(UniNetDbContext db, IDataProtectio
         }
 
         await transaction.CommitAsync(ct);
-        return new(row.Id, email, row.ProfileTokenExpiresAt, $"/assessor-onboarding/profile.html#token={token}");
+        return new(row.Id, email, row.ProfileTokenExpiresAt, profileLink);
     }
 
     public async Task Revoke(Guid actor, Guid id, CancellationToken ct)

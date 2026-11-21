@@ -21,7 +21,8 @@ public sealed class AssessorActivationTests
     public async Task AdminOnboardingListPaginatesFiltersAndOmitsSecrets()
     {
         await using var f = await Fixture.Create();
-        var service = new AssessorOnboardingService(f.Db, new EphemeralDataProtectionProvider(), f.Clock);
+        var service = new AssessorOnboardingService(f.Db, new EphemeralDataProtectionProvider(), f.Clock,
+            new(f.Db, f.Secrets, f.Clock), Options.Create(new AssessorContractOptions()));
         var now = f.Clock.GetUtcNow();
         f.Db.AssessorOnboardings.AddRange(
             new AssessorOnboarding { EmailNormalized = "alpha@example.test", FullName = "Alpha Expert",
@@ -51,7 +52,8 @@ public sealed class AssessorActivationTests
     public async Task AdminOnboardingListValidatesQueriesAndActiveAdminRole()
     {
         await using var f = await Fixture.Create();
-        var service = new AssessorOnboardingService(f.Db, new EphemeralDataProtectionProvider(), f.Clock);
+        var service = new AssessorOnboardingService(f.Db, new EphemeralDataProtectionProvider(), f.Clock,
+            new(f.Db, f.Secrets, f.Clock), Options.Create(new AssessorContractOptions()));
         Assert.Equal("INVALID_PAGINATION", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, page: 0))).Code);
         Assert.Equal("INVALID_PAGINATION", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, pageSize: 101))).Code);
         Assert.Equal("INVALID_ONBOARDING_STATUS", (await Assert.ThrowsAsync<AuthException>(() => service.List(f.Admin.Id, (AssessorOnboardingStatus)100))).Code);

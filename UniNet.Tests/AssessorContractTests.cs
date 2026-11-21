@@ -34,6 +34,41 @@ public sealed class AssessorContractTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task InvitationEmailUsesTheProfileLinkAndIsSkippedAfterRevocation(bool revoke)
+    {
+        await using var fixture = await Fixture.Create();
+        var admin = await fixture.Db.Accounts.SingleAsync(x => x.Role == AccountRole.Admin);
+        var onboarding = new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock,
+            new(fixture.Db, fixture.Secrets, fixture.Clock), fixture.Options);
+
+        var invitation = await onboarding.Invite(admin.Id, new("new-assessor@example.test"), default);
+        var queued = await fixture.Db.AssessorOnboardingEmails.AsNoTracking().SingleAsync(default(CancellationToken));
+        Assert.Equal(invitation.Id, queued.OnboardingId);
+        Assert.Equal(invitation.ExpiresAt, queued.ExpiresAt);
+        Assert.DoesNotContain(invitation.ProfileLink, queued.PayloadCiphertext!);
+
+        if (revoke)
+            await onboarding.Revoke(admin.Id, invitation.Id, default);
+        await fixture.Tasks.SendNext(default);
+
+        var processed = await fixture.Db.AssessorOnboardingEmails.AsNoTracking().SingleAsync(default(CancellationToken));
+        Assert.Null(processed.PayloadCiphertext);
+        if (revoke)
+        {
+            Assert.Empty(fixture.Mail.Sent);
+            Assert.NotNull(processed.CancelledAt);
+            return;
+        }
+
+        var sent = Assert.Single(fixture.Mail.Sent);
+        Assert.Equal(invitation.Email, sent.Recipient);
+        Assert.Contains("https://example.test" + invitation.ProfileLink, sent.Body);
+        Assert.NotNull(processed.SentAt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task SubmittedProfileCanBeSignedApprovedAndActivatedForNormalLogin(bool automatic)
     {
         await using var fixture = await Fixture.Create();
@@ -45,7 +80,8 @@ public sealed class AssessorContractTests
                 .SetProperty(p => p.ProfileTokenHash, profileHash).SetProperty(p => p.ProfileTokenExpiresAt, expires)
                 .SetProperty(p => p.AutoApprove, automatic));
         fixture.Db.ChangeTracker.Clear();
-        var profile = new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock);
+        var profile = new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock,
+            new(fixture.Db, fixture.Secrets, fixture.Clock), fixture.Options);
         Assert.Equal("assessor@example.test", await profile.ReadForm(profileToken, default));
         var id = await profile.Submit(new(profileToken, "Nguyễn Văn Thử", "000000000000", "0123456789",
             "Ngân hàng thử nghiệm", "000123456789", "NGUYEN VAN THU"), default);
@@ -101,7 +137,8 @@ public sealed class AssessorContractTests
         var activation = new AssessorActivationService(fixture.Db, new(fixture.Db, fixture.Secrets, fixture.Clock),
             fixture.Options, fixture.Clock);
         builder.Services.AddSingleton(activation);
-        builder.Services.AddSingleton(new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock));
+        builder.Services.AddSingleton(new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock,
+            new(fixture.Db, fixture.Secrets, fixture.Clock), fixture.Options));
         builder.Services.AddSingleton<IAssessorContractFiles>(fixture.Files);
         const string signingKey = "assessor-http-test-signing-key-at-least-32-bytes";
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o =>
