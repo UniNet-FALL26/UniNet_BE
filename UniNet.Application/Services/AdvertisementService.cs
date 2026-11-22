@@ -112,7 +112,7 @@ public sealed class AdvertisementService(
     // Admin duyệt tay (Dành cho các bài đã thanh toán nhưng rớt AI)
     public async Task<CampaignResponse> ModerateCampaignAsync(Guid accountId, Guid campaignId, ModerateCampaignRequest request, CancellationToken ct = default)
     {
-        await EnsureAdminAsync(accountId, ct);
+        await EnsureCampaignModeratorAsync(accountId, ct);
 
         var campaign = await db.AdvertisementCampaigns
             .Include(c => c.Package)
@@ -121,7 +121,7 @@ public sealed class AdvertisementService(
             ?? throw NotFound();
 
         Require(campaign.Status == AdCampaignStatus.PendingModeration,
-            "INVALID_STATUS", "Only campaigns in PendingModeration state can be reviewed by Admin.", 409);
+            "INVALID_STATUS", "Only campaigns in PendingModeration state can be reviewed.", 409);
 
         var now = DateTimeOffset.UtcNow;
         if (request.IsApproved)
@@ -441,7 +441,7 @@ public sealed class AdvertisementService(
 
     public async Task<CampaignsResponse> ListAllCampaignsAsync(Guid accountId, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        await EnsureAdminAsync(accountId, ct);
+        await EnsureCampaignModeratorAsync(accountId, ct);
 
         var query = db.AdvertisementCampaigns.AsNoTracking()
             .Include(c => c.Package)
@@ -453,7 +453,7 @@ public sealed class AdvertisementService(
             .Take(pageSize)
             .ToListAsync(ct);
 
-        var responses = items.Select(c => MapToResponse(c, c.CompanyUser.FullName ?? "Doanh nghiệp", c.Package.Name)).ToList();
+        var responses = items.Select(c => MapToResponse(c, c.CompanyUser.FullName ?? "Doanh nghiệp", c.Package?.Name)).ToList();
         return new(page, pageSize, total, (int)Math.Ceiling((double)total / pageSize), responses);
     }
 
@@ -498,13 +498,13 @@ public sealed class AdvertisementService(
         return profile;
     }
 
-    private async Task EnsureAdminAsync(Guid accountId, CancellationToken ct)
+    private async Task EnsureCampaignModeratorAsync(Guid accountId, CancellationToken ct)
     {
         var account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, ct)
             ?? throw new AdvertisementException("UNAUTHORIZED", "Account not found.", 401);
 
-        Require(account.Status == AccountStatus.Active && account.Role == AccountRole.Admin,
-            "FORBIDDEN", "Admin access required.", 403);
+        Require(account.Status == AccountStatus.Active && account.Role is AccountRole.Admin or AccountRole.Moderator,
+            "FORBIDDEN", "Admin or Moderator access required.", 403);
     }
 
     private static void ValidateCreateRequest(CreateCampaignRequest request)
