@@ -358,6 +358,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         await context.Response.WriteAsJsonAsync(new { code = packageError.Code, message = packageError.Message });
         return;
     }
+    if (error is UniNet.Application.Common.AdvertisementException advertisementError)
+    {
+        context.Response.StatusCode = advertisementError.StatusCode;
+        await context.Response.WriteAsJsonAsync(new { code = advertisementError.Code, message = advertisementError.Message });
+        return;
+    }
     if (error is AuthException authError)
     {
         context.Response.StatusCode = authError.Status;
