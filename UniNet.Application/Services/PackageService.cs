@@ -79,6 +79,8 @@ public sealed class PackageService(UniNetDbContext db) : IPackageService
         Validate(request);
         var package = await db.Packages.SingleOrDefaultAsync(x => x.Id == packageId, ct) ?? throw NotFound();
         await EnsureUniqueCodeAsync(request.Code.Trim(), packageId, ct);
+        if (package.IsActive && !request.IsActive)
+            await EnsureCanDeactivateAsync(packageId, ct);
         Apply(package, request, DateTimeOffset.UtcNow);
         await SaveAsync(ct);
         return package.ToResponse();
@@ -88,6 +90,7 @@ public sealed class PackageService(UniNetDbContext db) : IPackageService
     {
         await EnsureAccessAsync(accountId, true, ct);
         var package = await db.Packages.SingleOrDefaultAsync(x => x.Id == packageId, ct) ?? throw NotFound();
+        await EnsureCanDeactivateAsync(packageId, ct);
         package.IsActive = false;
         package.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -97,10 +100,20 @@ public sealed class PackageService(UniNetDbContext db) : IPackageService
     {
         await EnsureAccessAsync(accountId, true, ct);
         var package = await db.Packages.SingleOrDefaultAsync(x => x.Id == packageId, ct) ?? throw NotFound();
+        if (package.IsActive)
+            await EnsureCanDeactivateAsync(packageId, ct);
         package.IsActive = !package.IsActive;
         package.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return package.ToResponse();
+    }
+
+    private async Task EnsureCanDeactivateAsync(Guid packageId, CancellationToken ct)
+    {
+        if (await db.Transactions.AnyAsync(x => x.PackageId == packageId &&
+                (x.Status == PaymentStatus.Pending || x.Status == PaymentStatus.Success), ct))
+            throw new PackageException("PACKAGE_HAS_PURCHASES",
+                "A package with pending or successful purchases cannot be deactivated or deleted.", 409);
     }
 
     private async Task EnsureAccessAsync(Guid accountId, bool adminOnly, CancellationToken ct)
