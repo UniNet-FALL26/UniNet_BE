@@ -70,7 +70,21 @@ builder.Services.AddScoped<AssessorOnboardingEmailQueue>();
 builder.Services.AddScoped<AssessorContractTasks>();
 builder.Services.AddSingleton<AssessorContractSecrets>();
 builder.Services.AddScoped<IAssessorContractFiles, AssessorContractFiles>();
-builder.Services.AddScoped<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorSmtpSender>();
+var assessorMailProvider = builder.Configuration["AssessorOnboarding:MailProvider"] ?? "Smtp";
+if (assessorMailProvider.Equals("Brevo", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHttpClient<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorBrevoSender>(
+        client => client.Timeout = TimeSpan.FromSeconds(30))
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+}
+else if (assessorMailProvider.Equals("Smtp", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddScoped<IAssessorOnboardingMailSender, UniNet.API.Services.AssessorSmtpSender>();
+}
+else
+{
+    throw new InvalidOperationException("AssessorOnboarding:MailProvider must be Smtp or Brevo.");
+}
 builder.Services.AddOptions<AssessorContractOptions>()
     .Bind(builder.Configuration.GetSection("AssessorOnboarding"))
     .Validate(o => !o.Enabled || (
@@ -89,10 +103,18 @@ builder.Services.AddOptions<AssessorContractOptions>()
 builder.Services.AddOptions<UniNet.API.Services.AssessorSmtpOptions>()
     .Bind(builder.Configuration.GetSection("AssessorOnboarding:Smtp"))
     .Validate(o => !builder.Configuration.GetValue<bool>("AssessorOnboarding:Enabled") ||
+        !assessorMailProvider.Equals("Smtp", StringComparison.OrdinalIgnoreCase) ||
         (System.Net.Mail.MailAddress.TryCreate(o.From, out _) &&
         ((!string.IsNullOrWhiteSpace(o.Host) && o.Port > 0 && o.Port <= 65535) ||
          (builder.Environment.IsDevelopment() && Path.IsPathFullyQualified(o.PickupDirectory ?? "")))),
         "Configure SMTP or a Development-only pickup directory.")
+    .ValidateOnStart();
+builder.Services.AddOptions<UniNet.API.Services.AssessorBrevoOptions>()
+    .Bind(builder.Configuration.GetSection("AssessorOnboarding:Brevo"))
+    .Validate(o => !builder.Configuration.GetValue<bool>("AssessorOnboarding:Enabled") ||
+        !assessorMailProvider.Equals("Brevo", StringComparison.OrdinalIgnoreCase) ||
+        (!string.IsNullOrWhiteSpace(o.ApiKey) && System.Net.Mail.MailAddress.TryCreate(o.From, out _)),
+        "Configure the Brevo API key and sender email.")
     .ValidateOnStart();
 builder.Services.AddRateLimiter(o =>
 {
