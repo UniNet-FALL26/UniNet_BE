@@ -5,15 +5,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using UniNet.API.Services;
 using UniNet.Application;
 using UniNet.Application.Common;
 using UniNet.Application.DTOs.Advertisement;
 using UniNet.Application.Interfaces;
+using UniNet.Domain.Entities;
 
 namespace UniNet.API.Controllers;
 
 [ApiController]
 [Route("api/advertisements")]
+[AdvertisementExceptionFilter]
 public sealed class AdvertisementController(IAdvertisementService adService) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
@@ -39,6 +42,29 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
     [HttpPost("campaigns/{campaignId:guid}/payments"), Authorize(Roles = "Partner")]
     public Task<TransactionResponse> CreateCampaignPayment(Guid campaignId, CancellationToken ct)
         => adService.CreateCampaignPaymentAsync(AccountId, campaignId, ct);
+    [HttpGet("admin/refunds"), Authorize(Roles = "Admin")]
+    public Task<RefundTransactionsResponse> ListRefundRequests(
+        [FromQuery] RefundApproval? approval = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+        => adService.ListRefundRequestsAsync(AccountId, approval, page, pageSize, ct);
+
+    [HttpPost("admin/refunds/{refundId:guid}/review"), Authorize(Roles = "Admin")]
+    public Task<RefundTransactionResponse> ReviewCampaignRefund(
+        Guid refundId,
+        [FromBody] ReviewRefundRequest request,
+        CancellationToken ct)
+        => adService.ReviewCampaignRefundAsync(AccountId, refundId, request, ct);
+    [HttpPost("campaigns/{campaignId:guid}/refund"), Authorize(Roles = "Partner")]
+    public async Task<ActionResult<RefundTransactionResponse>> RequestCampaignRefund(
+    Guid campaignId,
+    [FromBody] RequestRefundRequest request,
+    CancellationToken ct)
+    {
+        var result = await adService.RequestCampaignRefundAsync(AccountId, campaignId, request, ct);
+        return Ok(result);
+    }
     [HttpPost("payments/{orderCode}/sync"), Authorize(Roles = "Partner")]
     public Task<CampaignResponse> SyncCampaignPayment(string orderCode, CancellationToken ct)
     => adService.SyncCampaignPaymentStatusAsync(AccountId, orderCode, ct);
@@ -59,12 +85,12 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
 
     // --- ADMIN / MODERATOR ---
 
-    [HttpGet("admin/campaigns"), Authorize(Roles = "Admin")]
+    [HttpGet("admin/campaigns"), Authorize(Roles = "Admin,Moderator")]
     public Task<CampaignsResponse> ListAllCampaigns([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
         => adService.ListAllCampaignsAsync(AccountId, page, pageSize, ct);
 
     // Admin duyệt tay (Dành cho các bài đã thanh toán nhưng không qua được cửa AI)
-    [HttpPost("admin/campaigns/{campaignId:guid}/moderate"), Authorize(Roles = "Admin")]
+    [HttpPost("admin/campaigns/{campaignId:guid}/moderate"), Authorize(Roles = "Admin,Moderator")]
     public Task<CampaignResponse> ModerateCampaign(Guid campaignId, [FromBody] ModerateCampaignRequest request, CancellationToken ct)
         => adService.ModerateCampaignAsync(AccountId, campaignId, request, ct);
 

@@ -13,6 +13,7 @@ namespace UniNet.Domain.Enums
         PendingPayment = 2,     // Đã duyệt (bởi AI/Admin), chờ Partner thanh toán
         Active = 3,             // Thanh toán thành công -> Đã xuất bản (Publish Ad)
         Completed = 4,          // Hết hạn thời gian chạy
-        Rejected = 5            // Bị từ chối (bởi AI hoặc Admin)
+        Rejected = 5,           // Bị từ chối (bởi AI hoặc Admin)
+        Refunded = 6            // Đã hoàn tiền (Khóa chiến dịch, không thể sửa hay chạy lại)
     }
 }
