@@ -208,6 +208,7 @@ builder.Services.AddSingleton<UniNet.API.Hubs.IWorkspaceConnectionTracker, UniNe
 builder.Services.AddScoped<UniNet.Application.Interfaces.IWorkspaceMemberRevoker, UniNet.API.Services.WorkspaceMemberRevoker>();
 builder.Services.AddScoped<ILiveKitTokenService, LiveKitTokenService>();
 builder.Services.AddScoped<UniNet.Application.Interfaces.ITransactionService, TransactionService>();
+builder.Services.AddScoped<UniNet.Application.Interfaces.IVerificationPaymentRenewalService, VerificationPaymentRenewalService>();
 builder.Services.AddHttpClient<UniNet.Application.Interfaces.IPaymentProvider, PayOSPaymentProvider>(client =>
     client.Timeout = TimeSpan.FromSeconds(30))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });

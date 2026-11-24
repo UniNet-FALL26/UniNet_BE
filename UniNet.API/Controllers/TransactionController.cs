@@ -21,6 +21,12 @@ public sealed class TransactionController(ITransactionService transactions) : Co
         return CreatedAtAction(nameof(Get), new { verificationId, transactionId = result.Id }, result);
     }
 
+    /// <summary>Kiểm tra giao dịch cũ, giữ lại khung giờ nếu còn chỗ và tạo lại QR đã hết hạn.</summary>
+    [HttpPost("renew")]
+    public Task<TransactionResponse> Renew(Guid verificationId,
+        [FromServices] IVerificationPaymentRenewalService renewal, CancellationToken ct)
+        => renewal.RenewAsync(verificationId, AccountId, ct);
+
     [HttpGet]
     public Task<TransactionsResponse> GetHistory(Guid verificationId,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)

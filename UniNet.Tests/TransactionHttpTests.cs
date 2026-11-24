@@ -31,6 +31,7 @@ public sealed class TransactionHttpTests
         builder.Services.AddControllers().AddApplicationPart(typeof(TransactionController).Assembly);
         var service = new FakeService();
         builder.Services.AddSingleton<ITransactionService>(service);
+        builder.Services.AddSingleton<IVerificationPaymentRenewalService>(service);
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
         {
             options.MapInboundClaims = false;
@@ -49,18 +50,24 @@ public sealed class TransactionHttpTests
         using var client = new HttpClient { BaseAddress = new(app.Urls.Single()) };
         var basePath = $"api/project-verifications/{service.VerificationId}/payments";
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(basePath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync($"{basePath}/renew", null)).StatusCode);
 
         string Token(string role) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
             claims: [new(JwtRegisteredClaimNames.Sub, service.AccountId.ToString()), new(ClaimTypes.Role, role)],
             expires: DateTime.UtcNow.AddMinutes(5), signingCredentials: new(key, SecurityAlgorithms.HmacSha256)));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("Admin"));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync(basePath, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"{basePath}/renew", null)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("Student"));
         using var create = await client.PostAsync(basePath, null);
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
         Assert.EndsWith($"/{service.TransactionId}", create.Headers.Location!.ToString());
         var created = await create.Content.ReadFromJsonAsync<TransactionResponse>();
         Assert.Equal(service.TransactionId, created!.Id);
+        using var renewed = await client.PostAsync($"{basePath}/renew", null);
+        Assert.Equal(HttpStatusCode.OK, renewed.StatusCode);
+        Assert.Equal(service.TransactionId, (await renewed.Content.ReadFromJsonAsync<TransactionResponse>())!.Id);
+        Assert.Equal(1, service.RenewCalls);
         var history = await client.GetFromJsonAsync<TransactionsResponse>($"{basePath}?page=2&pageSize=5");
         Assert.Equal(2, history!.Page);
         Assert.Equal(5, history.PageSize);
@@ -76,13 +83,21 @@ public sealed class TransactionHttpTests
         await app.StopAsync();
     }
 
-    private sealed class FakeService : ITransactionService
+    private sealed class FakeService : ITransactionService, IVerificationPaymentRenewalService
     {
         public Guid VerificationId { get; } = Guid.NewGuid();
         public Guid TransactionId { get; } = Guid.NewGuid();
         public Guid AccountId { get; } = Guid.NewGuid();
         public int WebhookCalls { get; private set; }
         public int ReconcileCalls { get; private set; }
+        public int RenewCalls { get; private set; }
+        public Task<TransactionResponse> RenewAsync(Guid verificationId, Guid accountId, CancellationToken ct = default)
+        {
+            Assert.Equal(VerificationId, verificationId);
+            Assert.Equal(AccountId, accountId);
+            RenewCalls++;
+            return Task.FromResult(Response);
+        }
         private TransactionResponse Response => new(TransactionId, VerificationId, Guid.NewGuid(), 37000, "VND",
             PaymentStatus.Pending, "PayOS", "123", "test", "https://pay.payos.vn/web/test", null, null,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, false, false, null);
