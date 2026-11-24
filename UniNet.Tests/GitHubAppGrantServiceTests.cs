@@ -25,10 +25,20 @@ public sealed class GitHubAppGrantServiceTests
         public bool Read = true;
         public bool Admin = true;
         public bool Fail;
+        public bool AdditionalRepository;
+        public bool Paginated;
+        public List<int> RepositoryPages = [];
         public Task<GitHubAppUserToken> ExchangeAsync(string code, CancellationToken ct) => throw new NotImplementedException();
         public Task<GitHubAppUserIdentity> GetUserAsync(string token, CancellationToken ct) => Fail ? throw new GitHubIntegrationException("FAILED", "GitHub failed", 502) : Task.FromResult(new GitHubAppUserIdentity(User, "user"));
-        public Task<GitHubAppUserPage<GitHubAppUserInstallation>> GetInstallationsAsync(string token, int page, CancellationToken ct) => Task.FromResult(new GitHubAppUserPage<GitHubAppUserInstallation>([new(42, 100, "org", "Organization", Suspended)], false));
-        public Task<GitHubAppUserPage<GitHubAppUserRepository>> GetRepositoriesAsync(string token, long id, int page, CancellationToken ct) => Task.FromResult(new GitHubAppUserPage<GitHubAppUserRepository>([new(999, "org/private-repo", true, Read, Admin)], false));
+        public Task<GitHubAppUserPage<GitHubAppUserInstallation>> GetInstallationsAsync(string token, int page, CancellationToken ct) => Task.FromResult(new GitHubAppUserPage<GitHubAppUserInstallation>([new(42, 100, "org", "Organization", Suspended, "https://github.com/organizations/org/settings/installations/42")], false));
+        public Task<GitHubAppUserPage<GitHubAppUserRepository>> GetRepositoriesAsync(string token, long id, int page, CancellationToken ct)
+        {
+            RepositoryPages.Add(page);
+            GitHubAppUserRepository first = new(999, "org/private-repo", true, Read, Admin);
+            GitHubAppUserRepository second = new(1000, "org/new-selected-repo", true, Read, Admin);
+            return Task.FromResult(new GitHubAppUserPage<GitHubAppUserRepository>(
+                Paginated ? page == 1 ? [first] : [second] : AdditionalRepository ? [first, second] : [first], Paginated && page == 1));
+        }
     }
 
     [Fact]
@@ -68,12 +78,40 @@ public sealed class GitHubAppGrantServiceTests
         await using var f = await Fixture.Create();
         var installations = await f.Service.GetInstallationsAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 1, default);
         Assert.Equal("Organization", Assert.Single(installations.Items).OwnerType);
+        Assert.Equal("https://github.com/organizations/org/settings/installations/42", installations.Items[0].ConfigurationUrl);
         var result = await f.Service.GetRepositoriesAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 42, 1, default);
         Assert.True(Assert.Single(result.Items).Eligible); Assert.True(result.Items[0].IsPrivate);
         await f.Service.GetRepositoriesAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 42, 1, default);
         Assert.Single(await f.Db.Set<GitHubAppInstallation>().ToListAsync());
         Assert.Single(await f.Db.Set<GitHubAppInstallationAccount>().ToListAsync());
         Assert.Single(await f.Db.Set<GitHubAppRepositoryGrant>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task ExplicitRediscoveryReadsNewlyGrantedRepositoriesWithoutWorkerOrProjectLink()
+    {
+        await using var f = await Fixture.Create();
+        Assert.Single((await f.Service.GetRepositoriesAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 42, 1, default)).Items);
+        f.Provider.AdditionalRepository = true;
+        var refreshed = await f.Service.GetRepositoriesAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 42, 1, default);
+        Assert.Equal(2, refreshed.Items.Count);
+        Assert.Contains(refreshed.Items, x => x.RepositoryId == 1000 && x.Eligible);
+        Assert.Equal(new[] { 1, 1 }, f.Provider.RepositoryPages);
+        Assert.Equal(2, await f.Db.Set<GitHubAppRepositoryGrant>().CountAsync());
+        Assert.Empty(await f.Db.ProjectGitRepositories.ToListAsync());
+        Assert.Empty(await f.Db.GitSyncJobs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RepositoryDiscoveryPreservesProviderPagination()
+    {
+        await using var f = await Fixture.Create(); f.Provider.Paginated = true;
+        var first = await f.Service.GetRepositoriesAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 42, 1, default);
+        var second = await f.Service.GetRepositoriesAsync(f.Owner.Id, f.Project.Id, f.Credential.Id, 42, 2, default);
+        Assert.True(first.HasMore); Assert.False(second.HasMore);
+        Assert.Equal(999, Assert.Single(first.Items).RepositoryId);
+        Assert.Equal(1000, Assert.Single(second.Items).RepositoryId);
+        Assert.Equal(2, second.Page);
     }
 
     [Theory]

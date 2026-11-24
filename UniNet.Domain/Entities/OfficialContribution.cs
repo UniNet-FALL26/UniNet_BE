@@ -42,3 +42,16 @@ public sealed class OfficialContributionPublication
     public Guid PublishedById { get; set; }
     public DateTimeOffset PublishedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+// Append-only publication ledger. Highest project Version is the sole current release;
+// previous releases remain unchanged. Supersession is derived from the next ledger row.
+public sealed class OfficialContributionRelease
+{
+    public Guid RunId { get; set; }
+    public Guid ProjectId { get; set; }
+    public int Version { get; set; }
+    public Guid? PreviousRunId { get; set; }
+    public Guid PublishedById { get; set; }
+    public DateTimeOffset PublishedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? Reason { get; set; }
+}

@@ -29,9 +29,10 @@ public sealed class RuntimeWorkerConfigurationTests
         var services = new ServiceCollection();
         services.AddRuntimeWorkers(new ConfigurationBuilder().Build(), isE2E: false);
         var workers = services.Where(x => x.ServiceType == typeof(IHostedService)).ToArray();
-        Assert.Equal(8, workers.Length);
+        Assert.Equal(9, workers.Length);
         Assert.Contains(workers, x => x.ImplementationType == typeof(GitSyncWorker));
         Assert.Contains(workers, x => x.ImplementationType == typeof(NotificationBackgroundWorker));
+        Assert.Contains(workers, x => x.ImplementationType == typeof(ChatDeliveryWorker));
         Assert.Contains(workers, x => x.ImplementationType == typeof(ExpiredTokenCleanup));
         Assert.Contains(workers, x => x.ImplementationType == typeof(PortraitCleanup));
         Assert.Single(workers.Where(x => x.ImplementationFactory is not null));
@@ -52,5 +53,19 @@ public sealed class RuntimeWorkerConfigurationTests
         var workers = services.Where(x => x.ServiceType == typeof(IHostedService)).ToArray();
         Assert.Equal(expected, workers.Length);
         if (enabled) Assert.Equal(typeof(GitSyncWorker), Assert.Single(workers).ImplementationType);
+    }
+
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public void AdjustmentConsumerRequiresMasterAndNeverRegistersGlobalWorker(bool enabled,int expected)
+    {
+        var configuration=new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?>
+        { ["BackgroundWorkers:Enabled"]=enabled.ToString(),["GitHubE2E:DisableUnrelatedWorkers"]="true",
+          ["GitHubSync:AdjustmentExecutionEnabled"]="true",["GitHubSync:Enabled"]="false" }).Build();
+        var services=new ServiceCollection();services.AddRuntimeWorkers(configuration,true);
+        var workers=services.Where(x=>x.ServiceType==typeof(IHostedService)).ToArray();
+        Assert.Equal(expected,workers.Length);
+        if(enabled)Assert.Equal(typeof(GitContributionAdjustmentWorker),Assert.Single(workers).ImplementationType);
     }
 }

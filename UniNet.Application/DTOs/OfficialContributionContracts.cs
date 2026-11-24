@@ -13,7 +13,7 @@ public sealed record OfficialReadinessResponse(string ContractVersion, Guid Snap
 public sealed record OfficialGitMemberSummary(Guid UserId, decimal ProvisionalRawGitScore, decimal? GitScore, decimal? GitShare);
 public sealed record OfficialRunResponse(string ContractVersion, Guid Id, Guid ProjectId, Guid RequestId, string State,
     int Revision, string ResultHash, GitExperimentalRunResponse Calculation,
-    DateTimeOffset? FinalizedAt, DateTimeOffset? PublishedAt);
+    DateTimeOffset? FinalizedAt, DateTimeOffset? PublishedAt, bool ReusedInputs = false);
 public sealed record OfficialPage<T>(string ContractVersion, int Page, int PageSize, int Total, IReadOnlyList<T> Items);
 public sealed record OfficialAuditResponse(int Revision, string Action, Guid ActorId, DateTimeOffset At, string? Feedback);
 public sealed record OfficialMemberResultResponse(string ContractVersion, Guid ProjectId, Guid RunId,
@@ -22,7 +22,7 @@ public sealed record OfficialMemberResultResponse(string ContractVersion, Guid P
 public sealed record OfficialScoredActivity(string Category, Guid RepositoryId, string ObjectId, Guid? UserId,
     DateTimeOffset ActivityAt, Guid ObservationId, Guid VersionId, string VersionHash);
 public sealed record OfficialRunListItem(Guid Id, string State, int Revision, DateTimeOffset CreatedAt,
-    DateTimeOffset? FinalizedAt, DateTimeOffset? PublishedAt);
+    DateTimeOffset? FinalizedAt, DateTimeOffset? PublishedAt, bool ReusedInputs = false);
 public sealed record OfficialSnapshotResponse(string ContractVersion, Guid SnapshotId, Guid ProjectId,
     DateTimeOffset CreatedAt, DateTimeOffset ObservationCutoff, int PolicyVersion, int RestrictedCount,
     int EntryCount, int VersionCount, int CoverageReceiptCount);
@@ -31,3 +31,9 @@ public sealed record OfficialSnapshotMember(Guid AssociationId, Guid RepositoryI
 public sealed record OfficialPeerSnapshotResponse(string ContractVersion, Guid SnapshotId, Guid CohortId,
     string PolicyVersion, string InputHash, DateTimeOffset CreatedAt, int ParticipantCount,
     string State, IReadOnlyDictionary<Guid, decimal> Scores);
+
+public sealed record OfficialApprovalRequest(int ExpectedRevision, Guid? ExpectedPublishedRunId, string? Reason = null);
+public sealed record OfficialVersionResponse(int Version, Guid RunId, DateTimeOffset PublishedAt, bool IsCurrent,
+    Guid? ReplacedByRunId, DateTimeOffset? SupersededAt, string? Reason);
+public sealed record OfficialVersionCapabilities(bool Supported, bool CanAdjust, bool CanOpenPeerRound,
+    Guid? CurrentPublishedRunId);

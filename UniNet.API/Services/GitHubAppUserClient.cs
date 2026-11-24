@@ -57,8 +57,10 @@ public sealed class GitHubAppUserClient(HttpClient http, IOptions<GitHubAppOptio
                 var owner = i.GetProperty("account");
                 var type = RequiredString(owner, "type");
                 if (type is not ("User" or "Organization")) throw new JsonException();
-                return new GitHubAppUserInstallation(PositiveId(i, "id"), PositiveId(owner, "id"),
-                    RequiredString(owner, "login"), type, i.TryGetProperty("suspended_at", out var suspended) && suspended.ValueKind != JsonValueKind.Null);
+                var id = PositiveId(i, "id");
+                return new GitHubAppUserInstallation(id, PositiveId(owner, "id"),
+                    RequiredString(owner, "login"), type, i.TryGetProperty("suspended_at", out var suspended) && suspended.ValueKind != JsonValueKind.Null,
+                    ConfigurationUrl(i, id));
             }).ToArray();
             return new(items, items.Length == 100);
         }
@@ -111,6 +113,17 @@ public sealed class GitHubAppUserClient(HttpClient http, IOptions<GitHubAppOptio
         catch (JsonException) { throw Error("GITHUB_APP_INVALID_RESPONSE", "GitHub returned invalid JSON.", 502); }
     }
     private static void ValidatePage(int page) { if (page is < 1 or > 1000) throw Error("GITHUB_APP_INVALID_PAGE", "Invalid page.", 400); }
+    private static string? ConfigurationUrl(JsonElement item, long installationId)
+    {
+        if (!item.TryGetProperty("html_url", out var value) || value.ValueKind != JsonValueKind.String) return null;
+        var raw = value.GetString();
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
+            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) || uri.Port != 443 ||
+            uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0) return null;
+        var id = installationId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return System.Text.RegularExpressions.Regex.IsMatch(uri.AbsolutePath,
+            @"^/(?:settings/installations|organizations/[^/]+/settings/installations)/" + id + @"/?$") ? raw : null;
+    }
     private static long PositiveId(JsonElement element, string property) { var id = element.GetProperty(property).GetInt64(); return id > 0 ? id : throw new JsonException(); }
     private static string RequiredString(JsonElement element, string property) => element.GetProperty(property).GetString() is { Length: > 0 } value ? value : throw new JsonException();
     private static string? OptionalString(JsonElement element, string property) => element.TryGetProperty(property, out var value) && value.ValueKind != JsonValueKind.Null ? value.GetString() : null;

@@ -5,6 +5,7 @@ public sealed class GitSyncOptions
     public const string SectionName = "GitHubSync";
 
     public bool Enabled { get; set; }
+    public bool AdjustmentExecutionEnabled { get; set; }
     // Allows the authenticated manual API while unrestricted background execution remains off.
     public bool ManualEnqueueEnabled { get; set; }
     public GitScopedManualSyncOptions ScopedManual { get; set; } = new();

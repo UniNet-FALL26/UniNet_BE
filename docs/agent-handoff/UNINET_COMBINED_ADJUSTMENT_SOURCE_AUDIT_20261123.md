@@ -1,0 +1,13 @@
+# Git + Peer combined adjustment source audit — 2026-11-23
+
+Before implementation: existing Manual API accepts Completed projects (manager authorization, no Active-project requirement), but enqueue-only is separate from execution. ScopedManual configuration pins one association+JobId and must have global=false; master registration gates the worker. It cannot dynamically process all project associations as a FE side effect. Normal enabled worker can process authorized Manual jobs, including Completed project jobs. E2E is worker-off; enabling global to make UX work is forbidden.
+
+App AccessLost/PendingAuthorization/paused must block this workflow; no silent status SQL or Initial->Manual conversion. Existing scoped activation remains separate supported path; Settings/access must be resolved first. Provider reads and all subsequent page validation must keep existing generation/lease fencing.
+
+Existing capture can occur while sync is in flight and selects visible project observations plus all completed receipts at its MVCC point; a historical SyncReady or timestamp alone is not a freshness proof. Combined capture therefore needs a persisted attempt and exact association/job IDs, all completed required checkpoint receipts, unchanged active association scope/current authorization, and no in-scope unresolved newer job. Capture must link to that attempt atomically; repeated/uncertain requests return that exact linked snapshot rather than guessing a latest ID.
+
+Existing evidence is immutable; repeated pages/jobs reuse versions and project observations remain separate. New observations do not prove new eligible activity; comparison of frozen version identities may prove facts changed, not eligibility. Empty completed enumeration is distinct from failure and must be reported without fake counts/points.
+
+Existing V2 timeline uses min/max valid CommitterDate within project snapshot, not project.CreatedAt/CompletedAt. Post-completion activity can extend this window under current source; preserve policy and prominently warn for product review. No project reopen or scoring-window change is part of implementation.
+
+Chosen minimum: additive persisted adjustment header/items, exact Manual jobs created through existing job service in the same transaction, guided capture/Peer/Run links. On-demand execution opt-in/default-off uses existing GitSyncWorker with per-job pinned scope and normal processor; no independent sync engine, no global scans/claim. Runtime enablement and migration require separate E2E approval. Existing normal worker unchanged when option off. Creator-only workflow; Member Peer remains existing own-account flow/current Published visibility.

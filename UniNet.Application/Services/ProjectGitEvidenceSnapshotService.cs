@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using UniNet.Domain.Entities;
 using UniNet.Infrastructure.Data;
 using UniNet.Domain.Enums;
@@ -12,9 +13,11 @@ internal sealed class ProjectGitEvidenceSnapshotService(UniNetDbContext db)
     public async Task<Guid> CaptureAsync(Guid projectId, Guid accountId, DateTimeOffset observationCutoff, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql()) throw new InvalidOperationException("Snapshot capture requires PostgreSQL.");
+        if (db.Database.CurrentTransaction is { } ambient && ambient.GetDbTransaction().IsolationLevel is not (IsolationLevel.RepeatableRead or IsolationLevel.Serializable))
+            throw new InvalidOperationException("Snapshot capture requires a consistent transaction read point.");
         if (observationCutoff > DateTimeOffset.UtcNow) throw new ArgumentOutOfRangeException(nameof(observationCutoff));
         observationCutoff = observationCutoff.ToUniversalTime();
-        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
         await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
         var coverageSchema = await db.Database.SqlQuery<int>($"""
             SELECT CASE WHEN to_regclass('public."ProjectGitEvidenceSnapshotCoverage"') IS NOT NULL THEN 1 ELSE 0 END AS "Value"
@@ -55,7 +58,7 @@ internal sealed class ProjectGitEvidenceSnapshotService(UniNetDbContext db)
         await db.SaveChangesAsync(ct);
         snapshot.Finalized = true;
         await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return snapshot.Id;
     }
 }

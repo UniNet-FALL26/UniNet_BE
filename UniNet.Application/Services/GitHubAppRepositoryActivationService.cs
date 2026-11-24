@@ -16,6 +16,62 @@ public sealed class GitHubAppRepositoryActivationService(UniNetDbContext db, IGi
     IGitHubProviderClient provider, IOptions<GitSyncOptions> options, IOptions<GitHubAppOptions>? appOptions = null, IGitHubWorkerProgress? progress = null,
     ILogger<GitHubAppRepositoryActivationService>? logger = null)
 {
+    // Explicit manual API only: no scan, no global enable, no Initial job conversion.
+    public async Task ActivateScopedManualAsync(Guid accountId, Guid projectId, Guid linkId, CancellationToken ct)
+    {
+        GitHubAppAvailability.Require(appOptions);
+        var settings = options.Value;
+        settings.ScopedManual.Validate(settings.Enabled);
+        if (!settings.ManualEnqueueEnabled || settings.ScopedManual.ProjectId != projectId ||
+            settings.ScopedManual.AssociationId != linkId || settings.ScopedManual.JobId is not null)
+            throw new GitHubIntegrationException("GITHUB_SCOPED_MANUAL_TARGET_MISMATCH", "Activation does not match the approved manual scope.", 409);
+        await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
+        var before = await FindAsync(linkId, ct);
+        if (before is null || before.Link.ProjectId != projectId ||
+            before.Link.AccessStatus != ProjectGitRepositoryAccessStatus.PendingAuthorization || !before.Link.SyncPaused)
+            throw new GitHubIntegrationException("GITHUB_APP_PENDING_ACTIVATION", "Repository is not eligible for scoped activation.", 409);
+        var token = await tokens.GetAsync(before.Installation.ProviderInstallationId, before.Repository.ProviderRepositoryId, ct);
+        var remote = await provider.GetInstallationRepositoryAsync(token, before.Repository.ProviderRepositoryId, ct);
+        if (remote.Id != before.Repository.ProviderRepositoryId || !remote.CanRead)
+            throw new GitHubIntegrationException("GITHUB_APP_REPOSITORY_UNAVAILABLE", "Installation cannot read this repository.", 403);
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            var actor = await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
+            // Same authorization join/order as page persistence; hold authorization rows until commit.
+            await db.Database.SqlQuery<int>($"""
+                SELECT 1 AS "Value" FROM "ProjectGitRepositories" l
+                JOIN "GitHubRepositories" r ON r."Id" = l."GitHubRepositoryId"
+                JOIN "GitHubAppRepositoryGrants" g ON g."Id" = l."GitHubAppRepositoryGrantId"
+                JOIN "GitHubAppInstallations" i ON i."Id" = g."InstallationId"
+                WHERE l."Id" = {linkId} AND l."ProjectId" = {projectId}
+                FOR UPDATE OF l FOR SHARE OF r, g, i
+                """).ToListAsync(ct);
+            var current = await FindAsync(linkId, ct);
+            if (current is null || current.Link.ProjectId != projectId || current.Link.Version != before.Link.Version ||
+                current.Grant.Id != before.Grant.Id || current.Grant.AuthorizationGeneration != before.Grant.AuthorizationGeneration ||
+                current.Installation.Id != before.Installation.Id || current.Installation.AuthorizationGeneration != before.Installation.AuthorizationGeneration ||
+                current.Repository.ProviderRepositoryId != remote.Id)
+                throw new GitHubIntegrationException("GITHUB_SYNC_AUTHORIZATION_CHANGED", "Repository authorization changed; request a fresh authorized synchronization.", 409);
+            if (await db.GitSyncJobs.AnyAsync(x => x.ProjectGitRepositoryId == linkId &&
+                (x.Status == GitSyncJobStatus.Pending || x.Status == GitSyncJobStatus.Running ||
+                 x.Status == GitSyncJobStatus.RetryScheduled || x.Status == GitSyncJobStatus.Paused), ct))
+                throw new GitHubIntegrationException("GITHUB_SYNC_CONFLICT", "An existing job must be resolved before activation.", 409);
+            var link = await db.ProjectGitRepositories.SingleAsync(x => x.Id == linkId, ct);
+            var now = DateTimeOffset.UtcNow;
+            link.AccessStatus = ProjectGitRepositoryAccessStatus.Active;
+            link.SyncPaused = false; link.LastAccessCheckedAt = now; link.UpdatedAt = now; link.Version = Guid.NewGuid();
+            db.GitSyncJobs.Add(new GitSyncJob { ProjectGitRepositoryId = linkId, GitHubRepositoryId = link.GitHubRepositoryId,
+                CredentialSource = GitRepositoryCredentialSource.GitHubApp, GitHubAppRepositoryGrantId = current.Grant.Id,
+                RequestedByProfileId = actor, SyncType = GitSyncType.Manual, Status = GitSyncJobStatus.Pending,
+                CreatedAt = now, UpdatedAt = now });
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+            GitHubAppDiagnostics.JobEnqueued.Add(1);
+        }
+        catch (Exception ex) when (ex is DbUpdateException || ex.GetBaseException() is PostgresException { SqlState: "40001" or "40P01" })
+        { throw new GitHubIntegrationException("GITHUB_APP_ACTIVATION_CONFLICT", "Activation changed concurrently; retry after checking durable job state.", 409); }
+    }
+
     public async Task<bool> ActivateAsync(Guid linkId, CancellationToken ct)
     {
         GitHubAppAvailability.Require(appOptions);

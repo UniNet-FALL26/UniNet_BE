@@ -10,6 +10,25 @@ namespace UniNet.Tests;
 
 public sealed class GitHubAppUserClientTests
 {
+    [Theory]
+    [InlineData("https://github.com/settings/installations/12", true)]
+    [InlineData("https://github.com/organizations/example-org/settings/installations/12", true)]
+    [InlineData("https://github.com/settings/installations/99", false)]
+    [InlineData("http://github.com/settings/installations/12", false)]
+    [InlineData("https://github.com.evil.test/settings/installations/12", false)]
+    [InlineData("https://user@github.com/settings/installations/12", false)]
+    [InlineData("https://github.com/settings/installations/12?redirect=https://evil.test", false)]
+    [InlineData("https://github.com/login/oauth/authorize", false)]
+    public async Task ConfigurationLinkMustComeFromProviderAndMatchInstallation(string url, bool valid)
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new { installations = new[] {
+            new { id = 12, account = new { id = 22, login = "example-org", type = "Organization" }, html_url = url }
+        } });
+        var client = new GitHubAppUserClient(new HttpClient(new Handler(_ => new(HttpStatusCode.OK) { Content = new StringContent(payload) })), Options.Create(new GitHubAppOptions { Enabled = true }));
+        var result = await client.GetInstallationsAsync("user-fixture", 1, default);
+        Assert.Equal(valid ? url : null, Assert.Single(result.Items).ConfigurationUrl);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => Task.FromResult(respond(request));

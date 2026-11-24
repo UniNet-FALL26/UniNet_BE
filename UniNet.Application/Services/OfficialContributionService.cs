@@ -9,7 +9,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed class OfficialContributionService
+public sealed partial class OfficialContributionService
 {
     private readonly UniNetDbContext db;
     private readonly GitExperimentalContributionService engine;
@@ -49,7 +49,7 @@ public sealed class OfficialContributionService
         if (p.Status != ProjectStatus.Completed) blockers.Add("ProjectNotCompleted");
         if (!await db.ProjectGitRepositories.AnyAsync(x => x.ProjectId == project && x.UnlinkedAt == null && x.AccessStatus == ProjectGitRepositoryAccessStatus.Active, ct)) blockers.Add("AuthorizedRepositoryRequired");
         if (!await db.ProjectGitMemberIdentities.AnyAsync(x => x.ProjectId == project && x.Status == ProjectGitMemberIdentityStatus.Active && x.VerifiedByConnectionId != null, ct)) blockers.Add("VerifiedGitIdentityRequired");
-        var published = await db.Set<OfficialContributionPublication>().AsNoTracking().Where(x => x.ProjectId == project).Select(x => (Guid?)x.RunId).SingleOrDefaultAsync(ct);
+        var published = await db.Set<OfficialContributionRelease>().AsNoTracking().Where(x => x.ProjectId == project).OrderByDescending(x=>x.Version).Select(x => (Guid?)x.RunId).FirstOrDefaultAsync(ct);
         var manage = p.CreatorId == actor;
         var cohort = mode == "OfficialV2" ? await db.Set<ExperimentalPeerCohort>().AsNoTracking().Where(x => x.ProjectId == project)
             .OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id).FirstOrDefaultAsync(ct) : null;
@@ -107,16 +107,52 @@ public sealed class OfficialContributionService
     }
     public async Task<ExperimentalPeerCohortResponse> OpenPeerAsync(Guid project, Guid account, ExperimentalPeerOpenRequest request, CancellationToken ct)
     {
-        await Actor(project, account, true, ct); await RequireV2(project, ct);
-        Check(await db.Projects.AnyAsync(x => x.Id == project && x.Status == ProjectStatus.Completed, ct), "OFFICIAL_PROJECT_NOT_COMPLETED", "Complete the project before freezing the roster.");
-        var members = await UniNet.Application.Common.ProjectMembership.EffectiveMemberIds(db, project).ToArrayAsync(ct);
-        Check(request.ParticipantIds is not null && request.ParticipantIds.ToHashSet().SetEquals(members), "OFFICIAL_ROSTER_MISMATCH", "Freeze all effective project members, including Creator.");
-        return await peers.OpenAsync(project, account, request, ct);
-    }
-    public async Task<ExperimentalPeerCohortResponse> PeerAsync(Guid project, Guid cohort, Guid account, CancellationToken ct)
+        await using var tx=db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct) : null;
+        await LockProject(project,ct);await Actor(project,account,true,ct);await RequireV2(project,ct);
+        Check(await db.Projects.AnyAsync(x=>x.Id==project&&x.Status==ProjectStatus.Completed,ct),"OFFICIAL_PROJECT_NOT_COMPLETED","Complete the project before freezing the roster.");
+        var members=await UniNet.Application.Common.ProjectMembership.EffectiveMemberIds(db,project).ToArrayAsync(ct);
+        Check(request.ParticipantIds is not null&&request.ParticipantIds.ToHashSet().SetEquals(members),"OFFICIAL_ROSTER_MISMATCH","Freeze all effective project members, including Creator.");
+        Check(!await db.Set<ExperimentalPeerCohort>().AnyAsync(x=>x.ProjectId==project&&x.Status!=ExperimentalPeerCohortStatus.Closed,ct),"OFFICIAL_PEER_ROUND_ACTIVE","Finish the existing evaluation round before opening another.");
+        var result=await peers.OpenAsync(project,account,request,ct);if(tx is not null) await tx.CommitAsync(ct);return result;
+    }    public async Task<ExperimentalPeerCohortResponse> PeerAsync(Guid project, Guid cohort, Guid account, CancellationToken ct)
     { await RequireV2(project, ct); return await peers.ReadAsync(project, cohort, account, ct); }
     public async Task<ExperimentalPeerCohortResponse> SubmitPeerAsync(Guid project, Guid cohort, Guid evaluatee, Guid account, ExperimentalPeerSubmitRequest request, CancellationToken ct)
     { await RequireV2(project, ct); return await peers.SubmitAsync(project, cohort, account, evaluatee, request, ct); }
+
+    // Internal guided-workflow summary. Compare scoring identities/content, not page observations,
+    // timestamps of retrieval, or an old SyncReady flag. Existing frozen inputs remain unchanged.
+    internal async Task<string> CompareGitAsync(Guid project, Guid snapshot, Guid? baselineRun, Guid account, CancellationToken ct)
+    {
+        await Actor(project, account, true, ct); await RequireV2(project, ct);
+        var roster = await UniNet.Application.Common.ProjectMembership.EffectiveMemberIds(db, project).ToArrayAsync(ct);
+        using var diagnostic = JsonDocument.Parse(await engine.DiagnoseGitAsync(project, snapshot, account, roster, ct));
+        if(diagnostic.RootElement.GetProperty("gitState").GetString()!="Ready") return "Unverified";
+        if(baselineRun is null) return "NoPublishedBaseline";
+        var baseline=await Calculation(project,baselineRun.Value,ct);
+        var oldRun=await Run(project,baselineRun.Value,ct);
+        Check(GitExperimentalContributionService.ComputeScoringInputHash(baseline.InputSnapshotJson)==baseline.InputHash&&GitExperimentalContributionService.OfficialResultHash(baseline)==oldRun.ResultHash,
+            "OFFICIAL_INPUT_INTEGRITY","Published frozen calculation integrity check failed.");
+        using var input=JsonDocument.Parse(baseline.InputSnapshotJson);
+        var candidates=input.RootElement.GetProperty("eligibleActivities").EnumerateArray().Select(x=>new {
+            Input=x.Clone(),
+            Activity=new ExperimentalGitActivity(Enum.Parse<ExperimentalGitActivityCategory>(x.GetProperty("category").GetString()!),
+                x.GetProperty("repositoryId").GetGuid(),x.GetProperty("objectId").GetString()!,
+                x.GetProperty("userId").ValueKind==JsonValueKind.Null?null:x.GetProperty("userId").GetGuid(),
+                x.GetProperty("activityAt").GetDateTimeOffset(),x.GetProperty("relatedCommitShas").Deserialize<string[]>(Json)!)
+        }).ToArray();
+        var oldRoster=input.RootElement.GetProperty("roster").EnumerateArray().Select(x=>x.GetProperty("userId").GetGuid()).ToArray();
+        var scored=ExperimentalGitScoringV1.CalculateGit(oldRoster,candidates.Select(x=>x.Activity).ToArray()).ScoredActivities
+            .Select(x=>(x.Category,x.RepositoryId,x.ObjectId)).ToHashSet();
+        static string Key(JsonElement x)=>JsonSerializer.Serialize(new {
+            Category=x.GetProperty("category").GetString(),Repository=x.GetProperty("repositoryId").GetGuid(),Object=x.GetProperty("objectId").GetString(),
+            User=x.GetProperty("userId").ValueKind==JsonValueKind.Null?(Guid?)null:x.GetProperty("userId").GetGuid(),
+            Actor=x.GetProperty("providerActorId").GetInt64(),At=x.GetProperty("activityAt").GetDateTimeOffset(),
+            Hash=x.GetProperty("versionHash").GetString(),Relations=x.GetProperty("relatedCommitShas").EnumerateArray().Select(v=>v.GetString()).OrderBy(v=>v,StringComparer.Ordinal).ToArray()
+        });
+        var previous=candidates.Where(x=>scored.Contains((x.Activity.Category,x.Activity.RepositoryId,x.Activity.ObjectId))).Select(x=>Key(x.Input)).ToHashSet(StringComparer.Ordinal);
+        var current=diagnostic.RootElement.GetProperty("scoredActivities").EnumerateArray().Select(Key).ToHashSet(StringComparer.Ordinal);
+        return previous.SetEquals(current)?"NoEligibleChanges":"EligibleActivitiesChanged";
+    }
     public async Task<Guid> ClosePeerAsync(Guid project, Guid cohort, Guid account, CancellationToken ct)
     { await RequireV2(project, ct); return await peers.CloseAsync(project, cohort, account, ct); }
     public async Task<OfficialPeerSnapshotResponse> PeerSnapshotAsync(Guid project, Guid id, Guid account, CancellationToken ct)
@@ -160,7 +196,7 @@ public sealed class OfficialContributionService
     {
         Check(request.RequestId != Guid.Empty && request.GitSnapshotId != Guid.Empty && request.PeerSnapshotId != Guid.Empty,
             "OFFICIAL_REQUEST_INVALID", "RequestId and both frozen Snapshot IDs are required.", 400);
-        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         await LockProject(project, ct); var actor = await Actor(project, account, true, ct); await RequireV2(project, ct);
         var existing = await db.Set<OfficialContributionRun>().SingleOrDefaultAsync(x => x.ProjectId == project && x.RequestId == request.RequestId, ct);
         if (existing is not null)
@@ -168,9 +204,9 @@ public sealed class OfficialContributionService
             var calc = await Calculation(project, existing.Id, ct);
             Check(calc.GitEvidenceSnapshotId == request.GitSnapshotId && calc.PeerSnapshotId == request.PeerSnapshotId,
                 "OFFICIAL_IDEMPOTENCY_CONFLICT", "RequestId already identifies different frozen inputs.");
-            var response = await Map(existing, account, ct); await tx.CommitAsync(ct); return response;
+            var response = await Map(existing, account, ct); if(tx is not null) await tx.CommitAsync(ct); return response;
         }
-        Check(!await db.Set<OfficialContributionRun>().AnyAsync(x => x.ProjectId == project && x.State == "Finalized", ct), "OFFICIAL_ALREADY_FINALIZED", "The project already has finalized official results.");
+        await RequireVersionSchema(ct);
         var peer = await db.Set<ExperimentalPeerSnapshot>().AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.PeerSnapshotId && x.ProjectId == project, ct);
         Check(peer is not null, "PEER_SNAPSHOT_NOT_FOUND", "A closed Peer Snapshot in this project is required.", 404);
         var cohort = await db.Set<ExperimentalPeerCohort>().AsNoTracking().SingleAsync(x => x.Id == peer!.CohortId && x.ProjectId == project, ct);
@@ -180,12 +216,12 @@ public sealed class OfficialContributionService
         Check(created.CalculationStatus == "Ready", "OFFICIAL_CALCULATION_NOT_READY", "Git and Peer must be complete with positive applicable mass.");
         var calculation = await Calculation(project, created.RunId, ct);
         if (await db.Set<OfficialContributionRun>().AnyAsync(x => x.Id == created.RunId, ct))
-            throw Error("OFFICIAL_CONTEXT_EXISTS", "Use the original RequestId for this calculation context.");
+        { var same = await Run(project, created.RunId, ct); var response = await Map(same, account, ct); if(tx is not null) await tx.CommitAsync(ct); return response with { ReusedInputs = true }; }
         await engine.ValidateOfficialAsync(calculation, account, ct);
         var run = new OfficialContributionRun { Id = created.RunId, ProjectId = project, RequestId = request.RequestId,
             CreatedById = actor, ResultHash = GitExperimentalContributionService.OfficialResultHash(calculation) };
         db.Add(run); db.Add(new OfficialContributionAudit { RunId = run.Id, ActorId = actor, Action = "Created", Revision = 0 });
-        await db.SaveChangesAsync(ct); var result = await Map(run, account, ct); await tx.CommitAsync(ct); return result;
+        await db.SaveChangesAsync(ct); var result = await Map(run, account, ct); if(tx is not null) await tx.CommitAsync(ct); return result;
     });
     private async Task<GitContributionRun> Calculation(Guid project, Guid id, CancellationToken ct) =>
         await db.GitContributionRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.ProjectId == project, ct)
@@ -197,7 +233,7 @@ public sealed class OfficialContributionService
     {
         var calculation = await Calculation(row.ProjectId, row.Id, ct);
         Check(row.ResultHash == GitExperimentalContributionService.OfficialResultHash(calculation), "OFFICIAL_RESULT_INTEGRITY", "Frozen calculation integrity check failed.");
-        var pub = await db.Set<OfficialContributionPublication>().AsNoTracking().Where(x => x.RunId == row.Id).Select(x => (DateTimeOffset?)x.PublishedAt).SingleOrDefaultAsync(ct);
+        var pub = await db.Set<OfficialContributionRelease>().AsNoTracking().Where(x => x.RunId == row.Id).Select(x => (DateTimeOffset?)x.PublishedAt).SingleOrDefaultAsync(ct);
         var response = await engine.GetRunAsync(row.ProjectId, row.Id, account, ct);
         return new("1", row.Id, row.ProjectId, row.RequestId, pub.HasValue ? "Published" : row.State,
             row.Revision, row.ResultHash, response with { Categories = OfficialCategories(response.Categories) }, row.FinalizedAt, pub);
@@ -214,17 +250,14 @@ public sealed class OfficialContributionService
         if (action == "publish")
         {
             Check(row.State == "Finalized", "OFFICIAL_NOT_FINALIZED", "Finalize approved results before publication.");
-            var existing = await db.Set<OfficialContributionPublication>().SingleOrDefaultAsync(x => x.ProjectId == project, ct);
-            if (existing is not null) Check(existing.RunId == id, "OFFICIAL_PUBLICATION_CONFLICT", "Another official result is already published.");
-            else
+            if (!await db.Set<OfficialContributionRelease>().AnyAsync(x=>x.RunId==id,ct))
             {
-                await Validate(row, account, ct);
-                db.Add(new OfficialContributionPublication { ProjectId = project, RunId = id, PublishedById = actor });
-                db.Add(new OfficialContributionAudit { RunId = id, Revision = row.Revision + 1, ActorId = actor, Action = "Published" });
-                await db.SaveChangesAsync(ct);
+                Check(await CurrentRelease(project,ct) is null,"OFFICIAL_PUBLICATION_CHANGED","Use approve-and-publish with the expected current publication to replace a published result.");
+                Check(row.Revision==request.ExpectedRevision,"OFFICIAL_REVISION_CONFLICT","Reload the run before publication.");
+                await Validate(row,account,ct);
+                await PublishRelease(row,actor,request.Feedback,ct);
             }
-        }
-        else if (action == "finalize" && row.State == "Finalized") { /* same result, idempotent */ }
+        }        else if (action == "finalize" && row.State == "Finalized") { /* same result, idempotent */ }
         else
         {
             Check(row.Revision == request.ExpectedRevision, "OFFICIAL_REVISION_CONFLICT", "Reload the run before changing its state.");
@@ -273,7 +306,7 @@ public sealed class OfficialContributionService
         await Actor(project, account, true, ct); await RequireV2(project, ct); Page(page, size);
         Check(state is null or "Draft" or "Review" or "Approved" or "Rejected" or "Finalized" or "Published", "OFFICIAL_STATE_INVALID", "Unknown lifecycle state.", 400);
         var q = from r in db.Set<OfficialContributionRun>().AsNoTracking()
-                join p in db.Set<OfficialContributionPublication>().AsNoTracking() on r.Id equals p.RunId into publications
+                join p in db.Set<OfficialContributionRelease>().AsNoTracking() on r.Id equals p.RunId into publications
                 from p in publications.DefaultIfEmpty()
                 where r.ProjectId == project
                 select new { r.Id, State = p == null ? r.State : "Published", r.Revision, r.CreatedAt, r.FinalizedAt, PublishedAt = p == null ? (DateTimeOffset?)null : p.PublishedAt };
@@ -307,7 +340,7 @@ public sealed class OfficialContributionService
     public async Task<OfficialMemberResultResponse> MyResultAsync(Guid project, Guid account, CancellationToken ct)
     {
         var actor = await Actor(project, account, false, ct); await RequireV2(project, ct);
-        var pub = await db.Set<OfficialContributionPublication>().AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == project, ct)
+        var pub = await db.Set<OfficialContributionRelease>().AsNoTracking().Where(x => x.ProjectId == project).OrderByDescending(x=>x.Version).FirstOrDefaultAsync(ct)
             ?? throw Error("OFFICIAL_NOT_PUBLISHED", "No official result has been published.", 404);
         var row = await Run(project, pub.RunId, ct); var calc = await Calculation(project, row.Id, ct);
         Check(row.ResultHash == GitExperimentalContributionService.OfficialResultHash(calc), "OFFICIAL_RESULT_INTEGRITY", "Frozen result integrity check failed.");

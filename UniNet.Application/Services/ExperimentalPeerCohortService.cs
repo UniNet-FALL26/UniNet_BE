@@ -21,7 +21,7 @@ public sealed class ExperimentalPeerCohortService(UniNetDbContext db, TimeProvid
         if (request.ParticipantIds is null) throw Error("PEER_ROSTER_INVALID", "A participant roster is required.");
         var actor = await ActorAsync(projectId, accountId, ct);
         await RequireLeaderAsync(projectId, actor, ct);
-        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var creator = await db.Projects.Where(x => x.Id == projectId).Select(x => x.CreatorId).SingleAsync(ct);
         var roster = request.ParticipantIds.Append(creator).Distinct().Order().ToArray();
         var eligible = await ProjectMembership.EffectiveMemberIds(db, projectId).Where(id => roster.Contains(id))
@@ -30,7 +30,7 @@ public sealed class ExperimentalPeerCohortService(UniNetDbContext db, TimeProvid
         var json = JsonSerializer.Serialize(roster, Json);
         var cohort = new ExperimentalPeerCohort { ProjectId = projectId, OpenedById = actor, RosterJson = json, RosterHash = Hash(json), CreatedAt = clock.GetUtcNow(),
             Status = roster.Length == 1 ? ExperimentalPeerCohortStatus.ReadyToClose : ExperimentalPeerCohortStatus.Open };
-        db.Add(cohort); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        db.Add(cohort); await db.SaveChangesAsync(ct); if (tx is not null) await tx.CommitAsync(ct);
         return await ReadAsync(projectId, cohort.Id, accountId, ct);
     }
 

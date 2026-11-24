@@ -514,7 +514,7 @@ internal sealed partial class GitExperimentalContributionService(
         return ids.Distinct().Order().ToArray();
     }
 
-    private static string ComputeScoringInputHash(string inputSnapshotJson)
+    internal static string ComputeScoringInputHash(string inputSnapshotJson)
     {
         using var document = JsonDocument.Parse(inputSnapshotJson);
         if (document.RootElement.ValueKind != JsonValueKind.Object)

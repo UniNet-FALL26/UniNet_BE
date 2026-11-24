@@ -21,7 +21,7 @@ internal sealed partial class GitExperimentalContributionService
             "Git diagnostics require a completed project.", 409);
         var snapshot = await snapshots.ReadAsync(projectId, snapshotId, accountId, ct);
         Require(snapshot.ProjectId == projectId, "GIT_CONTRIBUTION_SNAPSHOT_PROJECT_MISMATCH", "Snapshot project mismatch.", 409);
-        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
         var participants = await ResolveRequestedRosterAsync(project, participantIds, snapshot.ObservationCutoff, ct);
         var roster = participants.Select(x => x.UserId).ToArray();
         var history = await db.ProjectGitMemberIdentityHistory.AsNoTracking()
@@ -110,7 +110,7 @@ internal sealed partial class GitExperimentalContributionService
             Limitations = new[] { "DiagnosticNotContributionRun", "RosterAndHistoryFrozenInDiagnosticArtifactOnly",
                 "PartialPatchOverlapNotSupportedInExperimentalV1", "HistoricalForcePushNotProven" }
         };
-        await tx.CommitAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return JsonSerializer.Serialize(output, JsonOptions);
     }
 }

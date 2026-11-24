@@ -27,7 +27,7 @@ public sealed class GitHubAppGrantService(UniNetDbContext db, IGitHubAppUserClie
         var now = DateTimeOffset.UtcNow;
         foreach (var remote in response.Items) await UpsertInstallationAsync(accountId, token.UserId, remote, now, ct);
         await SaveAsync(ct);
-        return new(response.Items.Select(x => new GitHubAppInstallationItem(x.Id, x.OwnerLogin, x.OwnerType, x.Suspended ? "Suspended" : "Active")).ToArray(), page, response.HasMore);
+        return new(response.Items.Select(x => new GitHubAppInstallationItem(x.Id, x.OwnerLogin, x.OwnerType, x.Suspended ? "Suspended" : "Active", x.ConfigurationUrl)).ToArray(), page, response.HasMore);
     }
 
     public async Task<GitHubAppGrantPage<GitHubAppRepositoryItem>> GetRepositoriesAsync(Guid accountId, Guid projectId, Guid credentialId, long installationId, int page, CancellationToken ct)

@@ -60,7 +60,6 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MessagingService>();
 builder.Services.AddHttpClient("ChatPush", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<IChatPushSender, UniNet.API.Services.FcmChatPushSender>();
-builder.Services.AddHostedService<UniNet.API.Services.ChatDeliveryWorker>();
 builder.Services.AddHttpClient<IChatAttachmentStorage, UniNet.API.Services.ChatCloudStorage>(client => client.Timeout = TimeSpan.FromMinutes(2))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<AssessorOnboardingService>();

@@ -27,7 +27,7 @@ public sealed class OfficialRunConfiguration : IEntityTypeConfiguration<Official
         b.Property(x => x.State).HasMaxLength(32).IsRequired(); b.Property(x => x.ResultHash).HasMaxLength(64).IsRequired();
         b.Property(x => x.Revision).IsConcurrencyToken();
         b.HasIndex(x => new { x.ProjectId, x.RequestId }).IsUnique();
-        b.HasIndex(x => x.ProjectId).IsUnique().HasFilter("\"State\" = 'Finalized'");
+        b.HasIndex(x => x.ProjectId);
         b.HasOne<GitContributionRun>().WithOne().HasForeignKey<OfficialContributionRun>(x => new { x.Id, x.ProjectId })
             .HasPrincipalKey<GitContributionRun>(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<ProjectContributionWorkflow>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
@@ -54,5 +54,20 @@ public sealed class OfficialPublicationConfiguration : IEntityTypeConfiguration<
         b.HasOne<OfficialContributionRun>().WithOne().HasForeignKey<OfficialContributionPublication>(x => new { x.RunId, x.ProjectId })
             .HasPrincipalKey<OfficialContributionRun>(x => new { x.Id, x.ProjectId }).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserProfile>().WithMany().HasForeignKey(x => x.PublishedById).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class OfficialReleaseConfiguration : IEntityTypeConfiguration<OfficialContributionRelease>
+{
+    public void Configure(EntityTypeBuilder<OfficialContributionRelease> b)
+    {
+        b.ToTable("OfficialContributionReleases", t => t.HasCheckConstraint("CK_OfficialRelease_Version", "\"Version\" > 0"));
+        b.HasKey(x=>x.RunId); b.HasIndex(x=>new{x.ProjectId,x.Version}).IsUnique();
+        b.Property(x=>x.Reason).HasMaxLength(2000);
+        b.HasOne<OfficialContributionRun>().WithOne().HasForeignKey<OfficialContributionRelease>(x=>new{x.RunId,x.ProjectId})
+            .HasPrincipalKey<OfficialContributionRun>(x=>new{x.Id,x.ProjectId}).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<OfficialContributionRun>().WithMany().HasForeignKey(x=>new{x.PreviousRunId,x.ProjectId})
+            .HasPrincipalKey(x=>new{x.Id,x.ProjectId}).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserProfile>().WithMany().HasForeignKey(x=>x.PublishedById).OnDelete(DeleteBehavior.Restrict);
     }
 }

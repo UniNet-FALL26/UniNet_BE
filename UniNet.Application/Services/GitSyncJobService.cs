@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 
 namespace UniNet.Application.Services;
 
-public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOptions> options, IOptions<GitHubAppOptions>? appOptions = null, ILogger<GitSyncJobService>? logger = null) : IGitSyncJobService
+public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOptions> options, IOptions<GitHubAppOptions>? appOptions = null, ILogger<GitSyncJobService>? logger = null, GitHubAppRepositoryActivationService? activation = null) : IGitSyncJobService
 {
     private bool AppEnabled => appOptions?.Value.Enabled == true;
     private static readonly GitSyncJobStatus[] ActiveStatuses =
@@ -377,7 +377,7 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
 
     private async Task<GitSyncRequestResult> RequestAppManualAsync(Guid accountId, Guid projectId, Guid linkId, Guid actor, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         await ProjectGitAuthorization.RequireManagerAsync(db, projectId, accountId, ct);
         var link = (await EligibleAppCandidatesAsync(projectId, linkId, ct)).SingleOrDefault()
             ?? throw Error("GITHUB_APP_PENDING_ACTIVATION", "GitHub App repository access is not ready for synchronization.", 409);
@@ -385,9 +385,10 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         if (existing is not null) return await ManualReplayAsync(existing, ct);
         var job = NewAppJob(link, GitSyncType.Manual, actor, DateTimeOffset.UtcNow);
         db.GitSyncJobs.Add(job);
-        try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); }
+        try { await db.SaveChangesAsync(ct); if (transaction is not null) await transaction.CommitAsync(ct); }
         catch (DbUpdateException ex) when (IsActiveJobConflict(ex))
         {
+            if (transaction is null) throw Error("GITHUB_SYNC_CONFLICT", "A concurrent sync changed the approved plan; retry after reading durable state.", 409);
             db.Entry(job).State = EntityState.Detached;
             await transaction.RollbackAsync(ct);
             await transaction.DisposeAsync();
@@ -502,6 +503,10 @@ public sealed class GitSyncJobService(UniNetDbContext db, IOptions<GitSyncOption
         if (await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == projectGitRepositoryId && x.ProjectId == projectId && x.UnlinkedAt == null && x.CredentialSource == GitRepositoryCredentialSource.GitHubApp, ct))
         {
             if (!AppEnabled) throw Error("GITHUB_APP_DISABLED", "GitHub App integration is unavailable.", 503);
+            if (options.Value.ScopedManual.Enabled && activation is not null &&
+                await db.ProjectGitRepositories.AsNoTracking().AnyAsync(x => x.Id == projectGitRepositoryId &&
+                    x.AccessStatus == ProjectGitRepositoryAccessStatus.PendingAuthorization && x.SyncPaused, ct))
+                await activation.ActivateScopedManualAsync(accountId, projectId, projectGitRepositoryId, ct);
             return await RequestAppManualAsync(accountId, projectId, projectGitRepositoryId, actorProfileId, ct);
         }
         var link = await (

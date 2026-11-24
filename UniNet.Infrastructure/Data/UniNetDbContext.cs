@@ -178,6 +178,8 @@ public sealed partial class UniNetDbContext(DbContextOptions<UniNetDbContext> op
         model.ApplyConfiguration(new OfficialRunConfiguration());
         model.ApplyConfiguration(new OfficialAuditConfiguration());
         model.ApplyConfiguration(new OfficialPublicationConfiguration());
+        model.ApplyConfiguration(new OfficialReleaseConfiguration());
+        GitContributionAdjustmentConfiguration.Configure(model);
         SpecializationConfiguration.Configure(model);
         SimplifiedProjectConfiguration.Configure(model);
         AssessorOnboardingConfiguration.Configure(model);

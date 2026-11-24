@@ -51,9 +51,9 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
     private static async Task<T> OfficialCall<T>(Func<OfficialContributionService, Task<T>> action)
     { await using var db = OfficialDb(); return await action(OfficialService(db)); }
 
-    private static async Task<(Guid Project, Guid[] Accounts, Guid[] Profiles, Guid Snapshot, Guid Peer)> OfficialFixture()
+    private static async Task<(Guid Project, Guid[] Accounts, Guid[] Profiles, Guid Snapshot, Guid Peer)> OfficialFixture(string suffix = "")
     {
-        await using var db = OfficialDb(); await db.Database.MigrateAsync();
+        await using var db = OfficialDb(suffix); await db.Database.MigrateAsync();
         var seed = await SeedProjectAsync(db);
         var original = await db.Projects.SingleAsync(x => x.Id == seed.ProjectId);
         // Different project, same repository and verified accounts; no legacy cycle.
@@ -269,6 +269,20 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
             Assert.Equal(run.Calculation.Categories.Sum(x => x.EligibleActivityCount), scoredPage.Total);
             Assert.Equal(2, scoredPage.Items.Count);
             Assert.Equal(HttpStatusCode.BadRequest, (await leader.GetAsync($"{path}/runs?pageSize=1000")).StatusCode);
+            Assert.True((await leader.GetFromJsonAsync<OfficialVersionCapabilities>($"{path}/version-capabilities"))!.Supported);
+            Assert.Equal(HttpStatusCode.Forbidden,(await member.GetAsync($"{path}/versions")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden,(await member.PostAsJsonAsync($"{path}/runs/{run.Id}/approve-and-publish",new OfficialApprovalRequest(run.Revision,run.Id))).StatusCode);
+            var captureResponse=await leader.PostAsJsonAsync($"{path}/snapshots",new OfficialSnapshotRequest(DateTimeOffset.UtcNow));
+            using var captureJson=JsonDocument.Parse(await captureResponse.Content.ReadAsStringAsync());
+            var newGit=captureJson.RootElement.GetProperty("snapshotId").GetGuid();
+            var nextResponse=await leader.PostAsJsonAsync($"{path}/runs",new OfficialRunRequest(Guid.NewGuid(),newGit,f.Peer));
+            Assert.True(nextResponse.IsSuccessStatusCode,await nextResponse.Content.ReadAsStringAsync());
+            var nextRun=(await nextResponse.Content.ReadFromJsonAsync<OfficialRunResponse>())!;
+            var approvalResponse=await leader.PostAsJsonAsync($"{path}/runs/{nextRun.Id}/approve-and-publish",new OfficialApprovalRequest(nextRun.Revision,run.Id,"Reviewed replacement"));
+            Assert.True(approvalResponse.IsSuccessStatusCode,await approvalResponse.Content.ReadAsStringAsync());
+            Assert.Equal("Published",(await approvalResponse.Content.ReadFromJsonAsync<OfficialRunResponse>())!.State);
+            Assert.Equal(nextRun.Id,(await member.GetFromJsonAsync<OfficialMemberResultResponse>($"{path}/results/me"))!.RunId);
+            Assert.Equal(2,(await leader.GetFromJsonAsync<OfficialPage<OfficialVersionResponse>>($"{path}/versions"))!.Total);
         }
         finally { await app.StopAsync(); }
     }

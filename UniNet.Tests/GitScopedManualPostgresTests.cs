@@ -67,7 +67,7 @@ public sealed partial class GitHubAppActivityWebhookPostgresTests
         services.AddSingleton(f.App); services.AddSingleton<IGitHubTokenProtector>(f.Protection);
         services.AddSingleton<IGitHubAppInstallationTokenProvider>(f.Tokens);
         services.AddSingleton<IGitHubProviderClient>(f.Provider); services.AddScoped<GitHubCredentialService>();
-        services.AddScoped<IGitSyncJobService, GitSyncJobService>(); services.AddScoped<IGitSyncJobProcessor, GitHubSyncJobProcessor>();
+        services.AddScoped<GitHubAppRepositoryActivationService>(); services.AddScoped<IGitSyncJobService, GitSyncJobService>(); services.AddScoped<IGitSyncJobProcessor, GitHubSyncJobProcessor>();
         services.AddScoped<GitHubAppInstallationReconciliationService>(_ => { background.Reconciliation++; throw new InvalidOperationException("Unexpected reconciliation"); });
         services.AddScoped<GitHubAppWebhookConsumer>(_ => { background.Webhook++; throw new InvalidOperationException("Unexpected webhook consumption"); });
         return (services.BuildServiceProvider(), background);
@@ -374,4 +374,74 @@ public sealed partial class GitHubAppActivityWebhookPostgresTests
         Assert.Empty(await db.ProjectGitActivityGrants.Where(x=>x.ProjectGitRepositoryId==f.Links[0].Id).ToArrayAsync());
         Assert.Empty(await db.ProjectGitActivityVisibilities.Where(x=>x.ProjectGitRepositoryId==f.Links[0].Id).ToArrayAsync());
     }
-}
+    [ScopedManualPostgresFact]
+    public async Task ScopedActivationUsesManualJobAndPreservesOtherProjectSharingRepository()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await using (var setup = Open())
+        {
+            await setup.ProjectGitRepositories.Where(x => x.Id == f.Links[0].Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.AccessStatus, ProjectGitRepositoryAccessStatus.PendingAuthorization).SetProperty(x => x.SyncPaused, true));
+        }
+        var settings = ScopedSettings(f, null);
+        var (root, background) = ScopedServices(f, settings);
+        await using var keepRoot = root;
+        await using (var scope = root.CreateAsyncScope())
+        {
+            var jobs = scope.ServiceProvider.GetRequiredService<IGitSyncJobService>();
+            var result = await jobs.RequestManualSyncAsync(f.Owner.Id, f.Projects[0].Id, f.Links[0].Id, default);
+            var replay = await jobs.RequestManualSyncAsync(f.Owner.Id, f.Projects[0].Id, f.Links[0].Id, default);
+            Assert.Equal(result.Job.Id, replay.Job.Id);
+        }
+        await using var db = Open();
+        var job = Assert.Single(await db.GitSyncJobs.Where(x => x.ProjectGitRepositoryId == f.Links[0].Id).ToArrayAsync());
+        Assert.Equal(GitSyncType.Manual, job.SyncType);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.Active, (await db.ProjectGitRepositories.AsNoTracking().SingleAsync(x=>x.Id==f.Links[0].Id)).AccessStatus);
+        Assert.Empty(await db.GitSyncJobs.Where(x=>x.ProjectGitRepositoryId==f.Links[1].Id).ToArrayAsync());
+        Assert.Equal(f.Links[1].Version,(await db.ProjectGitRepositories.AsNoTracking().SingleAsync(x=>x.Id==f.Links[1].Id)).Version);
+        Assert.Equal(0,background.Reconciliation); Assert.Equal(0,background.Webhook);
+        var repository = new GitHubRepository { ProviderRepositoryId = Random.Shared.NextInt64(10000000,long.MaxValue/2), ProviderOwnerId=9, OwnerLogin="fixture", Name="second", FullName="fixture/second", HtmlUrl="https://github.com/fixture/second" };
+        var grant = new GitHubAppRepositoryGrant { InstallationId=f.Installation.Id, ProviderRepositoryId=repository.ProviderRepositoryId, VerifiedAt=DateTimeOffset.UtcNow };
+        var second = new ProjectGitRepository { ProjectId=f.Projects[0].Id, GitHubRepositoryId=repository.Id, GitHubAppRepositoryGrantId=grant.Id, CredentialSource=GitRepositoryCredentialSource.GitHubApp, LinkedByProfileId=f.Owner.Profile!.Id, AccessStatus=ProjectGitRepositoryAccessStatus.PendingAuthorization, SyncPaused=true };
+        db.AddRange(repository,grant,second); await db.SaveChangesAsync(); f.Links.Add(second);
+        f.Repository=repository; settings.ScopedManual.AssociationId=second.Id;
+        await using(var next=root.CreateAsyncScope())
+            await next.ServiceProvider.GetRequiredService<IGitSyncJobService>().RequestManualSyncAsync(f.Owner.Id,f.Projects[0].Id,second.Id,default);
+        var secondJob=Assert.Single(await db.GitSyncJobs.Where(x=>x.ProjectGitRepositoryId==second.Id).ToArrayAsync());
+        Assert.Equal(GitSyncType.Manual,secondJob.SyncType); Assert.Equal(repository.Id,secondJob.GitHubRepositoryId);
+    }    [ScopedManualPostgresTheory]
+    [InlineData("grant")]
+    [InlineData("installation")]
+    [InlineData("unlink")]
+    public async Task ScopedActivationRejectsAuthorizationChangeDuringProviderVerification(string change)
+    {
+        await using var f=await Fixture.CreateAsync();
+        await using(var setup=Open()) await setup.ProjectGitRepositories.Where(x=>x.Id==f.Links[0].Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.AccessStatus,ProjectGitRepositoryAccessStatus.PendingAuthorization).SetProperty(x=>x.SyncPaused,true));
+        var settings=ScopedSettings(f,null); var gate=new Gate(); f.Provider.FirstRead=gate;
+        await using var db=Open();
+        var activation=new GitHubAppRepositoryActivationService(db,f.Tokens,f.Provider,Options.Create(settings),f.App);
+        var attempt=activation.ActivateScopedManualAsync(f.Owner.Id,f.Projects[0].Id,f.Links[0].Id,default);
+        await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await using(var mutation=Open())
+        {
+            if(change=="grant") { await mutation.Set<GitHubAppRepositoryGrant>().Where(x=>x.Id==f.Grant.Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.RevokedAt,DateTimeOffset.UtcNow)); await mutation.Set<GitHubAppRepositoryGrant>().Where(x=>x.Id==f.Grant.Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.RevokedAt,(DateTimeOffset?)null)); }
+            else if(change=="installation") { await mutation.Set<GitHubAppInstallation>().Where(x=>x.Id==f.Installation.Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.Status,GitHubAppInstallationStatus.Suspended)); await mutation.Set<GitHubAppInstallation>().Where(x=>x.Id==f.Installation.Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.Status,GitHubAppInstallationStatus.Active)); }
+            else await mutation.ProjectGitRepositories.Where(x=>x.Id==f.Links[0].Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.UnlinkedAt,DateTimeOffset.UtcNow));
+        }
+        gate.Release.TrySetResult();
+        var error=await Assert.ThrowsAsync<GitHubIntegrationException>(()=>attempt);
+        Assert.Equal("GITHUB_SYNC_AUTHORIZATION_CHANGED",error.Code);
+        await using var verify=Open();
+        Assert.Empty(await verify.GitSyncJobs.Where(x=>x.ProjectGitRepositoryId==f.Links[0].Id).ToArrayAsync());
+        var link=await verify.ProjectGitRepositories.AsNoTracking().SingleAsync(x=>x.Id==f.Links[0].Id);
+        Assert.Equal(ProjectGitRepositoryAccessStatus.PendingAuthorization,link.AccessStatus); Assert.True(link.SyncPaused);
+    }
+    [ScopedManualPostgresFact]
+    public async Task NormalActivationStillCreatesInitialWhileScopedModeIsOff()
+    {
+        await using var f=await Fixture.CreateAsync();
+        await using(var setup=Open()) await setup.ProjectGitRepositories.Where(x=>x.Id==f.Links[0].Id).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.AccessStatus,ProjectGitRepositoryAccessStatus.PendingAuthorization).SetProperty(x=>x.SyncPaused,true));
+        await using var db=Open();
+        Assert.True(await new GitHubAppRepositoryActivationService(db,f.Tokens,f.Provider,f.Sync,f.App).ActivateAsync(f.Links[0].Id,default));
+        Assert.Equal(GitSyncType.Initial,Assert.Single(await db.GitSyncJobs.Where(x=>x.ProjectGitRepositoryId==f.Links[0].Id).ToArrayAsync()).SyncType);
+    }}

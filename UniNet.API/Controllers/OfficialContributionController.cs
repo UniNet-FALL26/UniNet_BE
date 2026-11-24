@@ -8,7 +8,7 @@ using UniNet.Domain;
 namespace UniNet.API.Controllers;
 
 [ApiController, Authorize(Roles = "Student"), Route("api/projects/{projectId:guid}/contribution/v2")]
-public sealed class OfficialContributionController(OfficialContributionService service) : ControllerBase
+public sealed class OfficialContributionController(OfficialContributionService service, GitContributionAdjustmentService adjustments) : ControllerBase
 {
     private Guid AccountId => Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var id)
         ? id : throw new ProjectException("UNAUTHORIZED", "Invalid login session.", 401);
@@ -55,6 +55,28 @@ public sealed class OfficialContributionController(OfficialContributionService s
     public Task<OfficialPage<GitExperimentalExcludedActivityResponse>> Exclusions(Guid projectId, Guid runId, CancellationToken ct, int page = 1, int pageSize = 20, string? category = null) => service.ExclusionsAsync(projectId, runId, AccountId, page, pageSize, category, ct);
     [HttpGet("runs/{runId:guid}/activities")]
     public Task<OfficialPage<OfficialScoredActivity>> Activities(Guid projectId, Guid runId, CancellationToken ct, int page = 1, int pageSize = 20, string? category = null) => service.ScoredAsync(projectId, runId, AccountId, page, pageSize, category, ct);
+    [HttpPost("runs/{runId:guid}/approve-and-publish")]
+    public Task<OfficialRunResponse> ApproveAndPublish(Guid projectId,Guid runId,OfficialApprovalRequest request,CancellationToken ct)=>service.ApproveAndPublishAsync(projectId,runId,AccountId,request,ct);
+    [HttpGet("version-capabilities")]
+    public Task<OfficialVersionCapabilities> VersionCapabilities(Guid projectId,CancellationToken ct)=>service.VersionCapabilitiesAsync(projectId,AccountId,ct);
+    [HttpGet("versions")]
+    public Task<OfficialPage<OfficialVersionResponse>> Versions(Guid projectId,CancellationToken ct,int page=1,int pageSize=20)=>service.VersionsAsync(projectId,AccountId,page,pageSize,ct);
+    [HttpGet("adjustments/latest")]
+    public Task<CombinedAdjustmentResponse> LatestAdjustment(Guid projectId,CancellationToken ct)=>adjustments.LatestAsync(projectId,AccountId,ct);
+    [HttpGet("adjustments/by-request/{requestId:guid}")]
+    public Task<CombinedAdjustmentResponse> AdjustmentByRequest(Guid projectId,Guid requestId,CancellationToken ct)=>adjustments.ByRequestAsync(projectId,requestId,AccountId,ct);
+    [HttpPost("adjustments")]
+    public Task<CombinedAdjustmentResponse> StartAdjustment(Guid projectId,CombinedAdjustmentStartRequest request,CancellationToken ct)=>adjustments.StartAsync(projectId,AccountId,request,ct);
+    [HttpGet("adjustments/{adjustmentId:guid}")]
+    public Task<CombinedAdjustmentResponse> ReadAdjustment(Guid projectId,Guid adjustmentId,CancellationToken ct)=>adjustments.ReadAsync(projectId,adjustmentId,AccountId,ct);
+    [HttpPost("adjustments/{adjustmentId:guid}/abandon")]
+    public Task<CombinedAdjustmentResponse> AbandonAdjustment(Guid projectId,Guid adjustmentId,CancellationToken ct)=>adjustments.AbandonAsync(projectId,adjustmentId,AccountId,ct);
+    [HttpPost("adjustments/{adjustmentId:guid}/git-snapshot")]
+    public Task<CombinedAdjustmentResponse> CaptureAdjustment(Guid projectId,Guid adjustmentId,CancellationToken ct)=>adjustments.CaptureAsync(projectId,adjustmentId,AccountId,ct);
+    [HttpPost("adjustments/{adjustmentId:guid}/peer-round")]
+    public Task<CombinedAdjustmentResponse> OpenAdjustmentPeer(Guid projectId,Guid adjustmentId,CancellationToken ct)=>adjustments.OpenPeerAsync(projectId,adjustmentId,AccountId,ct);
+    [HttpPost("adjustments/{adjustmentId:guid}/run")]
+    public Task<CombinedAdjustmentResponse> CreateAdjustmentRun(Guid projectId,Guid adjustmentId,CancellationToken ct)=>adjustments.CreateRunAsync(projectId,adjustmentId,AccountId,ct);
     [HttpGet("results/me")]
     public Task<OfficialMemberResultResponse> MyResult(Guid projectId, CancellationToken ct) => service.MyResultAsync(projectId, AccountId, ct);
 }

@@ -1,0 +1,4 @@
+namespace UniNet.Application;
+public sealed record CombinedAdjustmentStartRequest(Guid RequestId);
+public sealed record CombinedAdjustmentRepository(Guid AssociationId, string RepositoryName, Guid JobId, string JobStatus, string? ErrorCode, long ObservationCount, long NewVersionCount, bool CheckpointsComplete);
+public sealed record CombinedAdjustmentResponse(bool Supported, bool ExecutionAvailable, Guid? Id, Guid ProjectId, string State, int Revision, DateTimeOffset? CreatedAt, DateTimeOffset? Deadline, Guid? GitSnapshotId, Guid? PeerCohortId, Guid? PeerSnapshotId, Guid? RunId, Guid? CurrentPublishedRunId, IReadOnlyList<CombinedAdjustmentRepository> Repositories, IReadOnlyList<string> Blockers, string TimelinePolicy, Guid? RequestId = null, bool CanRestart = false, string EligibleChangeState = "NotEvaluated");
