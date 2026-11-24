@@ -28,7 +28,7 @@ public sealed class AssessorActivationService(
         var row = await db.AssessorOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
         if (row?.ContractStorageKey is null || row.ContractSha256 is null)
             throw new AuthException("CONTRACT_UNAVAILABLE", "Hồ sơ chưa có hợp đồng.", 404);
-        return await files.Read(row.ContractStorageKey, row.ContractSha256, ct);
+        return await files.Export(row, ct);
     }
 
     public async Task<object> Review(Guid actor, Guid id, CancellationToken ct)

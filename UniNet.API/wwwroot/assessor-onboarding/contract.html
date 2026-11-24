@@ -4,39 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Xác nhận hợp đồng UniNet</title>
-  <style>
-    body { font: 1rem system-ui, sans-serif; margin: 2rem auto; max-width: 48rem; padding: 0 1rem; }
-    label { display: block; margin: 1rem 0; }
-    input[type=text] { font: inherit; padding: .5rem; max-width: 95%; }
-    button { font: inherit; padding: .5rem 1rem; margin: .3rem 0; }
-    iframe { width: 100%; height: 36rem; border: 1px solid #aaa; }
-  </style>
+  <title>Ký hợp đồng thẩm định | UniNet</title>
+  <link rel="stylesheet" href="./onboarding.css">
   <script src="./contract.js" defer></script>
 </head>
 <body>
-<main>
-  <h1>Hợp đồng thẩm định viên</h1>
-  <p id="message" role="status">Xác thực email để mở hợp đồng của bạn.</p>
-  <section id="read">
-    <button id="read-otp" type="button">Gửi OTP mở hợp đồng</button>
-    <form id="verify">
-      <label>OTP từ email <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6"></label>
-      <button>Xác thực và mở hợp đồng</button>
-    </form>
-  </section>
-  <section id="contract" hidden>
-    <p id="version"></p>
-    <iframe id="pdf" title="Nội dung hợp đồng"></iframe>
-    <p><a id="download" target="_blank" rel="noopener noreferrer">Mở hoặc tải PDF</a></p>
-    <button id="sign-otp" type="button">Gửi OTP xác nhận ký</button>
-    <form id="sign">
-      <label>Họ tên ký xác nhận <input name="signedName" type="text" required maxlength="255" autocomplete="name"></label>
-      <label>OTP ký từ email <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6"></label>
-      <label><input name="accepted" type="checkbox" required> <span id="statement"></span></label>
-      <button>Ký xác nhận hợp đồng</button>
-    </form>
-  </section>
-</main>
+  <header class="brand"><span class="brand-mark" aria-hidden="true">U</span> UniNet</header>
+  <main class="contract-main">
+    <div class="intro"><h1>Hợp đồng thẩm định</h1><p id="version" class="muted"></p></div>
+    <p id="message" role="status">Đang mở hợp đồng…</p>
+    <section id="contract" class="card" hidden>
+      <article id="document" aria-label="Hợp đồng và phụ lục"></article>
+      <div class="actions"><button id="download" class="secondary" type="button">Tải PDF</button></div>
+      <form id="sign">
+        <label>Họ và tên người ký <input name="signedName" required maxlength="255" autocomplete="name"></label>
+        <label class="agree"><input name="accepted" type="checkbox" required> <span id="statement"></span></label>
+        <div class="actions"><button type="submit">Xác nhận ký hợp đồng</button></div>
+      </form>
+      <p id="signed" hidden></p>
+    </section>
+  </main>
 </body>
 </html>

@@ -24,7 +24,7 @@ public sealed class AssessorContractFileTests
         {
             var template = Path.Combine(root, "template.txt");
             await File.WriteAllTextAsync(template,
-                "HỢP ĐỒNG THỬ NGHIỆM\n{{FullName}}\n{{Email}}\n{{CitizenId}}\n{{BankAccountHolder}}\n{{SignatureStatement}}\n" +
+                "HỢP ĐỒNG THỬ NGHIỆM\nMã hồ sơ và số tài khoản\n{{FullName}}\n{{Email}}\n{{CitizenId}}\n{{BankAccountHolder}}\n{{SignatureStatement}}\n" +
                 new string('W', 255) + "\n" +
                 string.Join("\n", Enumerable.Repeat("Đây là nội dung kiểm thử để xác nhận phân trang và hiển thị tiếng Việt.", 55)), Encoding.UTF8);
             var files = new AssessorContractFiles(Options.Create(new AssessorContractOptions
@@ -35,10 +35,13 @@ public sealed class AssessorContractFileTests
             var stored = await files.Generate(new AssessorOnboarding
             {
                 FullName = "Nguyễn Thị Ánh", EmailNormalized = "test@example.test"
-            }, new("000000000000", "0123456789", "Ngân hàng thử nghiệm", "000123456789", "NGUYEN THI ANH"), default);
+            }, new("000000000000", "Ngân hàng thử nghiệm", "000123456789", "NGUYEN THI ANH"), default);
             var bytes = await files.Read(stored.Key, stored.Sha256, default);
             using var pdf = PdfDocument.Open(bytes);
             Assert.True(pdf.NumberOfPages >= 2);
+            var onlineText = AssessorContractService.ExtractContractPage(pdf.GetPage(1));
+            Assert.Contains("HỢP ĐỒNG THỬ NGHIỆM", onlineText);
+            Assert.Contains("Mã hồ sơ và số tài khoản", onlineText);
             var text = string.Join("\n", pdf.GetPages().Select(p => p.Text));
             Assert.Contains("Nguyễn Thị Ánh", text);
             Assert.Contains("000000000000", text);
@@ -49,8 +52,23 @@ public sealed class AssessorContractFileTests
                     Assert.InRange(letter.BoundingBox.Right, 50, 545);
                     Assert.InRange(letter.BoundingBox.Bottom, 40, 805);
                 });
+            var signedBytes = await files.Export(new AssessorOnboarding
+            {
+                ContractStorageKey = stored.Key, ContractSha256 = stored.Sha256,
+                SignedName = "Nguyễn Thị Anh", SignedAt = DateTimeOffset.UtcNow,
+                EmailNormalized = "test@example.test", TemplateVersion = "TEST-V1",
+                SignatureStatement = "Tôi đồng ý với hợp đồng."
+            }, default);
+            using var signedPdf = PdfDocument.Open(signedBytes);
+            Assert.Equal(pdf.NumberOfPages + 1, signedPdf.NumberOfPages);
+            Assert.Contains("Nguyễn Thị Anh", signedPdf.GetPage(signedPdf.NumberOfPages).Text);
+            Assert.Contains(stored.Sha256, signedPdf.GetPage(signedPdf.NumberOfPages).Text);
             var preview = Environment.GetEnvironmentVariable("ASSESSOR_TEST_PDF_PREVIEW");
             if (!string.IsNullOrWhiteSpace(preview)) await File.WriteAllBytesAsync(preview, bytes);
+            var missing = await Assert.ThrowsAsync<UniNet.Application.AuthException>(() =>
+                files.Read("missing/contract.pdf", stored.Sha256, default));
+            Assert.Equal("CONTRACT_FILE_MISSING", missing.Code);
+            Assert.Equal(404, missing.Status);
             await File.WriteAllBytesAsync(Path.Combine(root, "private", stored.Key), new byte[] { 0, 1, 2 });
             await Assert.ThrowsAsync<InvalidOperationException>(() => files.Read(stored.Key, stored.Sha256, default));
             await Assert.ThrowsAsync<InvalidOperationException>(() => files.Read("../outside.pdf", stored.Sha256, default));

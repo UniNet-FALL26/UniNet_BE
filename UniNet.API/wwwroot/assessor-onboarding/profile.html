@@ -4,28 +4,39 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Hồ sơ thẩm định viên UniNet</title>
-  <style>
-    body { font: 1rem system-ui, sans-serif; margin: 2rem auto; max-width: 34rem; padding: 0 1rem; }
-    label { display: block; margin-bottom: 1rem; }
-    input { box-sizing: border-box; width: 100%; font: inherit; padding: .5rem; }
-    button { font: inherit; padding: .5rem 1rem; }
-  </style>
+  <title>Thông tin hợp đồng thẩm định | UniNet</title>
+  <link rel="stylesheet" href="./onboarding.css">
   <script src="./profile.js" defer></script>
 </head>
 <body>
+  <header class="brand"><span class="brand-mark" aria-hidden="true">U</span> UniNet</header>
   <main>
-    <h1>Hồ sơ thẩm định viên UniNet</h1>
+    <div class="intro">
+      <h1>Thông tin hợp đồng thẩm định</h1>
+      <p>Dành cho Assessor (Thẩm định viên)</p>
+      <p class="muted">Vui lòng cung cấp thông tin để hoàn tất hồ sơ hợp đồng và nhận thù lao thẩm định trên UniNet.</p>
+    </div>
     <p id="message" role="status">Đang kiểm tra lời mời…</p>
-    <form id="profile" hidden>
-      <label>Email <input id="email" type="email" readonly></label>
-      <label>Họ và tên <input name="fullName" autocomplete="name" required maxlength="255"></label>
-      <label>Số CCCD <input name="citizenId" inputmode="numeric" required pattern="[0-9]{12}"></label>
-      <label>Mã số thuế <input name="taxCode" required pattern="[0-9]{10}(-?[0-9]{3})?"></label>
-      <label>Tên ngân hàng <input name="bankName" required maxlength="150"></label>
-      <label>Số tài khoản <input name="bankAccountNumber" required pattern="[A-Za-z0-9]{1,34}"></label>
-      <label>Tên chủ tài khoản <input name="bankAccountHolder" required maxlength="255"></label>
-      <button type="submit">Nộp hồ sơ</button>
+    <form id="profile" class="card" hidden>
+      <section aria-labelledby="personal">
+        <h2 id="personal">Thông tin cá nhân</h2>
+        <div class="grid">
+          <label>Email <span>*</span><input id="email" type="email" readonly></label>
+          <label>Họ và tên <span>*</span><input name="fullName" autocomplete="name" required maxlength="255" placeholder="Nhập họ và tên theo CCCD"></label>
+          <label>Số CCCD / Căn cước công dân <span>*</span><input name="citizenId" inputmode="numeric" required pattern="[0-9]{12}" maxlength="12" placeholder="Nhập số CCCD (12 số)"></label>
+        </div>
+      </section>
+      <section aria-labelledby="payment">
+        <h2 id="payment">Thông tin thanh toán <small>(Nhận thù lao thẩm định)</small></h2>
+        <div class="grid">
+          <label>Tên ngân hàng <span>*</span><input name="bankName" list="banks" required maxlength="150" placeholder="Chọn hoặc nhập tên ngân hàng"></label>
+          <datalist id="banks"><option>Vietcombank</option><option>BIDV</option><option>VietinBank</option><option>Agribank</option><option>Techcombank</option><option>MB</option><option>ACB</option><option>VPBank</option><option>TPBank</option><option>Sacombank</option><option>VIB</option></datalist>
+          <label>Số tài khoản <span>*</span><input name="bankAccountNumber" required pattern="[A-Za-z0-9]{1,34}" maxlength="34" placeholder="Nhập số tài khoản"></label>
+          <label class="wide">Tên chủ tài khoản <span>*</span><input name="bankAccountHolder" required maxlength="255" placeholder="Nhập tên chủ tài khoản đúng với ngân hàng"></label>
+        </div>
+      </section>
+      <aside><strong>Lưu ý</strong><ul><li>Tài khoản ngân hàng được dùng để thanh toán thù lao thẩm định.</li><li>Vui lòng kiểm tra thông tin trùng khớp với thông tin ngân hàng.</li></ul></aside>
+      <div class="actions"><button type="submit">Xác nhận</button></div>
     </form>
   </main>
 </body>

@@ -1,0 +1,293 @@
+CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
+Độc lập – Tự do – Hạnh phúc
+
+HỢP ĐỒNG CỘNG TÁC VIÊN THẨM ĐỊNH DỰ ÁN
+Số: {{ContractCode}}/HĐCTV-UNINET
+Căn cứ Bộ luật Dân sự số 91/2015/QH13; Luật Giao dịch điện tử số 20/2023/QH15; các quy định
+pháp luật hiện hành có liên quan và nhu cầu hợp tác tự nguyện của hai bên.
+Ngày lập hợp đồng: {{SigningDate}}. Các bên gồm:
+
+BÊN A: ĐƠN VỊ VẬN HÀNH NỀN TẢNG UNINET
+Tên công ty: {{CompanyName}}
+Mã số doanh nghiệp: {{CompanyTaxCode}}
+Địa chỉ trụ sở: {{CompanyAddress}}
+Người đại diện: {{RepresentativeName}} – Chức vụ: {{RepresentativePosition}}
+Email: {{CompanyEmail}} – Điện thoại: {{CompanyPhone}}
+
+BÊN B: CỘNG TÁC VIÊN THẨM ĐỊNH (ASSESSOR)
+Họ và tên: {{FullName}}
+Số CCCD/Căn cước: {{IdentityNumber}}
+Email: {{Email}}
+Ngân hàng: {{BankName}}
+Số tài khoản: {{BankAccountNumber}}
+Tên chủ tài khoản: {{BankAccountHolder}}
+Hai bên thống nhất ký kết hợp đồng với các điều khoản sau:
+
+Điều 1. Mục đích và phạm vi hợp tác
+1. Bên A hợp tác với Bên B để cung cấp dịch vụ đánh giá, nhận xét và thẩm định chuyên môn
+đối với các dự án trên UniNet.
+2. Bên B thực hiện công việc dựa trên kiến thức, kinh nghiệm và lĩnh vực chuyên môn đã được
+xác minh.
+3. Hoạt động thẩm định nhằm hỗ trợ sinh viên nâng cao năng lực, hoàn thiện dự án và phát
+triển hồ sơ nghề nghiệp.
+4. Kết quả mang tính đánh giá chuyên môn, không thay thế văn bằng, chứng chỉ hoặc kết luận
+kiểm định của cơ quan có thẩm quyền.
+5. Bên B không được nhân danh Bên A thực hiện giao dịch hoặc cam kết ngoài phạm vi hợp
+đồng nếu chưa được ủy quyền.
+
+Điều 2. Hình thức hợp tác
+1. Bên B tham gia với tư cách cộng tác viên cung cấp dịch vụ độc lập.
+2. Bên B chủ động sắp xếp thời gian, địa điểm và phương pháp thực hiện, bảo đảm thời hạn và
+chất lượng đã thỏa thuận.
+3. Bên B có quyền tiếp nhận hoặc từ chối yêu cầu trước khi xác nhận thực hiện.
+4. Bên A không cam kết số lượng yêu cầu hoặc thu nhập tối thiểu.
+5. Bản chất quan hệ hợp tác phải phù hợp với thực tế thực hiện và pháp luật hiện hành.
+
+Điều 3. Nội dung công việc
+1. Tiếp nhận yêu cầu phù hợp với chuyên môn.
+2. Nghiên cứu thông tin, tài liệu, mã nguồn, hình ảnh, video và sản phẩm minh chứng.
+3. Đánh giá theo bộ tiêu chí UniNet công bố.
+4. Chấm điểm, nhận xét ưu điểm, hạn chế và đề xuất cải thiện.
+5. Hoàn thành báo cáo đúng thời hạn.
+6. Giải trình hoặc bổ sung khi có yêu cầu hợp lý.
+7. Phối hợp xử lý khiếu nại liên quan đến kết quả do mình thực hiện.
+
+Điều 4. Quy trình thực hiện thẩm định
+1. Bên B nhận yêu cầu qua UniNet, kiểm tra thông tin và xác nhận tiếp nhận.
+2. Bên B đánh giá trong thời hạn xác định đối với từng yêu cầu và gửi kết quả lên hệ thống.
+3. Bên A hoặc nhân viên được phân quyền kiểm tra tính đầy đủ, hợp lệ và chất lượng kết quả.
+4. Nếu chưa đạt yêu cầu, Bên B bổ sung hoặc chỉnh sửa trong thời hạn thông báo.
+5. Sau khi xác nhận hợp lệ, yêu cầu được ghi nhận hoàn thành và thù lao được ghi nhận theo
+chính sách thanh toán.
+
+Điều 5. Quyền và nghĩa vụ của Bên A
+5.1. Quyền: Xác minh thông tin, năng lực và kinh nghiệm; ban hành tiêu chí, quy trình và tiêu
+chuẩn; kiểm tra chất lượng; yêu cầu giải trình, bổ sung hoặc chỉnh sửa; tạm ngừng phân phối
+yêu cầu khi có dấu hiệu vi phạm; xử lý vi phạm và chấm dứt hợp đồng theo thỏa thuận.
+5.2. Nghĩa vụ: Cung cấp nền tảng, công cụ, thông tin và tiêu chí rõ ràng; thông báo thù lao
+trước khi tiếp nhận; thanh toán đầy đủ, đúng hạn công việc đã nghiệm thu; bảo vệ dữ liệu cá
+nhân và thanh toán; giải quyết phản ánh, khiếu nại; thực hiện nghĩa vụ thuế và pháp lý thuộc
+trách nhiệm của mình.
+
+Điều 6. Quyền và nghĩa vụ của Bên B
+6.1. Quyền: Lựa chọn yêu cầu phù hợp; được cung cấp thông tin cần thiết; độc lập trong nhận
+định chuyên môn; nhận thù lao; theo dõi lịch sử thẩm định, thu nhập và giao dịch; khiếu nại
+quyết định xử lý hoặc đối soát; đề nghị chấm dứt hợp đồng.
+6.2. Nghĩa vụ: Cung cấp hồ sơ trung thực; đánh giá khách quan, công bằng; không nhận lợi ích
+riêng nhằm làm sai lệch kết quả; không giao tài khoản hoặc chuyển giao công việc trái phép;
+không sao chép, phát tán hoặc sử dụng trái phép tài liệu; không phân biệt đối xử, xúc phạm
+người dùng; tuân thủ bảo mật, đạo đức và pháp luật; chịu trách nhiệm về nội dung đánh giá.
+
+Điều 7. Thù lao và phương thức thanh toán
+1. Thù lao được xác định theo từng yêu cầu và hiển thị trước khi tiếp nhận.
+2. Thù lao được ghi nhận khi công việc hoàn thành và được nghiệm thu.
+3. Thù lao được ghi nhận vào số dư thu nhập trên UniNet.
+4. Bên B có thể yêu cầu thanh toán về tài khoản ngân hàng đã đăng ký.
+5. Bên A đối soát, khấu trừ thuế nếu pháp luật yêu cầu và chuyển khoản số tiền thực nhận.
+6. Bên A không tự ý thay đổi thù lao của yêu cầu đã tiếp nhận, trừ khi hai bên thỏa thuận khác.
+7. Phí, thời hạn và điều kiện giao dịch được quy định tại Phụ lục 01.
+
+Điều 8. Tiêu chuẩn chất lượng thẩm định
+Kết quả phải đúng đối tượng, nội dung và phạm vi; có căn cứ chuyên môn; điểm số phù hợp
+nhận xét; nhận xét cụ thể, có tính xây dựng; không sao chép máy móc; không chứa thông tin
+sai lệch, xúc phạm hoặc thiếu căn cứ; hoàn thành đúng hạn.
+Bên A không được yêu cầu thay đổi kết luận chuyên môn chỉ nhằm đáp ứng mong muốn của
+người đăng ký.
+
+Điều 9. Xung đột lợi ích
+1. Bên B thông báo quan hệ cá nhân, tài chính hoặc lợi ích trực tiếp liên quan đến dự án.
+2. Không cố tình thiên vị dự án của người thân, người quen, đối tác hoặc tổ chức liên quan.
+3. Khi xung đột có khả năng ảnh hưởng tính khách quan, phải từ chối hoặc đề nghị chuyển
+giao yêu cầu.
+4. Nghiêm cấm thông đồng, mua bán kết quả hoặc nâng điểm sai thực tế.
+
+Điều 10. Bảo mật thông tin và dữ liệu cá nhân
+1. Bên B bảo mật thông tin tiếp cận trong quá trình hợp tác, gồm dữ liệu sinh viên, tài liệu, mã
+nguồn, thông tin doanh nghiệp và dữ liệu nội bộ chưa công khai.
+2. Chỉ sử dụng thông tin để thực hiện yêu cầu; không cung cấp cho bên thứ ba hoặc tải lên dịch
+vụ bên ngoài khi chưa có căn cứ và sự cho phép phù hợp.
+3. Bên A bảo vệ dữ liệu cá nhân của Bên B theo pháp luật.
+4. Nghĩa vụ bảo mật tiếp tục sau khi hợp đồng chấm dứt theo tính chất thông tin và pháp luật.
+
+Điều 11. Quyền sở hữu trí tuệ
+1. Quyền đối với dự án, mã nguồn, tài liệu và sản phẩm thuộc chủ thể có quyền hợp pháp.
+2. Cung cấp tài liệu thẩm định không đồng nghĩa chuyển giao quyền sở hữu trí tuệ.
+3. Bên B không sử dụng sản phẩm sinh viên để thương mại, nghiên cứu riêng hoặc công bố khi
+chưa được phép.
+4. Bên B đồng ý cho Bên A sử dụng, lưu trữ, hiển thị và cung cấp báo cáo cho các bên có quyền
+tiếp cận nhằm phục vụ UniNet.
+5. Các quyền khác thực hiện theo pháp luật và thỏa thuận hợp pháp.
+
+Điều 12. Xử lý khiếu nại
+1. Bên A tiếp nhận và kiểm tra phản ánh.
+2. Bên B giải trình, cung cấp căn cứ và phối hợp xử lý.
+3. Bên A có thể yêu cầu đánh giá lại hoặc chuyển cho thẩm định viên khác khi có căn cứ.
+4. Chỉ tạm giữ khoản thù lao liên quan trực tiếp đến tranh chấp.
+5. Bên A thông báo lý do, phạm vi và thời hạn dự kiến giải quyết.
+6. Khiếu nại không mặc nhiên đồng nghĩa với vi phạm.
+
+Điều 13. Vi phạm hợp đồng và trách nhiệm bồi thường
+Tùy tính chất, mức độ và hậu quả, bên vi phạm có thể phải khắc phục, thực hiện lại công việc,
+nhận cảnh báo, tạm ngừng tiếp nhận yêu cầu, chấm dứt quyền thẩm định, hoàn trả khoản
+nhận không đúng căn cứ hoặc bồi thường thiệt hại thực tế theo pháp luật.
+Bên bị xem xét có quyền được thông báo, giải trình và khiếu nại. Thù lao hợp lệ không liên
+quan vi phạm vẫn phải được thanh toán.
+
+Điều 14. Thời hạn hợp đồng
+1. Có hiệu lực khi hai bên hoàn tất ký kết hợp lệ.
+2. Thời hạn 12 tháng kể từ ngày có hiệu lực, trừ thỏa thuận khác.
+3. Gia hạn bằng văn bản hoặc phương thức điện tử hợp lệ.
+4. Phụ lục và thỏa thuận bổ sung được chấp thuận là bộ phận không tách rời.
+
+Điều 15. Chấm dứt hợp đồng
+Hợp đồng chấm dứt khi hết hạn không gia hạn; hai bên thống nhất; một bên thông báo trước ít
+nhất 15 ngày (trừ thỏa thuận hoặc căn cứ pháp luật khác); vi phạm nghiêm trọng; Bên B không
+còn đáp ứng điều kiện chuyên môn hoặc pháp lý; hoặc trường hợp khác theo pháp luật.
+Hai bên hoàn tất hoặc bàn giao công việc đang thực hiện, đối soát công nợ và thanh toán thù
+lao hợp lệ còn tồn đọng.
+
+Điều 16. Sự kiện bất khả kháng
+Bên bị ảnh hưởng thông báo trong thời gian hợp lý. Hai bên phối hợp xác định phương án tiếp
+tục, gia hạn hoặc tạm ngừng nghĩa vụ. Trách nhiệm được xác định theo pháp luật.
+
+Điều 17. Giải quyết tranh chấp
+Ưu tiên thương lượng và hòa giải. Nếu không đạt thỏa thuận, mỗi bên có quyền yêu cầu Tòa án
+có thẩm quyền tại Việt Nam giải quyết. Hợp đồng chịu sự điều chỉnh của pháp luật Việt Nam.
+
+Điều 18. Ký kết hợp đồng điện tử
+1. Hai bên có thể giao kết điện tử qua UniNet.
+2. Bên B được cung cấp toàn bộ hợp đồng và phụ lục trước khi xác nhận.
+3. Hệ thống ghi nhận danh tính, phiên bản, thời điểm và thông tin cần thiết để chứng minh
+giao kết.
+4. Việc ký phải đáp ứng điều kiện pháp lý áp dụng đối với giao dịch điện tử và phương thức
+xác thực.
+5. Mỗi bên được cung cấp bản hợp đồng điện tử để lưu trữ và đối chiếu.
+
+Điều 19. Điều khoản chung
+Hai bên xác nhận đã đọc, hiểu và tự nguyện đồng ý. Mọi sửa đổi ảnh hưởng quyền và nghĩa vụ
+phải được hai bên chấp thuận. Nếu một điều khoản không có hiệu lực, các điều khoản còn lại
+vẫn áp dụng nếu có thể thực hiện độc lập.
+ĐẠI DIỆN BÊN A        BÊN B – THẨM ĐỊNH VIÊN
+
+Ký và ghi rõ họ tên       Ký và ghi rõ họ tên
+PHỤ LỤC 01
+
+CHÍNH SÁCH THÙ LAO VÀ THANH TOÁN THẨM ĐỊNH
+Kèm theo Hợp đồng số: {{ContractCode}}/HĐCTV-UNINET
+
+Điều 1. Nguyên tắc xác định thù lao
+Thù lao dựa trên chuyên môn, độ phức tạp, phạm vi và yêu cầu thẩm định; được thông báo
+trước khi tiếp nhận.
+
+Điều 2. Cơ cấu phí thẩm định
+Tổng phí dịch vụ là khoản người dùng thanh toán; phí nền tảng là doanh thu Bên A theo chính
+sách công bố; thù lao là khoản Bên B được hưởng; thuế và khấu trừ theo pháp luật; thực nhận
+là số tiền sau khấu trừ hợp lệ.
+
+Điều 3. Điều kiện ghi nhận thù lao
+Yêu cầu đã thanh toán hợp lệ; báo cáo hoàn thành; Bên A kiểm tra và xác nhận; không có
+tranh chấp chưa giải quyết ảnh hưởng trực tiếp khoản thù lao.
+
+Điều 4. Yêu cầu thanh toán
+Bên B gửi yêu cầu qua UniNet. Tài khoản ngân hàng phải đăng ký và xác minh.
+Mức thanh toán tối thiểu: {{MinimumWithdrawalAmount}} VNĐ.
+Thời gian xử lý: {{PaymentProcessingDays}} ngày làm việc từ khi nhận yêu cầu hợp lệ.
+Bên A cung cấp thông tin đối soát và trạng thái giao dịch.
+
+Điều 5. Thuế thu nhập cá nhân
+Bên A khấu trừ, kê khai và nộp thuế thay khi pháp luật quy định. Bên B cung cấp thông tin cần
+thiết và thực hiện nghĩa vụ thuế thuộc trách nhiệm cá nhân.
+
+Điều 6. Hoàn tiền và hủy yêu cầu
+Hủy trước khi thực hiện không phát sinh thù lao, trừ thỏa thuận khác. Hủy khi đang thực hiện:
+xác định thù lao theo phần công việc hợp lệ và nguyên nhân hủy. Nếu không đạt do lỗi Bên B,
+Bên A có quyền yêu cầu khắc phục trước nghiệm thu. Thu hồi hoặc điều chỉnh phải có căn cứ,
+thông báo và đối soát rõ ràng.
+
+Điều 7. Hiệu lực
+Phụ lục là bộ phận không tách rời của hợp đồng, có hiệu lực khi hai bên chấp thuận.
+
+ĐẠI DIỆN BÊN A                            BÊN B – THẨM ĐỊNH VIÊN
+
+Ký và ghi rõ họ tên                           Ký và ghi rõ họ tên
+PHỤ LỤC 02
+
+CAM KẾT BẢO MẬT THÔNG TIN VÀ BẢO VỆ DỮ LIỆU
+Kèm theo Hợp đồng số: {{ContractCode}}/HĐCTV-UNINET
+
+Điều 1. Phạm vi thông tin bảo mật
+Dữ liệu cá nhân, hồ sơ năng lực, liên hệ; ý tưởng, tài liệu, kế hoạch dự án; mã nguồn, cơ sở dữ
+liệu, kiến trúc; tài khoản, mật khẩu, khóa API; kết quả chưa công bố; thông tin tài chính và dữ
+liệu nội bộ.
+
+Điều 2. Cam kết của thẩm định viên
+1. Chỉ truy cập dữ liệu cần thiết.
+2. Không sao chép, phát tán, mua bán hoặc chuyển giao trái phép.
+3. Không sử dụng ý tưởng, mã nguồn hoặc tài liệu sinh viên cho dự án cá nhân khi chưa được
+phép.
+4. Không chia sẻ tài khoản.
+5. Không đưa tài liệu bảo mật lên AI, kho công cộng hoặc dịch vụ bên thứ ba khi chưa được
+phép.
+6. Không lưu trữ lâu hơn cần thiết.
+7. Thông báo ngay khi phát hiện rò rỉ hoặc mất an toàn thông tin.
+8. Hoàn trả hoặc xóa dữ liệu không còn cần thiết khi kết thúc công việc, trừ trường hợp pháp
+luật yêu cầu lưu giữ.
+
+Điều 3. Ngoại lệ bảo mật
+Thông tin đã công khai hợp pháp, được chủ thể có quyền cho phép công bố hoặc phải cung cấp
+theo yêu cầu hợp pháp của cơ quan có thẩm quyền.
+
+Điều 4. Xử lý vi phạm
+Bên vi phạm ngăn chặn, khắc phục hậu quả và bồi thường theo hợp đồng và pháp luật.
+
+Điều 5. Thời hạn bảo mật
+Tiếp tục sau khi hợp đồng chấm dứt đến khi thông tin công khai hợp pháp hoặc nghĩa vụ
+không còn áp dụng theo pháp luật. Bên B xác nhận đã đọc, hiểu và đồng ý tuân thủ.
+
+ĐẠI DIỆN BÊN A                        BÊN B – THẨM ĐỊNH VIÊN
+
+Ký và ghi rõ họ tên                        Ký và ghi rõ họ tên
+PHỤ LỤC 03
+
+QUY TẮC CHUYÊN MÔN VÀ ĐẠO ĐỨC THẨM ĐỊNH UNINET
+Kèm theo Hợp đồng số: {{ContractCode}}/HĐCTV-UNINET
+
+Điều 1. Tính trung thực
+Cung cấp thông tin trung thực về năng lực, kinh nghiệm, trình độ; không sử dụng hồ sơ giả
+hoặc thông tin người khác.
+
+Điều 2. Tính khách quan
+Đánh giá dựa trên chất lượng thực tế, minh chứng và tiêu chí; không để quan hệ cá nhân hoặc
+lợi ích tài chính ảnh hưởng kết quả.
+
+Điều 3. Trách nhiệm chuyên môn
+Chỉ tiếp nhận yêu cầu phù hợp năng lực và chịu trách nhiệm về nhận xét, điểm số, kết luận.
+
+Điều 4. Tôn trọng người dùng
+Ngôn ngữ lịch sự, chuyên nghiệp, xây dựng; không xúc phạm, phân biệt đối xử hoặc hạ thấp
+sinh viên.
+
+Điều 5. Chất lượng đánh giá
+Báo cáo gồm nhận xét tổng quan, đánh giá từng tiêu chí, điểm mạnh, hạn chế, đề xuất phát
+triển và kết luận chuyên môn.
+
+Điều 6. Sử dụng công cụ trí tuệ nhân tạo
+Có thể sử dụng AI hỗ trợ trong phạm vi được phép; không giao toàn bộ đánh giá cho AI, dùng
+kết quả chưa kiểm chứng hoặc cung cấp dữ liệu bảo mật trái phép. Thẩm định viên chịu trách
+nhiệm cuối cùng.
+
+Điều 7. Các hành vi nghiêm cấm
+Mua bán kết quả; nhận lợi ích riêng để thay đổi điểm; cố tình đánh giá sai; sao chép báo cáo;
+thẩm định thay tài khoản khác; chiếm đoạt ý tưởng hoặc sản phẩm; lợi dụng vị trí để trục lợi;
+giả mạo kết quả hoặc tài liệu.
+
+Điều 8. Xử lý vi phạm
+UniNet có quyền xem xét, cảnh báo, tạm ngừng hoặc chấm dứt quyền tham gia tùy mức độ.
+Thẩm định viên có quyền được thông báo, giải trình và khiếu nại.
+
+Điều 9. Cam kết thực hiện
+Thẩm định viên tự nguyện tuân thủ các quy tắc trong toàn bộ thời gian hợp tác.
+
+ĐẠI DIỆN BÊN A                        BÊN B – THẨM ĐỊNH VIÊN
+
+Ký và ghi rõ họ tên                        Ký và ghi rõ họ tên

@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <Content Include="Models/u2netp.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Contracts/assessor-agreement-v2.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Models/U2NET-LICENSE.txt" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
