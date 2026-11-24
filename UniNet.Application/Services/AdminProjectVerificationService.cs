@@ -52,6 +52,7 @@ public sealed class AdminProjectVerificationService(UniNetDbContext db, IConfigu
         verification.UpdatedAt = now;
         payment.FailureReason = null;
         payment.UpdatedAt = now;
+        await new AssignmentService(db).AssignConfirmedBookingAsync(verification, now, ct);
         var recipient = await db.UserProfiles.Where(p => p.Id == verification.Project.CreatorId)
             .Select(p => p.AccountId).SingleAsync(ct);
         await NotificationService.EnqueueAsync(db, [recipient],

@@ -420,9 +420,10 @@ public sealed partial class ProjectVerificationTests
                     CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
                 }] : [] }
         };
+        private static readonly Guid SpecializationId = Guid.NewGuid();
         public static Project ProjectFor(Account account) => new()
         {
-            CreatorId = account.Profile!.Id, Title = "Project", Description = "Completed project",
+            CreatorId = account.Profile!.Id, SpecializationId = SpecializationId, Title = "Project", Description = "Completed project",
             ProjectField = "IT", MemberTarget = 2, Status = ProjectStatus.Completed
         };
         public static ScheduleProjectVerificationRequest Slot()
@@ -470,7 +471,13 @@ public sealed partial class ProjectVerificationTests
             await db.Database.EnsureCreatedAsync();
             var owner = Account("Owner");
             var other = Account("Other");
-            db.Accounts.AddRange(owner, other, Account("Staff", AccountRole.Assessor));
+            var staff = Account("Staff", AccountRole.Assessor);
+            db.Accounts.AddRange(owner, other, staff);
+            db.AssessorSpecializations.Add(new()
+            {
+                Assessor = staff.Profile!,
+                Specialization = new() { Id = SpecializationId, Code = "IT", Name = "IT" }
+            });
             var project = ProjectFor(owner);
             var package = new Package { Id = Guid.NewGuid(), Code = "VERIFICATION", Name = "Verification",
                 Type = PackageType.Verification, Role = TargetRole.Student, IsActive = true, Price = 32000 };

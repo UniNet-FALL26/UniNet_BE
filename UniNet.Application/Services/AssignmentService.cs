@@ -210,12 +210,19 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
         await AvailableVerificators(v, excludeAssignmentId).FirstOrDefaultAsync(p => p.Id == id, ct)
         ?? throw new AssignmentException("VERIFICATOR_UNAVAILABLE", "Verificator is inactive, ineligible or has a conflicting schedule.", 409);
 
-    private VerificationAssignment AddAssignment(ProjectVerification v, UserProfile user, UserProfile admin, DateTimeOffset now)
+    internal async Task AssignConfirmedBookingAsync(ProjectVerification verification, DateTimeOffset now, CancellationToken ct)
+    {
+        var user = await db.UserProfiles.SingleAsync(p => p.Id == verification.ReservedVerificatorUserId, ct);
+        var assignment = AddAssignment(verification, user, null, now);
+        await EnqueueAssignmentAsync(assignment, user.AccountId, null, ct);
+    }
+
+    private VerificationAssignment AddAssignment(ProjectVerification v, UserProfile user, UserProfile? admin, DateTimeOffset now)
     {
         var assignment = new VerificationAssignment
         {
             Id = Guid.NewGuid(), ProjectVerificationId = v.Id, ProjectVerification = v,
-            AssignedToUserId = user.Id, AssignedToUser = user, AdminId = admin.Id, AssignedByUser = admin,
+            AssignedToUserId = user.Id, AssignedToUser = user, AdminId = admin?.Id, AssignedByUser = admin,
             Status = VerificationAssignmentStatus.Assigned, AssignedAt = now,
             AssignmentDueAt = v.MeetingEndAt.HasValue ? now.AddHours(48) : v.ScheduledEndAt,
             ReportDueAt = v.MeetingEndAt.HasValue ? now.AddHours(48) : null, CreatedAt = now, UpdatedAt = now
@@ -226,7 +233,7 @@ public sealed class AssignmentService(UniNetDbContext db) : IAssignmentService
         return assignment;
     }
 
-    private Task EnqueueAssignmentAsync(VerificationAssignment assignment, Guid recipientAccountId, Guid senderAccountId, CancellationToken ct)
+    private Task EnqueueAssignmentAsync(VerificationAssignment assignment, Guid recipientAccountId, Guid? senderAccountId, CancellationToken ct)
         => NotificationService.EnqueueAsync(db, [recipientAccountId],
             new("verification.assignment.created", "Verification", "Bạn được phân công xác minh dự án",
                 "Bạn vừa được phân công một hồ sơ xác minh dự án. Mở hồ sơ để xem lịch và chi tiết.",

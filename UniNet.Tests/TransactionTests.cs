@@ -394,7 +394,8 @@ public sealed partial class TransactionTests
             };
             var owner = Student("Owner");
             var other = Student("Other");
-            var project = new Project { Creator = owner.Profile!, Title = "Test", Description = "Completed project",
+            var specialization = new Specialization { Code = "IT", Name = "IT" };
+            var project = new Project { Creator = owner.Profile!, Specialization = specialization, Title = "Test", Description = "Completed project",
                 ProjectField = "IT", MemberTarget = 3, Status = ProjectStatus.Completed };
             var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verification",
                 Type = PackageType.Verification, Role = TargetRole.Student, IsActive = true, Price = 37000 };
@@ -403,11 +404,13 @@ public sealed partial class TransactionTests
                 BookingStatus = VerificationBookingStatus.Held, ReservationId = Guid.NewGuid(),
                 ReservedUntil = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds()),
                 ScheduledStartAt = DateTimeOffset.UtcNow.AddDays(2), ScheduledEndAt = DateTimeOffset.UtcNow.AddDays(2).AddHours(1) };
-            db.Accounts.AddRange(owner, other, new Account { Email = "staff@test.com", Role = AccountRole.Assessor,
+            var staff = new Account { Email = "staff@test.com", Role = AccountRole.Assessor,
                 Profile = new() { FullName = "Staff", Nickname = "Staff", VerificatorAvailabilities = [new()
                 {
                     StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31)
-                }] } });
+                }] } };
+            db.Accounts.AddRange(owner, other, staff);
+            db.AssessorSpecializations.Add(new() { Assessor = staff.Profile!, Specialization = specialization });
             db.ProjectVerifications.Add(verification);
             await db.SaveChangesAsync();
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

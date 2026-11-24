@@ -122,6 +122,7 @@ public sealed partial class ProjectVerificationTests
         await Error("MEETING_SLOT_UNAVAILABLE", () => f.Service.ScheduleMeetingAsync(second, f.Other.Id, slot));
         var another = Fixture.Account("Another", AccountRole.Assessor);
         f.Db.Accounts.Add(another);
+        f.Db.AssessorSpecializations.Add(new() { Assessor = another.Profile!, SpecializationId = f.Project.SpecializationId!.Value });
         await f.Db.SaveChangesAsync();
         var available = await f.Service.GetAvailableMeetingSlotsAsync(second, f.Other.Id, slot.StartAt, slot.EndAt);
         Assert.Equal(1, Assert.Single(available.Slots).RemainingCapacity);

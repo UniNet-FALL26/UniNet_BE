@@ -7,7 +7,7 @@ public record ReplaceVerificatorRequest(Guid AssignedToUserId, string Reason);
 public enum AssignmentAction { StartMeeting, EndMeeting, Complete }
 public record UpdateAssignmentRequest(AssignmentAction Action);
 public record AssignmentResponse(Guid Id, Guid ProjectVerificationId, Guid AssignedToUserId,
-    Guid AdminId, VerificationAssignmentStatus Status, DateTimeOffset AssignedAt,
+    Guid? AdminId, VerificationAssignmentStatus Status, DateTimeOffset AssignedAt,
     DateTimeOffset? AssignmentDueAt, DateTimeOffset? ReportDueAt, DateTimeOffset? ReplacedAt,
     string? ReplacementReason, Guid? ReplacedById, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     DateTimeOffset? ScheduledStartAt, DateTimeOffset? ScheduledEndAt,

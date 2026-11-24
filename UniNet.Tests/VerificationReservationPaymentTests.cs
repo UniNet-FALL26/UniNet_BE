@@ -91,7 +91,55 @@ public sealed partial class TransactionTests
         var error = await Assert.ThrowsAsync<ProjectVerificationException>(() => new ProjectVerificationService(f.Db, f.Configuration)
             .ScheduleMeetingAsync(f.Verification.Id, f.Owner.Id, new(f.Verification.ScheduledStartAt!.Value.AddHours(1),
                 f.Verification.ScheduledEndAt!.Value.AddHours(1))));
-        Assert.Equal("BOOKING_ALREADY_PAID", error.Code);
+        Assert.Equal("VERIFICATION_LOCKED", error.Code);
+    }
+
+    [Fact]
+    public async Task ConfirmationAssignsEarliestMatchingAvailableAssessorAndAdminCanReplace()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var later = await f.Db.VerificatorAvailabilities.Include(a => a.User).SingleAsync();
+        var registered = DateTimeOffset.UtcNow.AddDays(-1);
+        later.CreatedAt = registered;
+        var specializationId = f.Project.SpecializationId!.Value;
+        void AddAssessor(string name, DateTimeOffset createdAt, bool matching, bool coversSlot)
+        {
+            var account = new UniNet.Domain.Account
+            {
+                Email = name + "@test.com", Role = UniNet.Domain.AccountRole.Assessor,
+                Profile = new()
+                {
+                    FullName = name, Nickname = name, VerificatorAvailabilities = [new()
+                    {
+                        StartAt = later.StartAt,
+                        EndAt = coversSlot ? later.EndAt : f.Verification.ScheduledStartAt!.Value,
+                        CreatedAt = createdAt
+                    }]
+                }
+            };
+            f.Db.Accounts.Add(account);
+            if (matching)
+                f.Db.AssessorSpecializations.Add(new() { Assessor = account.Profile!, SpecializationId = specializationId });
+        }
+        AddAssessor("FirstEligible", registered.AddMinutes(-1), matching: true, coversSlot: true);
+        AddAssessor("WrongSpecialization", registered.AddMinutes(-2), matching: false, coversSlot: true);
+        AddAssessor("Unavailable", registered.AddMinutes(-3), matching: true, coversSlot: false);
+        f.Other.Role = UniNet.Domain.AccountRole.Admin;
+        await f.Db.SaveChangesAsync();
+
+        var checkout = await f.CheckoutAsync();
+        f.Provider.WebhookResult = FakeProvider.Result(checkout.ProviderOrderCode!, 37000, PaymentStatus.Success);
+        await f.Service.HandlePayOSWebhookAsync(default);
+        await f.Service.HandlePayOSWebhookAsync(default);
+
+        var assignment = await f.Db.VerificationAssignments.Include(a => a.AssignedToUser).SingleAsync();
+        Assert.Equal("FirstEligible", assignment.AssignedToUser.FullName);
+        Assert.Null(assignment.AdminId);
+        var replacement = await new AssignmentService(f.Db).ReplaceVerificatorAsync(assignment.Id, f.Other.Id,
+            new(later.UserId, "Manual replacement"));
+        Assert.Equal(later.UserId, replacement.AssignedToUserId);
+        Assert.Equal(f.Other.Profile!.Id, replacement.AdminId);
+        Assert.Equal(VerificationAssignmentStatus.Cancelled, assignment.Status);
     }
 
     [Fact]
@@ -150,7 +198,9 @@ public sealed partial class TransactionTests
         Assert.NotNull(f.Verification.BookingConfirmedAt);
         await f.Service.HandlePayOSWebhookAsync(default);
         Assert.Single(await f.Db.Transactions.ToListAsync());
-        Assert.Empty(await f.Db.VerificationAssignments.ToListAsync());
+        var assignment = Assert.Single(await f.Db.VerificationAssignments.ToListAsync());
+        Assert.Null(assignment.AdminId);
+        Assert.Equal(f.Verification.ReservedVerificatorUserId, assignment.AssignedToUserId);
         Assert.Empty(await f.Db.RefundTransactions.ToListAsync());
     }
 
