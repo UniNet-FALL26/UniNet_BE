@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UniNet.Application.DTOs.Advertisement;
+using UniNet.Domain.Entities;
 
 namespace UniNet.Application.Interfaces;
 
@@ -16,6 +17,9 @@ public interface IAdvertisementService
     Task<CampaignResponse> GetCampaignByIdAsync(Guid accountId, Guid campaignId, CancellationToken ct = default);
 
     // Payment Integration
+    Task<RefundTransactionResponse> RequestCampaignRefundAsync(Guid accountId, Guid campaignId, RequestRefundRequest request, CancellationToken ct = default);
+    Task<RefundTransactionsResponse> ListRefundRequestsAsync(Guid accountId, RefundApproval? approval = null, int page = 1, int pageSize = 20, CancellationToken ct = default);
+    Task<RefundTransactionResponse> ReviewCampaignRefundAsync(Guid accountId, Guid refundId, ReviewRefundRequest request, CancellationToken ct = default);
     Task<TransactionResponse> CreateCampaignPaymentAsync(Guid accountId, Guid campaignId, CancellationToken ct = default);
     Task ProcessPaymentCallbackAsync(string providerOrderCode, bool isSuccess, CancellationToken ct = default);
     Task<CampaignResponse> SyncCampaignPaymentStatusAsync(Guid accountId, string orderCode, CancellationToken ct = default);
@@ -28,5 +32,5 @@ public interface IAdvertisementService
     Task<IReadOnlyList<CampaignResponse>> GetActiveAdsForDisplayAsync(CancellationToken ct = default);
     Task TrackImpressionAsync(Guid campaignId, CancellationToken ct = default);
     Task TrackClickAsync(Guid campaignId, CancellationToken ct = default);
-    Task<CampaignResponse> SubmitCampaignAsync(Guid accountId, Guid campaignId, CancellationToken ct = default);
+    //Task<CampaignResponse> SubmitCampaignAsync(Guid accountId, Guid campaignId, CancellationToken ct = default);
 }
