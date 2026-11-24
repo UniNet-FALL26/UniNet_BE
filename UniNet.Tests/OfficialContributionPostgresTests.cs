@@ -51,7 +51,7 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
     private static async Task<T> OfficialCall<T>(Func<OfficialContributionService, Task<T>> action)
     { await using var db = OfficialDb(); return await action(OfficialService(db)); }
 
-    private static async Task<(Guid Project, Guid[] Accounts, Guid[] Profiles, Guid Snapshot, Guid Peer)> OfficialFixture(string suffix = "")
+    private static async Task<(Guid Project, Guid[] Accounts, Guid[] Profiles, Guid Snapshot, Guid Peer)> OfficialFixture(string suffix = "", bool multipleAccounts = false)
     {
         await using var db = OfficialDb(suffix); await db.Database.MigrateAsync();
         var seed = await SeedProjectAsync(db);
@@ -106,11 +106,29 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
         var firstFacts = JsonSerializer.Deserialize<GitFrozenFacts>((await db.GitEvidenceVersions.SingleAsync(x => x.Id == firstCommitVersionId)).FrozenFactsJson)!;
         var facts2 = firstFacts with { SchemaVersion = 4, Category = "commits", ExternalObjectId = new string('c', 40), Completeness = "Complete",
             Details = firstFacts.Details! with { MissingFacts = [], ParentShas = [new string('d', 40)] } };
+        if (multipleAccounts)
+        {
+            // A second independently verified account owned by the same member as actor 102.
+            var connection = new GitHubOAuthConnection { AccountId = seed.AccountIds[1], ProviderAccountId = "99221",
+                Login = "second-verified-account", AccessTokenEncrypted = "disposable-fixture-not-a-token" };
+            var secondIdentity = new ProjectGitMemberIdentity { ProjectId = project.Id, UserProfileId = seed.ProfileIds[1],
+                ExternalAccountId = 99221, ExternalUsername = connection.Login, VerifiedByConnectionId = connection.Id };
+            db.AddRange(connection, secondIdentity, new ProjectGitMemberIdentityHistory { IdentityId = secondIdentity.Id,
+                ProjectId = project.Id, UserProfileId = seed.ProfileIds[1], ExternalAccountId = 99221,
+                ExternalUsername = connection.Login, VerifiedByConnectionId = connection.Id,
+                Action = ProjectGitMemberIdentityHistoryAction.Linked, NewStatus = ProjectGitMemberIdentityStatus.Active,
+                PerformedByProfileId = seed.ProfileIds[1], OccurredAt = completed });
+            facts2 = facts2 with { Actors = [new("author", "99221")] };
+        }
         var extra = Evidence(secondRepo.Id, secondLink.Id, secondJob.Id, "commits", "", facts2.ExternalObjectId, facts2, completed);
         extra.Version.EvidenceStatus = "Complete"; extra.Observation.RetrievalCompleteness = "Complete";
         db.AddRange(secondRepo, secondGrant, secondLink, secondJob, extra.ProviderObject, extra.Version, extra.Observation,
             new GitSyncCheckpoint { SyncJobId = secondJob.Id, Category = "commits", ScopeKey = "", Status = GitSyncCheckpointStatus.Completed,
                 ItemsProcessed = 1, LastProcessedAt = completed });
+        if (multipleAccounts)
+            db.Add(new ProjectEvidenceObservation { ProjectGitRepositoryId = secondLink.Id, GitSyncJobId = secondJob.Id,
+                GitHubRepositoryId = secondRepo.Id, GitEvidenceVersionId = extra.Version.Id, Category = "commits",
+                ScopeKey = "another-branch", ObservedAt = completed, AuthorizationSource = "app", RetrievalCompleteness = "Complete" });
         await db.SaveChangesAsync();
         var service = OfficialService(db);
         var peer = await service.OpenPeerAsync(project.Id, seed.AccountIds[0], new(seed.ProfileIds.Take(3).ToArray()), default);
@@ -121,6 +139,37 @@ public sealed partial class GitExperimentalContributionPostgresHttpTests
         Assert.Equal(2, await db.Set<ProjectGitEvidenceSnapshotEntry>().Where(x => x.SnapshotId == snapshot).Select(x => x.ProjectGitRepositoryId).Distinct().CountAsync());
         Assert.False(await db.ContributionCycles.AnyAsync(x => x.ProjectId == project.Id));
         return (project.Id, seed.AccountIds, seed.ProfileIds, snapshot, peerId);
+    }
+
+    [OfficialPostgresFact]
+    public async Task OfficialAggregatesTwoVerifiedAccountsAcrossRepositoriesAndFreezesBothOwners()
+    {
+        var f = await OfficialFixture(multipleAccounts: true);
+        var run = await OfficialCall(s => s.CreateAsync(f.Project, f.Accounts[0], new(Guid.NewGuid(), f.Snapshot, f.Peer), default));
+        Assert.Equal("Ready", run.Calculation.CalculationStatus);
+        var member = Assert.Single(run.Calculation.Results, x => x.UserId == f.Profiles[1]);
+        Assert.Equal(100m, member.CommitScore); // Two distinct eligible commits, one owner; replay adds no credit.
+        await using var db = OfficialDb();
+        var frozen = await db.GitContributionRuns.AsNoTracking().SingleAsync(x => x.Id == run.Id);
+        using var input = JsonDocument.Parse(frozen.InputSnapshotJson);
+        var activities = input.RootElement.GetProperty("eligibleActivities").EnumerateArray()
+            .Where(x => x.GetProperty("category").GetString() == "Commit" && x.GetProperty("userId").GetGuid() == f.Profiles[1]).ToArray();
+        Assert.Equal(new long[] { 102, 99221 }, activities.Select(x => x.GetProperty("providerActorId").GetInt64()).Order().ToArray());
+        Assert.Equal(2, activities.Select(x => x.GetProperty("repositoryId").GetGuid()).Distinct().Count());
+        Assert.Equal(2, await db.ProjectGitMemberIdentities.CountAsync(x => x.ProjectId == f.Project &&
+            x.UserProfileId == f.Profiles[1] && x.Status == ProjectGitMemberIdentityStatus.Active));
+        var identity = await db.ProjectGitMemberIdentities.SingleAsync(x => x.ProjectId == f.Project && x.ExternalAccountId == 99221);
+        identity.Status = ProjectGitMemberIdentityStatus.Inactive; identity.UnlinkedAt = DateTimeOffset.UtcNow;
+        db.Add(new ProjectGitMemberIdentityHistory { IdentityId = identity.Id, ProjectId = f.Project, UserProfileId = f.Profiles[1],
+            ExternalAccountId = 99221, ExternalUsername = identity.ExternalUsername, VerifiedByConnectionId = identity.VerifiedByConnectionId,
+            Action = ProjectGitMemberIdentityHistoryAction.Unlinked, NewStatus = ProjectGitMemberIdentityStatus.Inactive,
+            PreviousStatus = ProjectGitMemberIdentityStatus.Active, PerformedByProfileId = f.Profiles[1], OccurredAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync();
+        var engine = new GitExperimentalContributionService(db, new ProjectGitContributionSnapshotAccess(new(db), new(db)), TimeProvider.System);
+        await engine.ValidateOfficialAsync(frozen, f.Accounts[0], default);
+        var after = await db.GitContributionRuns.AsNoTracking().SingleAsync(x => x.Id == run.Id);
+        Assert.Equal(frozen.InputSnapshotJson, after.InputSnapshotJson); Assert.Equal(frozen.InputHash, after.InputHash);
+        Assert.Equal(frozen.ResultsJson, after.ResultsJson);
     }
 
     [OfficialPostgresFact]

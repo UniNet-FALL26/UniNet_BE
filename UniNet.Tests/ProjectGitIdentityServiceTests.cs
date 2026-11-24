@@ -17,6 +17,34 @@ namespace UniNet.Tests;
 
 public sealed class ProjectGitIdentityServiceTests
 {
+    [OfficialPostgresFact]
+    public async Task MultipleAccountsLinkUnlinkAndReactivateIndependentlyWithPostgresOwnershipGuards()
+    {
+        await using var fixture = await Fixture.CreatePostgresAsync();
+        var creator = fixture.AddStudent("multi-creator"); var member = fixture.AddStudent("multi-member");
+        var other = fixture.AddStudent("multi-other"); var project = fixture.AddProject(creator.Profile!);
+        fixture.AddMember(project, member.Profile!); fixture.AddMember(project, other.Profile!);
+        var first = fixture.AddConnection(member, 91001); var second = fixture.AddConnection(member, 91002);
+        var competing = fixture.AddConnection(other, 91001);
+        await fixture.Db.SaveChangesAsync();
+        var a = await fixture.Service.LinkAsync(member.Id, project.Id, new(first.Id), default);
+        var b = await fixture.Service.LinkAsync(member.Id, project.Id, new(second.Id), default);
+        Assert.NotEqual(a.Id, b.Id);
+        Assert.Equal(2, await fixture.Db.ProjectGitMemberIdentities.CountAsync(x => x.ProjectId == project.Id && x.Status == ProjectGitMemberIdentityStatus.Active));
+        Assert.Equal("GIT_IDENTITY_OWNERSHIP_CONFLICT", (await Assert.ThrowsAsync<GitHubIntegrationException>(() =>
+            fixture.Service.LinkAsync(other.Id, project.Id, new(competing.Id), default))).Code);
+        Assert.Equal("GIT_IDENTITY_NOT_OWNER", (await Assert.ThrowsAsync<GitHubIntegrationException>(() =>
+            fixture.Service.UnlinkAsync(other.Id, project.Id, a.Id, default))).Code);
+        await fixture.Service.UnlinkAsync(member.Id, project.Id, a.Id, default);
+        Assert.Equal(ProjectGitMemberIdentityStatus.Active, (await fixture.Db.ProjectGitMemberIdentities.AsNoTracking().SingleAsync(x => x.Id == b.Id)).Status);
+        var restored = await fixture.Service.ReactivateAsync(member.Id, project.Id, a.Id, new(first.Id), default);
+        Assert.Equal(a.Id, restored.Id);
+        await fixture.Service.UnlinkAsync(member.Id, project.Id, b.Id, default);
+        Assert.Equal(ProjectGitMemberIdentityStatus.Active, (await fixture.Db.ProjectGitMemberIdentities.AsNoTracking().SingleAsync(x => x.Id == a.Id)).Status);
+        Assert.Equal(2, await fixture.Db.ProjectGitMemberIdentities.CountAsync(x => x.ProjectId == project.Id));
+        Assert.True(await fixture.Db.ProjectGitMemberIdentityHistory.CountAsync(x => x.ProjectId == project.Id) >= 5);
+    }
+
     [Fact]
     public async Task CreatorWithoutMembershipCanLinkAndMemberCanLinkMultipleAccountsAcrossProjects()
     {
@@ -369,7 +397,7 @@ public sealed class ProjectGitIdentityServiceTests
             (await fixture.Db.ProjectGitMemberIdentities.AsNoTracking().SingleAsync()).Status);
     }
 
-    private sealed class Fixture(UniNetDbContext db, SqliteConnection connection)
+    private sealed class Fixture(UniNetDbContext db, System.Data.Common.DbConnection connection)
         : IAsyncDisposable
     {
         public UniNetDbContext Db { get; } = db;
@@ -384,6 +412,19 @@ public sealed class ProjectGitIdentityServiceTests
             var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
                 .UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
+            var fixture = new Fixture(db, connection);
+            fixture.Service = new ProjectGitIdentityService(db,
+                new GitHubCredentialService(db, fixture.Provider, fixture.Protector), fixture.Provider);
+            return fixture;
+        }
+
+        public static async Task<Fixture> CreatePostgresAsync()
+        {
+            if (!int.TryParse(Environment.GetEnvironmentVariable("UNINET_OFFICIAL_TEST_PORT"), out var port) || port is <= 1024 or 55433 or > 65535)
+                throw new InvalidOperationException("Unsafe identity PostgreSQL fixture target");
+            var connection = new Npgsql.NpgsqlConnection($"Host=127.0.0.1;Port={port};Database=uninet_multi_identity_disposable;Username=postgres;SSL Mode=Disable");
+            var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>().UseNpgsql(connection).Options);
+            await db.Database.MigrateAsync();
             var fixture = new Fixture(db, connection);
             fixture.Service = new ProjectGitIdentityService(db,
                 new GitHubCredentialService(db, fixture.Provider, fixture.Protector), fixture.Provider);
