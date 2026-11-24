@@ -85,12 +85,12 @@ public sealed class AdvertisementController(IAdvertisementService adService) : C
 
     // --- ADMIN / MODERATOR ---
 
-    [HttpGet("admin/campaigns"), Authorize(Roles = "Admin")]
+    [HttpGet("admin/campaigns"), Authorize(Roles = "Admin,Moderator")]
     public Task<CampaignsResponse> ListAllCampaigns([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
         => adService.ListAllCampaignsAsync(AccountId, page, pageSize, ct);
 
     // Admin duyệt tay (Dành cho các bài đã thanh toán nhưng không qua được cửa AI)
-    [HttpPost("admin/campaigns/{campaignId:guid}/moderate"), Authorize(Roles = "Admin")]
+    [HttpPost("admin/campaigns/{campaignId:guid}/moderate"), Authorize(Roles = "Admin,Moderator")]
     public Task<CampaignResponse> ModerateCampaign(Guid campaignId, [FromBody] ModerateCampaignRequest request, CancellationToken ct)
         => adService.ModerateCampaignAsync(AccountId, campaignId, request, ct);
 

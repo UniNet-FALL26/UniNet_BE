@@ -77,6 +77,31 @@ public sealed class PackageServiceTests
         };
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync();
+        foreach (var status in new[] { PaymentStatus.Success, PaymentStatus.Pending })
+        {
+            transaction.Status = status;
+            await db.SaveChangesAsync();
+            var errors = new[]
+            {
+                await Assert.ThrowsAsync<PackageException>(() =>
+                    service.UpdatePackageAsync(adminId, created.Id, Request() with { IsActive = false }, default)),
+                await Assert.ThrowsAsync<PackageException>(() =>
+                    service.TogglePackageStatusAsync(adminId, created.Id, default)),
+                await Assert.ThrowsAsync<PackageException>(() =>
+                    service.DeletePackageAsync(adminId, created.Id, default))
+            };
+            Assert.All(errors, error =>
+            {
+                Assert.Equal(409, error.Status);
+                Assert.Equal("PACKAGE_HAS_PURCHASES", error.Code);
+            });
+            Assert.True((await service.GetPackageAsync(adminId, created.Id, default)).IsActive);
+            var edited = await service.UpdatePackageAsync(adminId, created.Id, Request() with { Name = status.ToString() }, default);
+            Assert.Equal(status.ToString(), edited.Name);
+            Assert.True(edited.IsActive);
+        }
+        transaction.Status = PaymentStatus.Failed;
+        await db.SaveChangesAsync();
         await service.DeletePackageAsync(adminId, created.Id, default);
         db.ChangeTracker.Clear();
         var deleted = await db.Packages.SingleAsync(x => x.Id == created.Id);

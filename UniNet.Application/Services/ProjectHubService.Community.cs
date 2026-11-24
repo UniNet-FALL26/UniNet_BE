@@ -247,9 +247,10 @@ public sealed partial class ProjectHubService
                 "reject" => ProjectJoinRequestStatus.Rejected, _ => ProjectJoinRequestStatus.Cancelled };
             r.ReviewedBy = actor.Id; r.ReviewedAt = now; r.UpdatedAt = now; p.UpdatedAt = now;
             var recipientId = actor.Id == r.UserId ? p.Creator.AccountId : r.User.AccountId;
+            var outcome = decision switch { "accept" => "đã được chấp nhận", "reject" => "đã bị từ chối", _ => "đã được hủy" };
             await NotificationService.EnqueueAsync(db, [recipientId],
                 new("project.join-request.reviewed", "Project", "Cập nhật yêu cầu tham gia dự án",
-                    $"Yêu cầu tham gia dự án {p.Title} vừa được xử lý.", "Project", p.Id,
+                    $"Yêu cầu tham gia dự án {p.Title} {outcome}.", "Project", p.Id,
                     EventKey: $"project-hub-request:{r.Id}:{decision}", SenderUserId: accountId), ct);
             await db.SaveChangesAsync(ct); return MapRequest(r, p, r.User);
         }, ct);
@@ -260,12 +261,14 @@ public sealed partial class ProjectHubService
         var actor = await Actor(accountId, ct);
         await Transaction(async () => {
             var p = await Locked(id, ct);
-            var selfLeaving = actor.Id == userId && request.Status == (short)ProjectMemberStatus.Left && request.Role == null && request.PositionId == null;
-            Require(p.CreatorId == actor.Id || selfLeaving, "FORBIDDEN", "Bạn không có quyền cập nhật thành viên này.", 403);
-            Require(userId != p.CreatorId || request.Status == null || request.Status == 0,
-                "PROJECT_OWNER_CANNOT_LEAVE", "Chủ dự án không thể bị xóa khỏi dự án.", 409);
+            Require(request.Status is null or >= 0 and <= 2, "INVALID_MEMBER_STATUS", "Trạng thái thành viên không hợp lệ.");
+            Require(request.Status is null or (short)ProjectMemberStatus.Active,
+                "PROJECT_HUB_MEMBER_REMOVAL_DISABLED", "Project Hub không cho phép rời dự án hoặc loại thành viên.", 409);
+            Own(p, actor);
             var member = await db.ProjectMembers.SingleOrDefaultAsync(m => m.ProjectId == id && m.UserId == userId, ct)
                 ?? throw new ProjectException("MEMBER_NOT_FOUND", "Không tìm thấy thành viên.", 404);
+            Require(!request.Status.HasValue || member.Status == ProjectMemberStatus.Active,
+                "MEMBER_REQUIRES_INVITATION", "Thành viên đã rời dự án cần nhận lời mời mới để tham gia lại.", 409);
             if (request.Role != null) member.Role = Text(request.Role, 150, true)!;
             if (request.PositionId != null)
             {
@@ -273,18 +276,9 @@ public sealed partial class ProjectHubService
                 if (position.Id != member.PositionId && member.Status == ProjectMemberStatus.Active) await Capacity(id, position, ct);
                 member.PositionId = position.Id; member.Role = position.Name;
             }
-            if (request.Status.HasValue)
-            {
-                Require(request.Status is >= 0 and <= 2, "INVALID_MEMBER_STATUS", "Trạng thái thành viên không hợp lệ.");
-                Require(request.Status != 0 || member.Status == ProjectMemberStatus.Active,
-                    "MEMBER_REQUIRES_INVITATION", "Thành viên đã rời dự án cần nhận lời mời mới để tham gia lại.", 409);
-                member.Status = (ProjectMemberStatus)request.Status.Value;
-                if (member.Status != ProjectMemberStatus.Active) member.LeftAt = DateTimeOffset.UtcNow;
-            }
             member.UpdatedAt = DateTimeOffset.UtcNow; p.UpdatedAt = member.UpdatedAt;
             await db.SaveChangesAsync(ct); return true;
         }, ct);
-        // A member leaving a private project receives their final state through this authorized mutation.
         return await Response(await Project(id, ct), actor.Id, ct);
     }
 }

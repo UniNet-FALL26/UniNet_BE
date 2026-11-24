@@ -113,6 +113,8 @@ public sealed class AssessorContractTasks(
         if (email.ExpiresAt <= now) return false;
         return email.Kind switch
         {
+            AssessorOnboardingService.InvitationEmailKind => row.Status == AssessorOnboardingStatus.Invited &&
+                row.ProfileTokenExpiresAt > now && row.ProfileTokenHash == email.CredentialHash,
             "SetPassword" => row.Status == AssessorOnboardingStatus.AwaitingPassword && row.SetPasswordTokenUsedAt == null &&
                 row.SetPasswordTokenExpiresAt > now && row.SetPasswordTokenHash == email.CredentialHash,
             "Rejected" => row.Status == AssessorOnboardingStatus.Rejected,

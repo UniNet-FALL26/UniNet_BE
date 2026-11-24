@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -30,8 +31,8 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             ((f.RequesterAccountId == accountId && f.ReceiverAccountId == invitee.AccountId) ||
              (f.ReceiverAccountId == accountId && f.RequesterAccountId == invitee.AccountId)), ct),
             "FRIENDSHIP_REQUIRED", "Only accepted student friends can be invited.", 409);
-        Require(!await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == invitee.Id &&
-            m.Status == ProjectMemberStatus.Active, ct), "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
+        Require(!await ProjectMembership.IsEffectiveMemberAsync(db, projectId, invitee.Id, ct),
+            "ALREADY_PROJECT_MEMBER", "The invitee is already a member of this project.", 409);
         Require(!await db.ProjectJoinRequests.AnyAsync(i => i.RequestType == ProjectRequestType.Invite && i.ProjectId == projectId && i.UserId == invitee.Id &&
             i.Status == ProjectJoinRequestStatus.Pending, ct), "INVITATION_EXISTS", "The invitee already has a pending invitation to this project.", 409);
 

@@ -89,7 +89,8 @@ public sealed class FriendshipTests
         var notices = await f.Db.Set<VerificationNotification>().ToListAsync();
         Assert.Contains(notices, n => n.RecipientUserId == f.B.Id && n.Type == "friendship.request.received");
         Assert.Contains(notices, n => n.RecipientUserId == f.A.Id && n.Type == "friendship.accepted");
-        Assert.Equal(2, await f.Db.Set<NotificationDelivery>().CountAsync());
+        Assert.Equal(2, await f.Db.Set<NotificationDelivery>().CountAsync(d => !d.Reason.StartsWith("chat.")));
+        Assert.Equal(2, await f.Db.Set<NotificationDelivery>().CountAsync(d => d.Reason == "chat.relationship"));
         Assert.Empty(await f.Db.ProjectMembers.ToListAsync());
         var targets = new NotificationTargets(f.Db, new NotificationService(f.Db));
         Assert.Equal("/profile/friends", await targets.ResolveAsync(f.B.Id, notices.Single(n => n.RecipientUserId == f.B.Id).Id, default));

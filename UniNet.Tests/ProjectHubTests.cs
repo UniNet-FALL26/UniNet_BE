@@ -14,6 +14,52 @@ namespace UniNet.Tests;
 
 public sealed class ProjectHubTests
 {
+    [Theory]
+    [InlineData(false, false, ProjectMemberStatus.Left)]
+    [InlineData(false, true, ProjectMemberStatus.Kicked)]
+    [InlineData(true, false, ProjectMemberStatus.Left)]
+    [InlineData(true, true, ProjectMemberStatus.Kicked)]
+    public async Task HubRejectsLeavingAndKicking(bool completed, bool asOwner, ProjectMemberStatus status)
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        var member = new ProjectMember
+        {
+            ProjectId = project.Id, UserId = f.Other.Profile!.Id,
+            Role = "Developer", Status = ProjectMemberStatus.Active
+        };
+        f.Db.ProjectMembers.Add(member);
+        await f.Db.SaveChangesAsync();
+        if (completed)
+            await f.Service.CompleteAsync(project.Id, f.Owner.Id, default);
+
+        var error = await Assert.ThrowsAsync<ProjectException>(() => f.Service.MemberAsync(
+            project.Id, member.UserId, asOwner ? f.Owner.Id : f.Other.Id, new(Status: (short)status), default));
+
+        Assert.Equal("PROJECT_HUB_MEMBER_REMOVAL_DISABLED", error.Code);
+        await f.Db.Entry(member).ReloadAsync();
+        Assert.Equal(ProjectMemberStatus.Active, member.Status);
+        Assert.Null(member.LeftAt);
+    }
+
+    [Theory]
+    [InlineData("accept", "đã được chấp nhận")]
+    [InlineData("reject", "đã bị từ chối")]
+    [InlineData("cancel", "đã được hủy")]
+    public async Task RequestDecisionNotificationNamesTheActualOutcome(string decision, string outcome)
+    {
+        await using var f = await Fixture.Create();
+        var project = await f.Internal();
+        await f.Service.RecruitmentAsync(project.Id, f.Owner.Id, new() { Status = 1,
+            Positions = [new() { Id = "developer", Name = "Developer", Quantity = 1 }] }, default);
+        var request = await f.Service.RequestAsync(project.Id, f.Other.Id, new() { PositionId = "developer" }, default);
+        await f.Service.DecideAsync(request.Id, decision == "cancel" ? f.Other.Id : f.Owner.Id, new(decision), default);
+        var notification = await f.Db.Set<VerificationNotification>().SingleAsync(n => n.Type == "project.join-request.reviewed");
+        Assert.Equal($"Yêu cầu tham gia dự án {project.Title} {outcome}.", notification.Message);
+        Assert.DoesNotContain("vừa được xử lý", notification.Message);
+        Assert.Equal(decision == "cancel" ? f.Owner.Id : f.Other.Id, notification.RecipientUserId);
+    }
+
     [Fact]
     public async Task DocumentMetadataIsRecoveredFromRegistryAndSurvivesRename()
     {
@@ -449,6 +495,92 @@ public sealed class ProjectHubTests
         var p = await f.Internal();
         await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Owner.Id,
             new() { Timeline = new(new(2026, 12, 1), new(2026, 11, 1)) }, default));
+    }
+
+    [Theory]
+    [InlineData("document", false)]
+    [InlineData("image", false)]
+    [InlineData("video", false)]
+    [InlineData("document", true)]
+    [InlineData("image", true)]
+    [InlineData("video", true)]
+    public async Task ActiveProjectMembersCanAppendTheirUploadsWithoutChangingExistingResources(string type, bool asOwner)
+    {
+        await using var f = await Fixture.Create(); var p = await f.Internal();
+        f.Db.ProjectMembers.Add(new() { ProjectId = p.Id, UserId = f.Other.Profile!.Id, Role = "Developer" });
+        var uploader = asOwner ? f.Owner : f.Other;
+        var upload = new UploadedFile { OwnerAccountId = uploader.Id, Url = $"https://files.test/new.{type}",
+            PublicId = "new", FileName = "New file", Format = type, ResourceType = type == "document" ? "raw" : type, SizeBytes = 1234 };
+        f.Db.UploadedFiles.Add(upload); await f.Db.SaveChangesAsync();
+        p = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Details = p.Details with {
+            Documents = [new("https://files.test/existing.pdf", "Existing document", "document")],
+            Media = [new("https://files.test/existing.png", "Existing image", "image")] } }, default);
+        var kind = type == "document" ? "documents" : "media";
+        var fakeMetadata = new HubFile(upload.Url, "New file", type, 1, DateTimeOffset.MinValue, new(f.Third.Profile!.Id, "Fake", null));
+        var result = await f.Service.AddResourceAsync(p.Id, uploader.Id, kind, fakeMetadata, default);
+        result = await f.Service.AddResourceAsync(p.Id, uploader.Id, kind, fakeMetadata, default);
+        Assert.Equal(type == "document" ? 2 : 1, result.Details.Documents.Length);
+        Assert.Equal(type == "document" ? 1 : 2, result.Details.Media.Length);
+        var added = Assert.Single(result.Details.Documents.Concat(result.Details.Media), item => item.Url == upload.Url);
+        Assert.Equal(upload.SizeBytes, added.SizeBytes); Assert.Equal(uploader.Profile!.Id, added.UploadedBy!.Id);
+        Assert.Equal(p.Title, result.Title); Assert.Equal(p.Details.Description, result.Details.Description);
+        Assert.Equal(p.Details.StartDate, result.Details.StartDate);
+        await Assert.ThrowsAsync<ProjectException>(() => f.Service.UpdateAsync(p.Id, f.Other.Id,
+            new() { Details = p.Details with { Documents = [] } }, default));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task OutsidersAndFormerMembersCannotAddProjectResources(int status)
+    {
+        await using var f = await Fixture.Create(); var p = await f.Internal();
+        if (status >= 0) f.Db.ProjectMembers.Add(new() { ProjectId = p.Id, UserId = f.Other.Profile!.Id,
+            Role = "Developer", Status = (ProjectMemberStatus)status });
+        f.Db.UploadedFiles.Add(new() { OwnerAccountId = f.Other.Id, Url = "https://files.test/upload.pdf",
+            PublicId = "upload", FileName = "upload.pdf", Format = "pdf", ResourceType = "raw", SizeBytes = 1024 });
+        await f.Db.SaveChangesAsync();
+        var error = await Assert.ThrowsAsync<ProjectException>(() => f.Service.AddResourceAsync(p.Id, f.Other.Id,
+            "documents", new("https://files.test/upload.pdf", "File", "document"), default));
+        Assert.Equal(403, error.Status);
+        Assert.Empty((await f.Service.GetAsync(p.Id, f.Owner.Id, default)).Details.Documents);
+    }
+
+    [Fact]
+    public async Task AppendingResourcesRejectsOtherPeoplesUploadsAndInvalidKinds()
+    {
+        await using var f = await Fixture.Create(); var p = await f.Internal();
+        f.Db.ProjectMembers.Add(new() { ProjectId = p.Id, UserId = f.Other.Profile!.Id, Role = "Developer" });
+        f.Db.UploadedFiles.Add(new() { OwnerAccountId = f.Owner.Id, Url = "https://files.test/owner.pdf",
+            PublicId = "owner", FileName = "owner.pdf", Format = "pdf", ResourceType = "raw", SizeBytes = 1024 });
+        await f.Db.SaveChangesAsync();
+        var file = new HubFile("https://files.test/owner.pdf", "File", "document");
+        var denied = await Assert.ThrowsAsync<ProjectException>(() => f.Service.AddResourceAsync(p.Id, f.Other.Id, "documents", file, default));
+        Assert.Equal("PROJECT_UPLOAD_FORBIDDEN", denied.Code);
+        var invalidKind = await Assert.ThrowsAsync<ProjectException>(() => f.Service.AddResourceAsync(p.Id, f.Owner.Id, "links", file, default));
+        Assert.Equal(400, invalidKind.Status);
+        var invalidType = await Assert.ThrowsAsync<ProjectException>(() => f.Service.AddResourceAsync(p.Id, f.Owner.Id, "media", file, default));
+        Assert.Equal(400, invalidType.Status);
+    }
+
+    [Fact]
+    public async Task MemberAppendRespectsResourceLimitWithoutReplacingExistingFiles()
+    {
+        await using var f = await Fixture.Create(); var p = await f.Internal();
+        f.Db.ProjectMembers.Add(new() { ProjectId = p.Id, UserId = f.Other.Profile!.Id, Role = "Developer" });
+        f.Db.UploadedFiles.Add(new() { OwnerAccountId = f.Other.Id, Url = "https://files.test/extra.pdf",
+            PublicId = "extra", FileName = "extra.pdf", Format = "pdf", ResourceType = "raw", SizeBytes = 1024 });
+        await f.Db.SaveChangesAsync();
+        p = await f.Service.UpdateAsync(p.Id, f.Owner.Id, new() { Details = p.Details with {
+            Documents = Enumerable.Range(0, 50).Select(i => new HubFile($"https://files.test/{i}.pdf", $"File {i}", "document")).ToArray() } }, default);
+        var error = await Assert.ThrowsAsync<ProjectException>(() => f.Service.AddResourceAsync(p.Id, f.Other.Id,
+            "documents", new("https://files.test/extra.pdf", "Extra", "document"), default));
+        Assert.Equal(400, error.Status);
+        f.Db.ChangeTracker.Clear();
+        var stored = await f.Service.GetAsync(p.Id, f.Owner.Id, default);
+        Assert.Equal(50, stored.Details.Documents.Length);
+        Assert.DoesNotContain(stored.Details.Documents, file => file.Url.EndsWith("extra.pdf"));
     }
 
     private sealed class Fixture(SqliteConnection connection, UniNetDbContext db, Account owner, Account other, Account third) : IAsyncDisposable

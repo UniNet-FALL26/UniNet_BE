@@ -15,7 +15,7 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public class CommunityService : ICommunityService
+public partial class CommunityService : ICommunityService
 {
     private readonly UniNetDbContext _context;
     private readonly ICloudImageStorage _imageStorage;

@@ -139,7 +139,7 @@ public sealed class GeminiModerationService : IAIModerationService
         }
 
         var prompt = $$"""
-    Bạn là hệ thống kiểm duyệt nội dung tự động. 
+    Bạn là hệ thống kiểm duyệt nội dung tự động.
     Hãy đánh giá tiêu đề và nội dung dưới đây xem có vi phạm tiêu chuẩn hay không.
 
     Tiêu chí vi phạm: cờ bạc, phản động, lừa đảo, lô đề, nội dung 18+/đồi trụy, vi phạm pháp luật.

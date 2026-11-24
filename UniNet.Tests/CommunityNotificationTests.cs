@@ -1,10 +1,12 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using UniNet.Application.Common;
 using UniNet.Application.DTOs.Community;
 using UniNet.Application.Services;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
 using UniNet.Domain.Entities.Community;
+using UniNet.Domain.Enums;
 using UniNet.Infrastructure.Data;
 using Xunit;
 
@@ -12,6 +14,41 @@ namespace UniNet.Tests;
 
 public sealed class CommunityNotificationTests
 {
+    [Theory]
+    [InlineData(false, ReportStatus.Resolved, CommunityContentStatus.Published)]
+    [InlineData(true, ReportStatus.Dismissed, CommunityContentStatus.Hidden)]
+    public async Task StaffReviewSetsReportAndPostStatus(
+        bool isViolation, ReportStatus expectedReportStatus, CommunityContentStatus expectedPostStatus)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var moderator = new Account { Email = "moderator@review.test", Role = AccountRole.Moderator };
+        var student = new Account { Email = "student@review.test", Role = AccountRole.Student,
+            Profile = new UserProfile { FullName = "Student", Nickname = "student" } };
+        db.Accounts.AddRange(moderator, student);
+        var post = new CommunityPost { Id = Guid.NewGuid(), AuthorUser = student.Profile!,
+            Status = (short)CommunityContentStatus.Published, Description = "Reported post" };
+        var report = new ContentReport { Id = Guid.NewGuid(), Post = post, ReporterUser = student.Profile!,
+            Reason = "Spam", Status = (short)ReportStatus.Open };
+        db.ContentReports.Add(report);
+        await db.SaveChangesAsync();
+        var service = new CommunityService(db, null!);
+
+        var forbidden = await Assert.ThrowsAsync<CommunityException>(() =>
+            service.ReviewContentReportAsync(student.Id, report.Id, isViolation, default));
+        Assert.Equal(403, forbidden.Status);
+        var result = await service.ReviewContentReportAsync(moderator.Id, report.Id, isViolation, default);
+        Assert.Equal((short)expectedReportStatus, result.Status);
+        Assert.Equal((short)expectedPostStatus, result.PostStatus);
+        Assert.Equal(result.Status, (await service.GetContentReportAsync(moderator.Id, report.Id, default)).Status);
+        Assert.Equal(result.Status, (await service.ReviewContentReportAsync(moderator.Id, report.Id, isViolation, default)).Status);
+        var conflict = await Assert.ThrowsAsync<CommunityException>(() =>
+            service.ReviewContentReportAsync(moderator.Id, report.Id, !isViolation, default));
+        Assert.Equal(409, conflict.Status);
+    }
+
     [Fact]
     public async Task ReportNotifiesOnlyStaffWithCommunityReviewPermission()
     {

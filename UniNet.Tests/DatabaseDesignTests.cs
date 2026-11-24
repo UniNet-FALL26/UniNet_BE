@@ -16,7 +16,8 @@ public sealed class DatabaseDesignTests
         using var db = new UniNetDbContext(new DbContextOptionsBuilder<UniNetDbContext>()
             .UseNpgsql("Host=localhost;Database=model_test;Username=postgres").Options);
         var skill = db.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(Skill))!;
-        Assert.Equal("\"Category\" BETWEEN 0 AND 3", skill.GetCheckConstraints().Single().Sql);
+        Assert.Equal("\"Category\" IS NULL OR \"Category\" BETWEEN 0 AND 3", skill.GetCheckConstraints().Single().Sql);
+        Assert.True(skill.FindProperty("Category")!.IsNullable);
     }
     [Fact]
     public void PostgreSqlModelMatchesAccountProfileDesign()

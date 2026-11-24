@@ -51,7 +51,7 @@ public sealed class NotificationBackgroundWorker(IServiceScopeFactory scopes, IL
         var db = scope.ServiceProvider.GetRequiredService<UniNetDbContext>();
         var hub = scope.ServiceProvider.GetRequiredService<IHubContext<NotificationsHub>>();
         var now = DateTimeOffset.UtcNow;
-        var deliveries = await db.Set<NotificationDelivery>().Where(d => d.DeliveredAt == null && (d.RetryAt == null || d.RetryAt <= now))
+        var deliveries = await db.Set<NotificationDelivery>().Where(d => !d.Reason.StartsWith("chat.") && d.DeliveredAt == null && (d.RetryAt == null || d.RetryAt <= now))
             .OrderBy(d => d.CreatedAt).Take(250).ToListAsync(ct);
         foreach (var delivery in deliveries) {
             try {

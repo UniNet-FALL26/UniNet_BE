@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using UniNet.Application.Common;
 using UniNet.Application.Interfaces;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -56,9 +57,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         if (projectId.HasValue) await RequireReadableProjectAsync(projectId.Value, leader.Id, ct);
         Require(!status.HasValue || Enum.IsDefined(status.Value), "INVALID_VERIFICATION_STATUS", "Invalid verification status.");
         var query = db.ProjectVerifications.AsNoTracking().Include(v => v.Project)
-            .Where(v => v.Project.CreatorId == leader.Id || db.ProjectMembers.Any(m =>
-                m.ProjectId == v.ProjectId && m.UserId == leader.Id &&
-                m.Status == ProjectMemberStatus.Active && m.LeftAt == null));
+            .Where(v => ProjectMembership.EffectiveProjectIds(db, leader.Id).Contains(v.ProjectId));
         if (projectId.HasValue) query = query.Where(v => v.ProjectId == projectId.Value);
         if (status.HasValue) query = query.Where(v => v.Status == status.Value);
         page = Math.Max(1, page);
@@ -166,14 +165,13 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
     }
 
     private Task<bool> IsActiveMemberAsync(Guid projectId, Guid profileId, CancellationToken ct) =>
-        db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == profileId &&
-            m.Status == ProjectMemberStatus.Active && m.LeftAt == null, ct);
+        ProjectMembership.IsEffectiveMemberAsync(db, projectId, profileId, ct);
 
     private async Task RequireReadableProjectAsync(Guid projectId, Guid profileId, CancellationToken ct)
     {
         var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == projectId, ct)
             ?? throw new ProjectVerificationException("PROJECT_NOT_FOUND", "Project not found.", 404);
-        Require(project.CreatorId == profileId || await IsActiveMemberAsync(projectId, profileId, ct),
+        Require(await IsActiveMemberAsync(projectId, profileId, ct),
             "FORBIDDEN", "Only the project owner or active members can view its verifications.", 403);
     }
     private async Task<Project> GetOwnedProjectAsync(Guid projectId, Guid profileId, CancellationToken ct)

@@ -55,8 +55,10 @@ public sealed class Level1ArchiveMigrationPostgresTests
         var submission = new ProjectModeration { Project = project, Purpose = ProjectModerationPurpose.ProjectSubmission,
             AttemptNumber = 1, ContentHash = new('C', 64), Status = ProjectModerationStatus.Approved,
             CreatedAt = now, UpdatedAt = now, ReviewNote = "original submission decision", ReviewedBy = admin.Profile };
-        db.Accounts.AddRange(owner, admin, assessor); db.Packages.Add(package); db.ProjectModerations.Add(submission);
-        await db.SaveChangesAsync();
+        foreach (var account in new[] { owner, admin, assessor }) await HistoricalFixtureSeed.AccountAsync(db, account);
+        await HistoricalFixtureSeed.ProjectAsync(db, project);
+        db.Packages.Add(package); db.ProjectModerations.Add(submission);
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         var verification = new ProjectVerification { Id = Guid.NewGuid(), Project = project, RequestByUser = owner.Profile!,
             Package = package, Status = ProjectVerificationStatus.Verified, SubmittedAt = now, CreatedAt = now, UpdatedAt = now,
             FinalizedAt = now.AddHours(3), FinalizedByUserId = assessor.Profile!.Id };
@@ -70,7 +72,7 @@ public sealed class Level1ArchiveMigrationPostgresTests
         db.VerificationAssignments.Add(assignment);
         db.Transactions.Add(new() { Id = Guid.NewGuid(), UserId = owner.Profile!.Id, Package = package, Amount = 15000,
             Verification = verification, Status = PaymentStatus.Success, PaidAt = now, CreatedAt = now, UpdatedAt = now });
-        await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.SaveAddedAsync(db);
         Guid linked = Guid.Empty;
         const string snapshot = "{\"original\":\"source\"}";
         const string policy = "{\"original\":\"policy\"}";
@@ -231,10 +233,10 @@ public sealed class Level1ArchiveMigrationPostgresTests
     {
         await using var store = new Store(); await store.Initialize(); await using var db = store.Open();
         var seed = await SeedData(db); await Migrate(db, After); db.ChangeTracker.Clear();
-        var oldProject = await db.Projects.SingleAsync();
+        var oldProject = await db.Projects.Select(x => new { x.CreatorId }).SingleAsync();
         var otherProject = new Project { CreatorId = oldProject.CreatorId, Title = "New owner relationship",
             Description = "Must not be overwritten by rollback", ProjectField = "IT", MemberTarget = 1, Status = ProjectStatus.Completed };
-        db.Projects.Add(otherProject); await db.SaveChangesAsync();
+        await HistoricalFixtureSeed.ProjectAsync(db, otherProject); await db.SaveChangesAsync();
         await db.ProjectVerifications.Where(v => v.Id == seed.Case).ExecuteUpdateAsync(s => s.SetProperty(v => v.ProjectId, otherProject.Id));
         var error = await Assert.ThrowsAsync<PostgresException>(() => Migrate(db, Before));
         Assert.Contains("linked verification missing or changed project", error.MessageText);
@@ -244,6 +246,7 @@ public sealed class Level1ArchiveMigrationPostgresTests
 
     private static async Task RunPostgresTool(UniNetDbContext db, string tool, params string[] arguments)
     {
+        if (await DockerPostgresFixtureTools.TryRunAsync(tool, new NpgsqlConnectionStringBuilder(db.Database.GetConnectionString()), arguments)) return;
         var bin = Environment.GetEnvironmentVariable("UNINET_POSTGRES_BIN") ?? @"C:\Program Files\PostgreSQL\18\bin";
         var executable = Path.Combine(bin, tool + ".exe");
         Assert.True(File.Exists(executable), "Set UNINET_POSTGRES_BIN to the PostgreSQL tools directory for dump/restore validation.");

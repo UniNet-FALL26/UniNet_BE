@@ -59,6 +59,29 @@ public sealed partial class ProjectHubService
         return await Response(p, actor.Id, ct);
     }
 
+    public async Task<HubProject> AddResourceAsync(Guid id, Guid accountId, string kind, HubFile file, CancellationToken ct)
+    {
+        var actor = await Actor(accountId, ct);
+        Require(kind is "documents" or "media", "INVALID_PROJECT_INPUT", "Mục tài liệu không hợp lệ.");
+        var normalized = Files([file], kind == "documents")[0];
+        var project = await Transaction(async () => {
+            var p = await Locked(id, ct);
+            Require(p.CreatorId == actor.Id || ActiveMember(p, actor.Id), "FORBIDDEN",
+                "Chỉ thành viên đang tham gia dự án được thêm tài liệu hoặc demo.", 403);
+            Require(await db.UploadedFiles.AnyAsync(upload => upload.Url == normalized.Url && upload.OwnerAccountId == accountId, ct),
+                "PROJECT_UPLOAD_FORBIDDEN", "Vui lòng chọn tệp do chính bạn tải lên.", 403);
+            var details = p.Details ??= new() { ProjectId = p.Id };
+            var existing = Read<HubFile[]>(kind == "documents" ? details.Documents : details.Media) ?? [];
+            if (existing.Any(item => item.Url == normalized.Url)) return p;
+            var files = Files([.. existing, normalized], kind == "documents");
+            if (kind == "documents") details.Documents = JsonSerializer.Serialize(files, Json);
+            else details.Media = JsonSerializer.Serialize(files, Json);
+            var now = DateTimeOffset.UtcNow; details.UpdatedAt = now; p.UpdatedAt = now;
+            return p;
+        }, ct);
+        return await Response(project, actor.Id, ct);
+    }
+
     private static void SaveDetails(Project p, HubDetails input, DateTimeOffset now)
     {
         var start = input.StartDate ?? (p.Details?.StartDateIsCreationDate == true ? p.Details.StartDate : null);
