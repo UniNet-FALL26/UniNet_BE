@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
@@ -66,10 +65,8 @@ public sealed class AssessorContractTests
         Assert.NotNull(processed.SentAt);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SubmittedProfileCanBeSignedApprovedAndActivatedForNormalLogin(bool automatic)
+    [Fact]
+    public async Task SubmittedProfileCanBeSignedApprovedAndActivatedForNormalLogin()
     {
         await using var fixture = await Fixture.Create();
         var profileToken = AssessorContractSecrets.Token();
@@ -78,41 +75,27 @@ public sealed class AssessorContractTests
         await fixture.Db.AssessorOnboardings.ExecuteUpdateAsync(x =>
             x.SetProperty(p => p.Status, AssessorOnboardingStatus.Invited)
                 .SetProperty(p => p.ProfileTokenHash, profileHash).SetProperty(p => p.ProfileTokenExpiresAt, expires)
-                .SetProperty(p => p.AutoApprove, automatic));
+                .SetProperty(p => p.AutoApprove, true));
         fixture.Db.ChangeTracker.Clear();
         var profile = new AssessorOnboardingService(fixture.Db, fixture.Protection, fixture.Clock,
-            new(fixture.Db, fixture.Secrets, fixture.Clock), fixture.Options);
-        Assert.Equal("assessor@example.test", await profile.ReadForm(profileToken, default));
-        var id = await profile.Submit(new(profileToken, "Nguyễn Văn Thử", "000000000000", "0123456789",
+            new(fixture.Db, fixture.Secrets, fixture.Clock), fixture.Options, fixture.Files);
+        var submitted = await profile.Submit(new(profileToken, "Nguyễn Văn Thử", "000000000000",
             "Ngân hàng thử nghiệm", "000123456789", "NGUYEN VAN THU"), default);
-        await fixture.Tasks.GenerateNext(default);
-        var contractToken = (await fixture.LatestPayload("Contract")).Body.Split("#token=")[1];
-        await fixture.Tasks.SendNext(default);
-        await fixture.Service.RequestReadOtp(contractToken, default);
-        var readCode = await fixture.Code("ReadOtp");
-        await fixture.Tasks.SendNext(default);
-        var session = await fixture.Service.VerifyReadOtp(contractToken, readCode, default);
-        await fixture.Service.Pdf(session, default);
-        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
-        await fixture.Service.RequestSignOtp(session, default);
-        var signCode = await fixture.Code("SignOtp");
-        await fixture.Tasks.SendNext(default);
-        await fixture.Service.Sign(new(session, signCode, "Nguyễn Văn Thử", fixture.Files.Hash, true), default);
+        Assert.Equal("AwaitingSignature", submitted.Status);
+        Assert.EndsWith("#token=" + profileToken, submitted.ContractLink);
+        Assert.Empty(await fixture.Db.AssessorOnboardingEmails.ToListAsync());
+        await fixture.Service.Inspect(profileToken, default);
+        await fixture.Service.Sign(new(profileToken, "Nguyễn Văn Thử", fixture.Files.Hash, true), default);
         var activation = new AssessorActivationService(fixture.Db, new(fixture.Db, fixture.Secrets, fixture.Clock),
             fixture.Options, fixture.Clock);
-        if (automatic)
-        {
-            fixture.Clock.Advance(TimeSpan.FromMinutes(16));
-            await activation.ApproveNext(default);
-        }
-        else
-        {
-            var admin = await fixture.Db.Accounts.SingleAsync(x => x.Role == AccountRole.Admin);
-            await activation.Approve(admin.Id, id, default);
-        }
+        fixture.Clock.Advance(TimeSpan.FromMinutes(16));
+        await activation.ApproveNext(default);
+        Assert.Equal(AssessorOnboardingStatus.AwaitingApproval, (await fixture.Db.AssessorOnboardings.SingleAsync()).Status);
+        var admin = await fixture.Db.Accounts.SingleAsync(x => x.Role == AccountRole.Admin);
+        await activation.Approve(admin.Id, submitted.Id, default);
         var passwordToken = (await fixture.LatestPayload("SetPassword")).Body.Split("#token=")[1];
         await fixture.Tasks.SendNext(default);
-        Assert.Equal(4, fixture.Mail.Sent.Count);
+        Assert.Single(fixture.Mail.Sent);
         await activation.SetPassword(new(passwordToken, "Password123", "Password123"), default);
         fixture.Db.ChangeTracker.Clear();
         var auth = new AuthService(fixture.Db, new Microsoft.Extensions.Configuration.ConfigurationBuilder()
@@ -125,7 +108,7 @@ public sealed class AssessorContractTests
     }
 
     [Fact]
-    public async Task HttpContractEndpointsValidateInputsAndKeepPdfPrivateUntilEmailVerification()
+    public async Task HttpContractEndpointsRequireInvitationCredentialAndAdminApproval()
     {
         await using var fixture = await Fixture.Create();
         await fixture.Tasks.GenerateNext(default);
@@ -168,24 +151,19 @@ public sealed class AssessorContractTests
         await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         const string route = "/api/assessor-onboarding/contract/";
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(route + "verify-read-otp",
-            new { token, code = "bad" })).StatusCode);
-        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(route + "pdf", new { token })).StatusCode);
-        Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsJsonAsync(route + "read-otp", new { token })).StatusCode);
-        var verification = await client.PostAsJsonAsync(route + "verify-read-otp",
-            new { token, code = await fixture.Code("ReadOtp") });
-        verification.EnsureSuccessStatusCode();
-        var session = (await verification.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
-        var pdf = await client.PostAsJsonAsync(route + "pdf", new { token = session });
-        pdf.EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(route + "pdf",
+            new { token = AssessorContractSecrets.Token() })).StatusCode);
+        var online = await client.PostAsJsonAsync(route + "inspect", new { token });
+        online.EnsureSuccessStatusCode();
+        var detail = await online.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("Contract test", detail.GetProperty("pages")[0].GetString());
+        var signature = new { token, signedName = "Nguyễn Văn Thử", accepted = true, contractSha256 = fixture.Files.Hash };
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(route + "sign", signature)).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(route + "sign", signature)).StatusCode);
+        var pdf = await client.PostAsJsonAsync(route + "pdf", new { token });
+        Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
         Assert.Equal("application/pdf", pdf.Content.Headers.ContentType!.MediaType);
         Assert.True(pdf.Headers.CacheControl!.NoStore);
-        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
-        Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsJsonAsync(route + "sign-otp", new { token = session })).StatusCode);
-        var signature = new { token = session, code = await fixture.Code("SignOtp"), signedName = "Nguyễn Văn Thử",
-            accepted = true, contractSha256 = fixture.Files.Hash };
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(route + "sign", signature)).StatusCode);
-        Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(route + "pdf", new { token = session })).StatusCode);
         var row = await fixture.Db.AssessorOnboardings.AsNoTracking().SingleAsync();
         var reviewRoute = $"/api/admin/assessor-onboardings/{row.Id}";
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync(reviewRoute + "/approve", null)).StatusCode);
@@ -219,70 +197,23 @@ public sealed class AssessorContractTests
     }
 
     [Fact]
-    public async Task GeneratedContractRequiresSeparateOtpForViewingAndSigningAndCannotBeSignedTwice()
-    {
-        await using var fixture = await Fixture.Create();
-        await fixture.Tasks.GenerateNext(default);
-        fixture.Db.ChangeTracker.Clear();
-        var row = await fixture.Db.AssessorOnboardings.SingleAsync();
-        Assert.Equal(AssessorOnboardingStatus.AwaitingSignature, row.Status);
-        Assert.Equal("V1-TEST", row.TemplateVersion);
-        var linkMail = await fixture.LatestPayload("Contract");
-        var token = linkMail.Body.Split("#token=")[1];
-        await fixture.Tasks.SendNext(default);
-        Assert.Single(fixture.Mail.Sent);
-        Assert.Null((await fixture.Db.AssessorOnboardingEmails.AsNoTracking().SingleAsync()).PayloadCiphertext);
-
-        await fixture.Service.RequestReadOtp(token, default);
-        var readCode = await fixture.Code("ReadOtp");
-        Assert.Equal(429, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.RequestReadOtp(token, default))).Status);
-        var session = await fixture.Service.VerifyReadOtp(token, readCode, default);
-        Assert.Equal(400, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.RequestSignOtp(session, default))).Status);
-        Assert.NotEmpty(await fixture.Service.Pdf(session, default));
-        Assert.Equal(400, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Sign(
-            new(session, readCode, "Nguyễn Văn Thử", fixture.Files.Hash, true), default))).Status);
-        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
-        await fixture.Service.RequestSignOtp(session, default);
-        var code = await fixture.Code("SignOtp");
-        Assert.Equal(400, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Sign(
-            new(session, code, "Nguyễn Văn Thử", new string('A', 64), true), default))).Status);
-        await fixture.Service.Sign(new(session, code, "Nguyễn Văn Thử", fixture.Files.Hash, true), default);
-
-        fixture.Db.ChangeTracker.Clear();
-        row = await fixture.Db.AssessorOnboardings.SingleAsync();
-        Assert.Equal(AssessorOnboardingStatus.AwaitingApproval, row.Status);
-        Assert.Equal(fixture.Clock.GetUtcNow().AddMinutes(15), row.AutoApproveAt);
-        Assert.Equal(fixture.Options.Value.SignatureStatement, row.SignatureStatement);
-        Assert.NotNull(row.ContractViewedAt);
-        Assert.Null(row.OtpHash);
-        Assert.Null(row.AccountId);
-        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Sign(
-            new(session, code, "Nguyễn Văn Thử", fixture.Files.Hash, true), default))).Status);
-        await fixture.Tasks.SendNext(default);
-        Assert.Single(fixture.Mail.Sent); // Pending OTP was cancelled after it was consumed.
-    }
-
-    [Fact]
-    public async Task WrongOtpLocksAfterFiveAttemptsResendInvalidatesOldCodeAndHourlyLimitIsPersisted()
+    public async Task SignatureRequiresMatchingNameViewedDocumentAndMatchingHash()
     {
         await using var fixture = await Fixture.Create();
         await fixture.Tasks.GenerateNext(default);
         var token = (await fixture.LatestPayload("Contract")).Body.Split("#token=")[1];
-        await fixture.Service.RequestReadOtp(token, default);
-        var code = await fixture.Code("ReadOtp");
-        var wrongCode = code == "000000" ? "000001" : "000000";
-        for (var attempt = 0; attempt < 5; attempt++)
-            await Assert.ThrowsAsync<AuthException>(() => fixture.Service.VerifyReadOtp(token, wrongCode, default));
-        Assert.Equal("OTP_UNAVAILABLE", (await Assert.ThrowsAsync<AuthException>(() =>
-            fixture.Service.VerifyReadOtp(token, code, default))).Code);
-        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
-        await fixture.Service.RequestReadOtp(token, default);
-        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
-        await fixture.Service.RequestReadOtp(token, default);
-        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
-        fixture.Db.ChangeTracker.Clear();
-        Assert.Equal(429, (await Assert.ThrowsAsync<AuthException>(() =>
-            fixture.Service.RequestReadOtp(token, default))).Status);
+        await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Sign(
+            new(token, "Nguyễn Văn Thử", fixture.Files.Hash, true), default));
+        await fixture.Service.Inspect(token, default);
+        await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Sign(
+            new(token, "Someone else", fixture.Files.Hash, true), default));
+        await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Sign(
+            new(token, "Nguyễn Văn Thử", new string('A', 64), true), default));
+        await fixture.Service.Sign(new(token, "Nguyễn Văn Thử", fixture.Files.Hash, true), default);
+        var row = await fixture.Db.AssessorOnboardings.SingleAsync();
+        Assert.Equal(AssessorOnboardingStatus.AwaitingApproval, row.Status);
+        Assert.Null(row.AccountId);
+        Assert.NotNull(row.SignedAt);
     }
 
     [Fact]
@@ -301,34 +232,31 @@ public sealed class AssessorContractTests
         fixture.Mail.Fail = false;
         await fixture.Tasks.SendNext(default);
         Assert.Single(fixture.Mail.Sent);
-        await fixture.Service.RequestReadOtp(token, default);
-        var session = await fixture.Service.VerifyReadOtp(token, await fixture.Code("ReadOtp"), default);
-        fixture.Clock.Advance(TimeSpan.FromMinutes(31));
-        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Pdf(session, default))).Status);
+        fixture.Clock.Advance(TimeSpan.FromDays(3));
+        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Pdf(token, default))).Status);
         await fixture.Db.AssessorOnboardings.ExecuteUpdateAsync(x => x.SetProperty(p => p.Status, AssessorOnboardingStatus.Revoked));
         fixture.Db.ChangeTracker.Clear();
-        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.RequestReadOtp(token, default))).Status);
+        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Inspect(token, default))).Status);
     }
 
     [Fact]
-    public async Task ResendingContractKeepsPdfAndCancelsPreviousLinkAndOtp()
+    public async Task ResendingContractKeepsPdfAndCancelsPreviousLink()
     {
         await using var fixture = await Fixture.Create();
         await fixture.Tasks.GenerateNext(default);
         var oldToken = (await fixture.LatestPayload("Contract")).Body.Split("#token=")[1];
-        await fixture.Service.RequestReadOtp(oldToken, default);
         fixture.Clock.Advance(TimeSpan.FromMinutes(2));
         var row = await fixture.Db.AssessorOnboardings.SingleAsync();
         var key = row.ContractStorageKey;
         await fixture.Service.Resend(row.CreatedByAccountId, row.Id, default);
         Assert.Equal(key, row.ContractStorageKey);
-        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.RequestReadOtp(oldToken, default))).Status);
+        Assert.Equal(410, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Inspect(oldToken, default))).Status);
         await fixture.Tasks.SendNext(default);
         Assert.Empty(fixture.Mail.Sent); // The oldest, superseded contract message is discarded.
     }
 
     [Fact]
-    public async Task ConcurrentUpdatesCannotCommitAnOtpIssuedAgainstAStaleRevision()
+    public async Task ConcurrentUpdatesCannotMarkContractViewedAgainstStaleRevision()
     {
         await using var fixture = await Fixture.Create();
         await fixture.Tasks.GenerateNext(default);
@@ -337,8 +265,8 @@ public sealed class AssessorContractTests
         await fixture.Db.AssessorOnboardings.SingleAsync(); // Stale tracked revision.
         var nextRevision = Guid.NewGuid();
         await fixture.Db.AssessorOnboardings.ExecuteUpdateAsync(x => x.SetProperty(p => p.Revision, nextRevision));
-        Assert.Equal(409, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.RequestReadOtp(token, default))).Status);
-        Assert.Empty(await fixture.Db.AssessorOnboardingEmails.AsNoTracking().Where(x => x.Kind == "ReadOtp").ToListAsync());
+        Assert.Equal(409, (await Assert.ThrowsAsync<AuthException>(() => fixture.Service.Inspect(token, default))).Status);
+        Assert.Null((await fixture.Db.AssessorOnboardings.AsNoTracking().SingleAsync()).ContractViewedAt);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -369,7 +297,7 @@ public sealed class AssessorContractTests
             var provider = new EphemeralDataProtectionProvider();
             fixture.Protection = provider;
             fixture.Secrets = new(provider);
-            fixture.Service = new(fixture.Db, fixture.Secrets, fixture.Files, fixture.Options, fixture.Clock, new(fixture.Db, fixture.Secrets, fixture.Clock));
+            fixture.Service = new(fixture.Db, fixture.Files, fixture.Options, fixture.Clock, new(fixture.Db, fixture.Secrets, fixture.Clock));
             fixture.Tasks = new(fixture.Db, provider, fixture.Secrets, fixture.Files, fixture.Mail, fixture.Service, fixture.Options, fixture.Clock);
             var admin = new Account { Email = "admin@example.test", Role = AccountRole.Admin };
             fixture.Db.Accounts.Add(admin);
@@ -379,7 +307,7 @@ public sealed class AssessorContractTests
                 Status = AssessorOnboardingStatus.ProfileSubmitted, CreatedAt = fixture.Clock.GetUtcNow(),
                 SubmittedAt = fixture.Clock.GetUtcNow(), AutoApprove = true, ProfileTokenHash = "sample",
                 SensitiveProfileCiphertext = provider.CreateProtector("UniNet.AssessorOnboarding.Profile.v1").Protect(
-                    JsonSerializer.Serialize(new ContractProfile("000000000000", "0123456789", "Test bank", "000123456789", "NGUYEN VAN THU")))
+                    JsonSerializer.Serialize(new ContractProfile("000000000000", "Test bank", "000123456789", "NGUYEN VAN THU")))
             });
             await fixture.Db.SaveChangesAsync();
             return fixture;
@@ -392,7 +320,6 @@ public sealed class AssessorContractTests
             return JsonSerializer.Deserialize<AssessorEmailPayload>(Secrets.Unprotect(row.PayloadCiphertext!))!;
         }
 
-        public async Task<string> Code(string kind) => Regex.Match((await LatestPayload(kind)).Body, @"\b[0-9]{6}\b").Value;
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await Connection.DisposeAsync(); }
     }
 
@@ -408,7 +335,14 @@ public sealed class AssessorContractTests
         public string Hash { get; } = new('B', 64);
         public Task<StoredAssessorContract> Generate(AssessorOnboarding row, ContractProfile profile, CancellationToken ct)
             => Task.FromResult(new StoredAssessorContract("private/test.pdf", Hash));
-        public Task<byte[]> Read(string key, string sha256, CancellationToken ct) => Task.FromResult(new byte[] { 1, 2, 3 });
+        public Task<byte[]> Export(AssessorOnboarding row, CancellationToken ct) => Read(row.ContractStorageKey!, row.ContractSha256!, ct);
+        public Task<byte[]> Read(string key, string sha256, CancellationToken ct) {
+            using var document = new UglyToad.PdfPig.Writer.PdfDocumentBuilder();
+            var font = document.AddStandard14Font(UglyToad.PdfPig.Fonts.Standard14Fonts.Standard14Font.Helvetica);
+            var page = document.AddPage(UglyToad.PdfPig.Content.PageSize.A4);
+            page.AddText("Contract test", 12, new UglyToad.PdfPig.Core.PdfPoint(55, 785), font);
+            return Task.FromResult(document.Build());
+        }
     }
 
     private sealed class TestMail : IAssessorOnboardingMailSender

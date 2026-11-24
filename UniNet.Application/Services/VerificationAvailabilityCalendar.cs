@@ -9,7 +9,7 @@ namespace UniNet.Application.Services;
 // Shared eligibility for assignment and booking. Availability must cover the entire meeting.
 internal sealed class VerificationAvailabilityCalendar
 {
-    private sealed record Window(Guid UserId, DateTimeOffset Start, DateTimeOffset End);
+    private sealed record Window(Guid UserId, DateTimeOffset Start, DateTimeOffset End, DateTimeOffset CreatedAt);
     private sealed record Busy(Guid UserId, DateTimeOffset? Start, DateTimeOffset? End, bool InProgress);
     private sealed record Booking(Guid LeaderId, Guid? UserId, DateTimeOffset Start, DateTimeOffset End);
     private readonly List<Window> windows;
@@ -47,9 +47,15 @@ internal sealed class VerificationAvailabilityCalendar
     public static async Task<VerificationAvailabilityCalendar> LoadAsync(UniNetDbContext db, ProjectVerification v,
         DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
-        var eligible = (await EligibleUsers(db, v).Select(p => p.Id).ToListAsync(ct)).ToHashSet();
+        var specializationId = await db.Projects.Where(p => p.Id == v.ProjectId && p.Specialization!.IsActive)
+            .Select(p => p.SpecializationId).SingleOrDefaultAsync(ct);
+        var permitted = NotificationPermissionPolicy.Recipients(db, NotificationPermissionPolicy.EvidenceReview);
+        var eligible = (await EligibleUsers(db, v).Where(p => specializationId != null &&
+            permitted.Any(a => a.Id == p.AccountId) &&
+            db.AssessorSpecializations.Any(s => s.AssessorUserId == p.Id && s.SpecializationId == specializationId))
+            .Select(p => p.Id).ToListAsync(ct)).ToHashSet();
         var windows = await db.VerificatorAvailabilities.AsNoTracking().Where(a => a.StartAt < to && a.EndAt > from)
-            .Select(a => new Window(a.UserId, a.StartAt, a.EndAt)).ToListAsync(ct);
+            .Select(a => new Window(a.UserId, a.StartAt, a.EndAt, a.CreatedAt)).ToListAsync(ct);
         var busy = await db.VerificationAssignments.AsNoTracking().Where(a => a.ProjectVerificationId != v.Id &&
             (a.Status == VerificationAssignmentStatus.Assigned || a.Status == VerificationAssignmentStatus.Overdue) &&
             a.ProjectVerification.Status == ProjectVerificationStatus.Pending &&
@@ -72,10 +78,10 @@ internal sealed class VerificationAvailabilityCalendar
 
     public List<Guid> Candidates(DateTimeOffset start, DateTimeOffset end) => windows
         .Where(w => w.Start <= start && w.End >= end && eligible.Contains(w.UserId))
-        .Select(w => w.UserId).Distinct()
+        .OrderBy(w => w.CreatedAt).ThenBy(w => w.UserId).Select(w => w.UserId).Distinct()
         .Where(id => !busy.Any(b => b.UserId == id && (b.InProgress || !b.Start.HasValue || !b.End.HasValue ||
                 (b.Start < end && b.End > start))) &&
-            !bookings.Any(b => b.UserId == id && b.Start < end && b.End > start)).OrderBy(id => id).ToList();
+            !bookings.Any(b => b.UserId == id && b.Start < end && b.End > start)).ToList();
 
     public int Remaining(Guid leaderId, DateTimeOffset start, DateTimeOffset end, int capacity)
     {

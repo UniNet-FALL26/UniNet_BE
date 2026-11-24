@@ -12,7 +12,7 @@ namespace UniNet.Domain.Entities
         public Guid Id { get; set; } 
         public Guid ProjectVerificationId { get; set; }
         public Guid AssignedToUserId { get; set; }
-        public Guid AdminId { get; set; }
+        public Guid? AdminId { get; set; }
         public VerificationAssignmentStatus Status { get; set; }
         public DateTimeOffset AssignedAt { get; set; }
         public DateTimeOffset? CompletedAt { get; set; }
@@ -27,7 +27,7 @@ namespace UniNet.Domain.Entities
         public DateTimeOffset UpdatedAt { get; set; }
         public ProjectVerification ProjectVerification { get; set; } = null!;
         public UserProfile AssignedToUser { get; set; } = null!;
-        public UserProfile AssignedByUser { get; set; } = null!;
+        public UserProfile? AssignedByUser { get; set; }
         public VerificationReport? Report { get; set; }
     }
 }

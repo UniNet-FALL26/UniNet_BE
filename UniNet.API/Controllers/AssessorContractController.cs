@@ -10,17 +10,6 @@ namespace UniNet.API.Controllers;
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AssessorContractController(AssessorContractService contracts) : ControllerBase
 {
-    [HttpPost("read-otp")]
-    public async Task<IActionResult> RequestReadOtp(ContractCredential request, CancellationToken ct)
-    {
-        await contracts.RequestReadOtp(request.Token, ct);
-        return Accepted();
-    }
-
-    [HttpPost("verify-read-otp")]
-    public async Task<IActionResult> VerifyReadOtp(VerifyContractOtp request, CancellationToken ct)
-        => Ok(new { token = await contracts.VerifyReadOtp(request.Token, request.Code, ct) });
-
     [HttpPost("inspect")]
     public async Task<IActionResult> Inspect(ContractCredential request, CancellationToken ct)
         => Ok(await contracts.Inspect(request.Token, ct));
@@ -33,17 +22,9 @@ public sealed class AssessorContractController(AssessorContractService contracts
         return File(await contracts.Pdf(request.Token, ct), "application/pdf");
     }
 
-    [HttpPost("sign-otp")]
-    public async Task<IActionResult> RequestSignOtp(ContractCredential request, CancellationToken ct)
-    {
-        await contracts.RequestSignOtp(request.Token, ct);
-        return Accepted();
-    }
-
     [HttpPost("sign")]
     public async Task<IActionResult> Sign(SignAssessorContract request, CancellationToken ct)
     {
-        await contracts.Sign(request, ct);
-        return Ok(new { status = "AwaitingApproval" });
+        return Ok(await contracts.Sign(request, ct));
     }
 }

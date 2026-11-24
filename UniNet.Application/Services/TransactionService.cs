@@ -237,6 +237,7 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                             verification.BookingStatus = VerificationBookingStatus.Confirmed;
                             verification.BookingConfirmedAt = now;
                             verification.AssignmentEligibleAt = now;
+                            await new AssignmentService(db).AssignConfirmedBookingAsync(verification, now, ct);
                         }
                     }
                 }
@@ -254,7 +255,6 @@ public sealed class TransactionService(UniNetDbContext db, IPaymentProvider prov
                 transaction.FailureReason = result.AmountPaidVnd > 0 ? "PARTIAL_PAYMENT_PENDING" : null;
             transaction.UpdatedAt = now;
             // Touching the parent serializes simultaneous success events for different attempts.
-            // Payment never finalizes verification or assigns a verificator.
             verification.UpdatedAt = now;
             return TransactionMapping.ToResponse(transaction, verification.Id);
         }, ct);

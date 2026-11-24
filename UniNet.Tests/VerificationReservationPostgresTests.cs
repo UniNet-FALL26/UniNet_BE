@@ -68,11 +68,14 @@ public sealed partial class VerificationReservationPostgresTests
                 Profile = new() { FullName = name, Nickname = name, VerificatorAvailabilities = role == AccountRole.Assessor
                     ? [new() { StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31) }] : [] } };
             var owner = User("owner"); var other = sameLeader ? owner : User("other");
-            db.Accounts.Add(owner); if (!sameLeader) db.Accounts.Add(other); db.Accounts.Add(User("staff", AccountRole.Assessor));
+            var staff = User("staff", AccountRole.Assessor);
+            db.Accounts.Add(owner); if (!sameLeader) db.Accounts.Add(other); db.Accounts.Add(staff);
+            var specialization = new Specialization { Code = "IT", Name = "IT" };
+            db.AssessorSpecializations.Add(new() { Assessor = staff.Profile!, Specialization = specialization });
             var package = new Package { Id = Guid.NewGuid(), Code = "VERIFY", Name = "Verify", IsActive = true,
                 Role = TargetRole.Student, Type = PackageType.Verification, Price = 100 };
             db.Packages.Add(package);
-            Project ProjectFor(Account user) => new() { Creator = user.Profile!, Title = "Completed", Description = "Done",
+            Project ProjectFor(Account user) => new() { Creator = user.Profile!, Specialization = specialization, Title = "Completed", Description = "Done",
                 ProjectField = "IT", MemberTarget = 2, Status = ProjectStatus.Completed };
             var projects = new[] { ProjectFor(owner), ProjectFor(other) }; db.Projects.AddRange(projects); await db.SaveChangesAsync();
             Owner = owner.Id; Other = other.Id;
@@ -101,9 +104,16 @@ public sealed partial class VerificationReservationPostgresTests
         store.Config["ProjectVerification:Capacity"] = "2";
         await using (var seed = store.Open())
         {
-            seed.Accounts.Add(new() { Email = "staff2@test.com", Role = AccountRole.Assessor,
+            var staff = new Account { Email = "staff2@test.com", Role = AccountRole.Assessor,
                 Profile = new() { FullName = "Staff2", Nickname = "Staff2", VerificatorAvailabilities = [new()
-                    { StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31) }] } }); await seed.SaveChangesAsync();
+                    { StartAt = DateTimeOffset.UtcNow.AddDays(-1), EndAt = DateTimeOffset.UtcNow.AddDays(31) }] } };
+            seed.Accounts.Add(staff);
+            seed.AssessorSpecializations.Add(new()
+            {
+                Assessor = staff.Profile!,
+                SpecializationId = await seed.Specializations.Select(s => s.Id).SingleAsync()
+            });
+            await seed.SaveChangesAsync();
         }
         await AssertOneWinnerAsync(store);
     }

@@ -233,8 +233,7 @@ public sealed class ProjectVerificationService(UniNetDbContext db, IConfiguratio
         if (calendar.Remaining(leaderId, verification.ScheduledStartAt.Value, verification.ScheduledEndAt.Value, policy.Capacity) <= 0)
             return false;
         var candidates = calendar.Candidates(verification.ScheduledStartAt.Value, verification.ScheduledEndAt.Value);
-        if (!verification.ReservedVerificatorUserId.HasValue || !candidates.Contains(verification.ReservedVerificatorUserId.Value))
-            verification.ReservedVerificatorUserId = candidates.First();
+        verification.ReservedVerificatorUserId = candidates.First();
         return true;
     }
     private async Task<T> MutateAsync<T>(Func<Task<T>> action, CancellationToken ct)

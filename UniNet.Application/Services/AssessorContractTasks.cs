@@ -27,14 +27,7 @@ public sealed class AssessorContractTasks(
                 .Unprotect(row.SensitiveProfileCiphertext!);
             var profile = JsonSerializer.Deserialize<ContractProfile>(json)
                 ?? throw new InvalidOperationException("Invalid contract profile.");
-            var document = await files.Generate(row, profile, ct);
-            row.ContractStorageKey = document.Key;
-            row.ContractSha256 = document.Sha256;
-            row.TemplateVersion = options.Value.TemplateVersion;
-            row.SignatureStatement = options.Value.SignatureStatement;
-            row.GenerationErrorCode = null;
-            row.GenerationRetryAt = null;
-            row.Status = AssessorOnboardingStatus.AwaitingSignature;
+            await AssessorContractService.PrepareDocument(row, profile, files, options.Value, ct);
             row.Revision = Guid.NewGuid();
             contracts.QueueContractLink(row);
             // State and email are committed atomically. A losing generator leaves only a private, content-addressed file.
@@ -119,10 +112,6 @@ public sealed class AssessorContractTasks(
                 row.SetPasswordTokenExpiresAt > now && row.SetPasswordTokenHash == email.CredentialHash,
             "Rejected" => row.Status == AssessorOnboardingStatus.Rejected,
             "Contract" => row.Status == AssessorOnboardingStatus.AwaitingSignature && row.ContractTokenHash == email.CredentialHash,
-            "ReadOtp" => row.Status == AssessorOnboardingStatus.AwaitingSignature && row.OtpPurpose == "Read" && row.OtpHash != null &&
-                AssessorContractSecrets.Hash(row.OtpHash) == email.CredentialHash && row.OtpExpiresAt > now,
-            "SignOtp" => row.Status == AssessorOnboardingStatus.AwaitingSignature && row.OtpPurpose == "Sign" && row.OtpHash != null &&
-                AssessorContractSecrets.Hash(row.OtpHash) == email.CredentialHash && row.OtpExpiresAt > now,
             _ => false
         };
     }

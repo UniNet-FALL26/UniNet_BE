@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Writer;
@@ -22,7 +23,19 @@ public sealed class AssessorContractFiles(IOptions<AssessorContractOptions> opti
             ["FullName"] = row.FullName!,
             ["Email"] = row.EmailNormalized,
             ["CitizenId"] = profile.CitizenId,
-            ["TaxCode"] = profile.TaxCode,
+            ["TaxCode"] = "",
+            ["IdentityNumber"] = profile.CitizenId,
+            ["ContractCode"] = row.Id.ToString("N").ToUpperInvariant(),
+            ["SigningDate"] = row.SubmittedAt?.ToOffset(TimeSpan.FromHours(7)).ToString("dd/MM/yyyy") ?? "",
+            ["CompanyName"] = settings.CompanyName,
+            ["CompanyTaxCode"] = settings.CompanyTaxCode,
+            ["CompanyAddress"] = settings.CompanyAddress,
+            ["RepresentativeName"] = settings.RepresentativeName,
+            ["RepresentativePosition"] = settings.RepresentativePosition,
+            ["CompanyEmail"] = settings.CompanyEmail,
+            ["CompanyPhone"] = settings.CompanyPhone,
+            ["MinimumWithdrawalAmount"] = settings.MinimumWithdrawalAmount,
+            ["PaymentProcessingDays"] = settings.PaymentProcessingDays,
             ["BankName"] = profile.BankName,
             ["BankAccountNumber"] = profile.BankAccountNumber,
             ["BankAccountHolder"] = profile.BankAccountHolder,
@@ -31,8 +44,14 @@ public sealed class AssessorContractFiles(IOptions<AssessorContractOptions> opti
         };
         // Replace once so profile values cannot introduce additional template substitutions.
         var text = Regex.Replace(template, @"\{\{([A-Za-z]+)\}\}", match =>
-            values.TryGetValue(match.Groups[1].Value, out var value) ? value :
-                throw new InvalidOperationException("Unknown contract placeholder."));
+        {
+            var key = match.Groups[1].Value;
+            if (!values.TryGetValue(key, out var value))
+                throw new InvalidOperationException("Unknown contract placeholder.");
+            if (string.IsNullOrWhiteSpace(value) && key != "TaxCode")
+                throw new AuthException("CONTRACT_DETAILS_NOT_CONFIGURED", "Thông tin mẫu hợp đồng chưa được cấu hình đầy đủ.", 503);
+            return value;
+        });
         var bytes = Render(text, await File.ReadAllBytesAsync(settings.FontPath, ct));
         var sha = Convert.ToHexString(SHA256.HashData(bytes));
         var key = $"{row.Id:N}/{sha}.pdf";
@@ -54,10 +73,56 @@ public sealed class AssessorContractFiles(IOptions<AssessorContractOptions> opti
 
     public async Task<byte[]> Read(string key, string sha256, CancellationToken ct)
     {
-        var bytes = await File.ReadAllBytesAsync(Resolve(key), ct);
+        byte[] bytes;
+        try
+        {
+            bytes = await File.ReadAllBytesAsync(Resolve(key), ct);
+        }
+        catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new AuthException("CONTRACT_FILE_MISSING",
+                "Máy chủ này không có tệp hợp đồng gốc. Vui lòng kiểm tra nơi hợp đồng được tạo và kho lưu trữ.", 404);
+        }
         if (!string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), sha256, StringComparison.Ordinal))
             throw new InvalidOperationException("Contract integrity check failed.");
         return bytes;
+    }
+
+    public async Task<byte[]> Export(AssessorOnboarding row, CancellationToken ct)
+    {
+        var bytes = await Read(row.ContractStorageKey!, row.ContractSha256!, ct);
+        if (row.SignedAt is not { } signedAt) return bytes;
+
+        byte[] fontBytes;
+        try { fontBytes = await File.ReadAllBytesAsync(settings.FontPath, ct); }
+        catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new AuthException("CONTRACT_FONT_UNAVAILABLE",
+                "Máy chủ chưa có phông chữ để xuất trang xác nhận ký hợp đồng.", 503);
+        }
+
+        var signedTime = signedAt.ToOffset(TimeSpan.FromHours(7)).ToString("dd/MM/yyyy HH:mm:ss");
+        var receiptText = $"""
+            XÁC NHẬN KÝ HỢP ĐỒNG ONLINE – UNINET
+
+            Người ký (Bên B): {row.SignedName}
+            Email: {row.EmailNormalized}
+            Thời điểm xác nhận: {signedTime} (UTC+7)
+            Phiên bản hợp đồng: {row.TemplateVersion}
+            SHA-256 của bản hợp đồng được xác nhận:
+            {row.ContractSha256}
+
+            Nội dung xác nhận:
+            {row.SignatureStatement}
+            """;
+        using var original = PdfDocument.Open(bytes);
+        using var receipt = PdfDocument.Open(Render(receiptText, fontBytes));
+        using var export = new PdfDocumentBuilder();
+        for (var page = 1; page <= original.NumberOfPages; page++)
+            export.AddPage(original, page);
+        for (var page = 1; page <= receipt.NumberOfPages; page++)
+            export.AddPage(receipt, page);
+        return export.Build();
     }
 
     private string Resolve(string key)

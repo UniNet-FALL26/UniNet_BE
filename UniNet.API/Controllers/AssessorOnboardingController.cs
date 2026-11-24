@@ -74,9 +74,9 @@ public sealed class AssessorOnboardingProfileController(AssessorOnboardingServic
 {
     [HttpPost("inspect")]
     public async Task<IActionResult> Inspect(AssessorProfileLink request, CancellationToken ct)
-        => Ok(new { email = await onboarding.ReadForm(request.Token, ct) });
+        => Ok(await onboarding.ReadForm(request.Token, ct));
 
     [HttpPost]
     public async Task<IActionResult> Submit(SubmitAssessorOnboardingProfile request, CancellationToken ct)
-        => Ok(new { id = await onboarding.Submit(request, ct), status = "ProfileSubmitted" });
+        => Ok(await onboarding.Submit(request, ct));
 }

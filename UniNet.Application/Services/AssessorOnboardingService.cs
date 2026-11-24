@@ -25,14 +25,15 @@ public sealed record SubmitAssessorOnboardingProfile(
     [Required, StringLength(43, MinimumLength = 43)] string Token,
     [Required, MaxLength(255)] string FullName,
     [Required, RegularExpression("^[0-9]{12}$")] string CitizenId,
-    [Required, RegularExpression("^[0-9]{10}(-?[0-9]{3})?$")] string TaxCode,
     [Required, MaxLength(150)] string BankName,
     [Required, RegularExpression("^[A-Za-z0-9]{1,34}$")] string BankAccountNumber,
     [Required, MaxLength(255)] string BankAccountHolder);
 
+public sealed record SubmittedAssessorProfile(Guid Id, string Status, string ContractLink);
+
 public sealed class AssessorOnboardingService(
     UniNetDbContext db, IDataProtectionProvider protection, TimeProvider clock,
-    AssessorOnboardingEmailQueue emails, IOptions<AssessorContractOptions> options)
+    AssessorOnboardingEmailQueue emails, IOptions<AssessorContractOptions> options, IAssessorContractFiles? files = null)
 {
     internal const string InvitationEmailKind = "ProfileInvitation";
 
@@ -74,7 +75,7 @@ public sealed class AssessorOnboardingService(
         {
             EmailNormalized = email,
             CreatedByAccountId = actor,
-            AutoApprove = request.AutoApprove,
+            AutoApprove = false,
             Status = AssessorOnboardingStatus.Invited,
             CreatedAt = now,
             ProfileTokenHash = Hash(token),
@@ -129,27 +130,39 @@ public sealed class AssessorOnboardingService(
             throw new AuthException("INVITATION_NOT_OPEN", "Hồ sơ không còn ở trạng thái có thể thu hồi.", 409);
     }
 
-    public async Task<string> ReadForm(string token, CancellationToken ct)
-        => (await FindOpenInvitation(token, ct)).EmailNormalized;
-
-    public async Task<Guid> Submit(SubmitAssessorOnboardingProfile request, CancellationToken ct)
+    public async Task<object> ReadForm(string token, CancellationToken ct)
     {
+        var hash = Hash(token);
+        var now = clock.GetUtcNow();
+        var row = await db.AssessorOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.ProfileTokenHash == hash, ct);
+        if (row?.Status == AssessorOnboardingStatus.Invited && row.ProfileTokenExpiresAt > now)
+            return new { email = row.EmailNormalized, contractLink = (string?)null };
+        if (row?.ContractTokenHash == hash && row.ContractTokenExpiresAt > now &&
+            AssessorContractService.CanRead(row))
+            return new { email = row.EmailNormalized, contractLink = ContractLink(token) };
+        throw InvalidInvitation();
+    }
+
+    private static string ContractLink(string token) => "/assessor-onboarding/contract.html#token=" + token;
+
+    public async Task<SubmittedAssessorProfile> Submit(SubmitAssessorOnboardingProfile request, CancellationToken ct)
+    {
+        if (new[] { request.FullName, request.BankName, request.BankAccountHolder }.Any(value => value.Any(char.IsControl)))
+            throw new AuthException("INVALID_PROFILE_TEXT", "Vui lòng nhập thông tin cá nhân trên một dòng.", 400);
         var row = await FindOpenInvitation(request.Token, ct);
         var now = clock.GetUtcNow();
-        var sensitive = JsonSerializer.Serialize(new
-        {
-            request.CitizenId,
-            request.TaxCode,
-            BankName = request.BankName.Trim(),
-            request.BankAccountNumber,
-            BankAccountHolder = request.BankAccountHolder.Trim()
-        });
+        if (!options.Value.Enabled)
+            throw new AuthException("CONTRACTS_DISABLED", "Chức năng hợp đồng chưa được cấu hình.", 503);
+        var profile = new ContractProfile(request.CitizenId, request.BankName.Trim(),
+            request.BankAccountNumber, request.BankAccountHolder.Trim());
+        var sensitive = JsonSerializer.Serialize(profile);
         row.FullName = request.FullName.Trim();
         row.SensitiveProfileCiphertext = protection.CreateProtector("UniNet.AssessorOnboarding.Profile.v1")
             .Protect(sensitive);
         row.SubmittedAt = now;
         row.ProfileTokenUsedAt = now;
-        row.Status = AssessorOnboardingStatus.ProfileSubmitted;
+        await AssessorContractService.PrepareDocument(row, profile, files ?? new AssessorContractFiles(options), options.Value, ct);
+        AssessorContractService.SetContractToken(row, request.Token, now);
         row.Revision = Guid.NewGuid();
         try
         {
@@ -159,7 +172,7 @@ public sealed class AssessorOnboardingService(
         {
             throw InvalidInvitation();
         }
-        return row.Id;
+        return new(row.Id, "AwaitingSignature", ContractLink(request.Token));
     }
 
     private async Task<AssessorOnboarding> FindOpenInvitation(string token, CancellationToken ct)

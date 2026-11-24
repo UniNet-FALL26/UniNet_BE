@@ -28,8 +28,13 @@ async function openForm() {
                 : "Không thể mở hồ sơ lúc này. Vui lòng mở lại lời mời sau.";
             return;
         }
-        email.value = (await response.json()).email;
-        message.textContent = "Vui lòng kiểm tra thông tin trước khi nộp.";
+        const detail = await response.json();
+        if (detail.contractLink) {
+            location.replace(detail.contractLink);
+            return;
+        }
+        email.value = detail.email;
+        message.textContent = "";
         form.hidden = false;
     } catch {
         message.textContent = "Không thể kết nối. Vui lòng mở lại lời mời sau.";
@@ -43,17 +48,19 @@ form.addEventListener("submit", async (event) => {
         const profile = Object.fromEntries(new FormData(form));
         const response = await post("/api/assessor-onboarding/profile", { ...profile, token });
         if (response.ok) {
+            const detail = await response.json();
             form.reset();
             form.hidden = true;
-            message.textContent = "UniNet đã nhận hồ sơ của bạn.";
+            location.replace(detail.contractLink);
         } else if (response.status === 410) {
             form.reset();
             form.hidden = true;
             message.textContent = "Lời mời không còn hiệu lực hoặc hồ sơ đã được nộp.";
         } else {
-            message.textContent = response.status === 400
+            const error = await response.json().catch(() => ({}));
+            message.textContent = error.message || (response.status === 400
                 ? "Thông tin chưa hợp lệ. Vui lòng kiểm tra các trường và gửi lại."
-                : "Chưa thể nộp hồ sơ. Vui lòng thử lại.";
+                : "Chưa thể nộp hồ sơ. Vui lòng thử lại.");
         }
     } catch {
         message.textContent = "Không thể kết nối. Vui lòng thử lại.";

@@ -1,0 +1,35 @@
+:root { color-scheme: light; font: 16px system-ui, sans-serif; color: #101c3a; background: #edf4ff; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at top right, #d5e7ff, transparent 65%); }
+.brand { display: flex; align-items: center; gap: .65rem; padding: .8rem 3vw; background: #f7faff; font-size: 1.55rem; font-weight: 750; }
+.brand-mark { color: #0961d3; font-size: 2rem; line-height: 1; font-weight: 900; }
+main { max-width: 74rem; margin: 0 auto; padding: 1.75rem 1rem 3rem; }
+.contract-main { max-width: 58rem; }
+.intro { padding: .2rem 0 1rem; }
+h1 { margin: 0; font-size: clamp(1.55rem, 4vw, 2.15rem); }
+p { margin: .45rem 0; }
+.muted { color: #405373; }
+#message { margin: .25rem 0 .9rem; }
+#message:empty { display: none; }
+.card { padding: clamp(1rem, 3vw, 2rem); border: 1px solid #dbe6f7; border-radius: 1.2rem; background: #fff; box-shadow: 0 12px 32px #193a7418; }
+.card section + section, aside, #sign { margin-top: 1.2rem; }
+h2 { margin: 0 0 .8rem; padding-bottom: .55rem; border-bottom: 1px solid #dbe6f7; font-size: 1.2rem; }
+small { font-size: .95rem; font-weight: 500; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .95rem 1.5rem; }
+.wide { grid-column: 1 / -1; }
+label { display: block; font-weight: 600; }
+label > span:not(#statement) { color: #ab1c37; }
+input:not([type=checkbox]) { width: 100%; margin-top: .35rem; padding: .65rem .85rem; border: 1px solid #a8b6ca; border-radius: .55rem; background: #fff; font: inherit; font-weight: 400; }
+input[readonly] { background: #e9eef7; }
+aside { background: #e8f1ff; padding: .85rem 1rem; border-radius: .8rem; }
+ul { margin: .3rem 0 0; padding-left: 1.3rem; }
+.actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+button { cursor: pointer; border: 1px solid #0c55bc; border-radius: .65rem; padding: .75rem 1.15rem; background: #0a56c8; color: #fff; font: inherit; font-weight: 650; }
+button.secondary { background: #fff; color: #0c55bc; }
+button:disabled { opacity: .65; cursor: wait; }
+#document { max-height: 65vh; overflow: auto; border: 1px solid #dbe6f7; border-radius: .65rem; padding: clamp(.8rem, 3vw, 2rem); white-space: pre-wrap; overflow-wrap: anywhere; font: 1rem/1.65 system-ui, sans-serif; }
+#document section + section { padding-top: 1rem; border-top: 1px solid #dbe6f7; }
+.agree { display: flex; align-items: baseline; gap: .55rem; margin: .9rem 0; font-weight: 500; }
+#signed { padding-top: .9rem; }
+@media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }

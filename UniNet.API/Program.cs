@@ -87,6 +87,16 @@ else
 }
 builder.Services.AddOptions<AssessorContractOptions>()
     .Bind(builder.Configuration.GetSection("AssessorOnboarding"))
+    .PostConfigure(o =>
+    {
+        if (string.IsNullOrWhiteSpace(o.TemplatePath))
+        {
+            o.TemplatePath = Path.Combine(builder.Environment.ContentRootPath, "Contracts", "assessor-agreement-v2.txt");
+            o.TemplateVersion = "ASSESSOR-AGREEMENT-V2";
+        }
+        if (string.IsNullOrWhiteSpace(o.SignatureStatement))
+            o.SignatureStatement = "Tôi xác nhận đã đọc và đồng ý với toàn bộ hợp đồng và các phụ lục.";
+    })
     .Validate(o => !o.Enabled || (
         Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var uri) &&
         (uri.Scheme == "https" || (builder.Environment.IsDevelopment() && uri.IsLoopback && uri.Scheme == "http")) &&
