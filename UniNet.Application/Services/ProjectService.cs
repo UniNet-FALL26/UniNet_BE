@@ -261,6 +261,15 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
             .FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken: ct);
 
         Require(project != null, "PROJECT_NOT_FOUND", "Project not found.", 404);
+        if (project.Status is (ProjectStatus.Pending or ProjectStatus.Rejected) &&
+            project.Creator.AccountId != userId &&
+            !await db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.Status == ProjectMemberStatus.Active &&
+                m.User.AccountId == userId, ct))
+        {
+            Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+                m.Purpose == ProjectModerationPurpose.ProjectHubSubmission, ct),
+                "PROJECT_NOT_FOUND", "Project not found.", 404);
+        }
 
         return await MapToDetailResponseAsync(project, userId, ct);
     }
@@ -281,6 +290,10 @@ public sealed class ProjectService(UniNetDbContext db, ProjectModerationService 
         var userProfile = await db.UserProfiles.FirstOrDefaultAsync(p => p.AccountId == userId, cancellationToken: ct);
         Require(userProfile != null, "PROFILE_NOT_FOUND", "User profile not found.", 404);
         Require(project.CreatorId == userProfile.Id, "UNAUTHORIZED", "Only the project creator can update it.", 403);
+
+        Require(!await db.ProjectModerations.AnyAsync(m => m.ProjectId == projectId &&
+            m.Purpose == ProjectModerationPurpose.ProjectHubSubmission, ct),
+            "USE_PROJECT_HUB", "Update this project through Project Hub.", 409);
 
         Require(project.Status is ProjectStatus.Pending or ProjectStatus.Rejected ||
                 (project.Status == ProjectStatus.Active && project.RecruitmentStatus == RecruitmentStatus.Open),

@@ -3,5 +3,6 @@ namespace UniNet.Domain.Enums;
 public enum ProjectModerationPurpose : short
 {
     ProjectSubmission = 0,
-    ProjectEvidence = 1
+    ProjectEvidence = 1,
+    ProjectHubSubmission = 2
 }

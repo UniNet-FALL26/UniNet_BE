@@ -11,6 +11,6 @@ public sealed class UnifiedProjectModerationConfiguration : IEntityTypeConfigura
     {
         e.Property(x => x.Purpose).HasConversion<short>();
         e.Property(x => x.Purpose).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
-        e.ToTable("ProjectModerations", t => t.HasCheckConstraint("CK_ProjectModerations_Purpose", "\"Purpose\" = 0"));
+        e.ToTable("ProjectModerations", t => t.HasCheckConstraint("CK_ProjectModerations_Purpose", "\"Purpose\" IN (0, 2)"));
     }
 }

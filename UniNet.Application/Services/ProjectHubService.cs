@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using UniNet.Application.Interfaces;
 using UniNet.Application.DTOs.Projects;
 using UniNet.Domain;
 using UniNet.Domain.Entities;
@@ -9,7 +11,8 @@ using UniNet.Infrastructure.Data;
 
 namespace UniNet.Application.Services;
 
-public sealed partial class ProjectHubService(UniNetDbContext db)
+public sealed partial class ProjectHubService(UniNetDbContext db, IAIModerationService aiModeration,
+    IConfiguration configuration)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private IQueryable<Project> Projects() => db.Projects.Include(p => p.Creator)
@@ -39,7 +42,8 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
     public async Task<HubPage> DiscoverAsync(Guid accountId, int page, int pageSize, string? q, CancellationToken ct)
     {
         var actor = await Actor(accountId, ct); var now = DateTimeOffset.UtcNow;
-        var query = Projects().AsNoTracking().Where(p => (p.Status == ProjectStatus.Active || p.Status == ProjectStatus.Pending) && p.Recruitment != null &&
+        var query = Projects().AsNoTracking().Where(p => (p.Status == ProjectStatus.Active || (p.Status == ProjectStatus.Pending &&
+            !p.Moderations.Any(m => m.Purpose == ProjectModerationPurpose.ProjectHubSubmission))) && p.Recruitment != null &&
             p.Recruitment.Status == ProjectRecruitmentStatus.Open && (p.Recruitment.Deadline == null || p.Recruitment.Deadline > now));
         return await Page(query, actor.Id, page, pageSize, q, ct);
     }
@@ -65,6 +69,9 @@ public sealed partial class ProjectHubService(UniNetDbContext db)
     public async Task<HubProject> GetAsync(Guid id, Guid accountId, CancellationToken ct)
     {
         var actor = await Actor(accountId, ct); var p = await Project(id, ct);
+        if (!ActiveMember(p, actor.Id) && p.Status is (ProjectStatus.Pending or ProjectStatus.Rejected) &&
+            await HasHubModeration(id, ct))
+            throw new ProjectException("PROJECT_NOT_FOUND", "Project not found.", 404);
         return await Response(p, actor.Id, ct);
     }
 

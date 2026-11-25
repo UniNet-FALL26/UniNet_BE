@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
@@ -281,13 +281,22 @@ public sealed class GeminiModerationService : IAIModerationService
 
         sb.AppendLine("=== PROJECT DATA END ===");
         sb.AppendLine();
-        sb.AppendLine("Analyze this project for:");
-        sb.AppendLine("1. Spam content or suspicious patterns");
-        sb.AppendLine("2. Inappropriate or offensive content");
-        sb.AppendLine("3. Malicious activities, illegal content, or cybercrime (but NOT legitimate cybersecurity/ethical hacking projects)");
-        sb.AppendLine("4. Suspicious project indicators");
-        sb.AppendLine("5. Potentially duplicate projects");
-        sb.AppendLine("6. Suspicious or malicious links");
+        if (input.CheckProhibitedKeywordsOnly)
+        {
+            sb.AppendLine($"Check only the title and description for these prohibited terms: {string.Join(", ", ProhibitedKeywords)}.");
+            sb.AppendLine("Use unsafe only for a clear prohibited term in a violating context. Use suspicious if uncertain and safe if none apply.");
+            sb.AppendLine("For unsafe, cite the matched term in the reason. Set linkResult to safe and all boolean flags to false.");
+        }
+        else
+        {
+            sb.AppendLine("Analyze this project for:");
+            sb.AppendLine("1. Spam content or suspicious patterns");
+            sb.AppendLine("2. Inappropriate or offensive content");
+            sb.AppendLine("3. Malicious activities, illegal content, or cybercrime (but NOT legitimate cybersecurity/ethical hacking projects)");
+            sb.AppendLine("4. Suspicious project indicators");
+            sb.AppendLine("5. Potentially duplicate projects");
+            sb.AppendLine("6. Suspicious or malicious links");
+        }
         sb.AppendLine();
         sb.AppendLine("Respond with ONLY valid JSON (no markdown, no explanations) in this exact format:");
         sb.AppendLine("{");

@@ -19,7 +19,7 @@ public sealed partial class ProjectHubService
         var p = new Project { CreatorId = actor.Id, Creator = actor,
             Title = Text(request.Title, 200, true)!, Description = Text(request.Description, 500, true)!,
             LogoUrl = Url(request.LogoUrl), Technologies = JsonSerializer.Serialize(Strings(request.Technologies), Json),
-            Status = ProjectStatus.Active, Visibility = ProjectVisibility.Public,
+            Status = ProjectStatus.Pending, Visibility = ProjectVisibility.Public,
             ProjectField = "Khác", MemberTarget = null, MinimumQuantity = null, RecruitmentDeadline = null,
             RecruitmentStatus = RecruitmentStatus.Closed, CreatedAt = now, UpdatedAt = now, SubmitterRole = role };
         p.SubmitterIsLeader = true;
@@ -27,7 +27,9 @@ public sealed partial class ProjectHubService
             Role = role ?? "Leader", Status = ProjectMemberStatus.Active,
             JoinedAt = now, CreatedAt = now, UpdatedAt = now });
         p.Details = new() { ProjectId = p.Id, StartDate = today, StartDateIsCreationDate = true, UpdatedAt = now };
-        db.Projects.Add(p); await db.SaveChangesAsync(ct);
+        await ModerateCreationAsync(p, ct);
+        db.Projects.Add(p);
+        await db.SaveChangesAsync(ct);
         return await Response(p, actor.Id, ct);
     }
 
@@ -36,6 +38,8 @@ public sealed partial class ProjectHubService
         var actor = await Actor(accountId, ct);
         var p = await Transaction(async () => {
         var p = await Locked(id, ct); Own(p, actor);
+        if (request.Title != null || request.Description != null || request.Status.HasValue)
+            await RequireApprovedSubmission(p, ct);
         if (request.Title != null) p.Title = Text(request.Title, 200, true)!;
         if (request.Description != null) p.Description = Text(request.Description, 500, true)!;
         if (request.LogoUrl != null) p.LogoUrl = Url(request.LogoUrl);
@@ -47,6 +51,8 @@ public sealed partial class ProjectHubService
             Require(request.Status is >= 0 and <= 2, "INVALID_PROJECT_STATUS", "Trạng thái dự án không hợp lệ.");
             Require(p.Status != ProjectStatus.Completed || request.Status == 2,
                 "PROJECT_COMPLETED", "Dự án đã hoàn thành không thể mở lại qua thao tác này.", 409);
+            if (request.Status == 0 && await HasHubModeration(id, ct))
+                throw new ProjectException("INVALID_PROJECT_STATUS", "Pending is reserved for moderation.", 409);
             p.Status = (ProjectStatus)request.Status.Value;
             if (p.Status == ProjectStatus.Completed) { StampCompletion(p, now); await ExpirePending(p.Id, now, ct, applicationsOnly: true); }
         }
@@ -157,6 +163,7 @@ public sealed partial class ProjectHubService
         var actor = await Actor(accountId, ct);
         var p = await Transaction(async () => {
         var p = await Locked(id, ct); Own(p, actor);
+        await RequireApprovedSubmission(p, ct);
         Require(p.Status != ProjectStatus.Rejected, "INVALID_PROJECT_STATUS", "Dự án cũ bị từ chối cần được xử lý trước.", 409);
         var now = DateTimeOffset.UtcNow;
         p.Status = ProjectStatus.Completed; StampCompletion(p, now); p.UpdatedAt = now;

@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using UniNet.Application;
 using UniNet.Application.DTOs.Projects;
 using UniNet.Application.Services;
@@ -14,6 +15,51 @@ namespace UniNet.Tests;
 
 public sealed class ProjectHubTests
 {
+    [Theory]
+    [InlineData("unsafe", 0.95, ProjectStatus.Rejected)]
+    [InlineData("unsafe", 0.75, ProjectStatus.Pending)]
+    [InlineData("suspicious", 0.95, ProjectStatus.Pending)]
+    [InlineData("safe", 0.95, ProjectStatus.Pending)]
+    [InlineData("error", 0, ProjectStatus.Pending)]
+    public async Task CreationRoutesAiResultsToRejectionOrStaffReview(string result, double confidence, ProjectStatus status)
+    {
+        await using var f = await Fixture.Create();
+        var ai = new HubModerationStub(result, (decimal)confidence);
+        var config = new ConfigurationBuilder().Build();
+        var hub = new ProjectHubService(f.Db, ai, config);
+        var moderation = new ProjectModerationService(ai, f.Db, config);
+        var project = await hub.CreateAsync(f.Owner.Id, new() { Title = "New project", Description = "Test" }, default);
+        Assert.Equal((short)status, project.Status);
+        await Assert.ThrowsAsync<ProjectException>(() => hub.GetAsync(project.Id, f.Other.Id, default));
+        await Assert.ThrowsAsync<ProjectException>(() => hub.UpdateAsync(project.Id, f.Owner.Id, new() { Status = 1 }, default));
+        var queue = await moderation.GetPendingProjectsAsync(1, 10, default, ProjectModerationPurpose.ProjectHubSubmission);
+        Assert.Equal(status == ProjectStatus.Pending ? 1 : 0, queue.TotalItems);
+        Assert.Empty((await moderation.GetPendingProjectsAsync(1, 10, default)).Projects);
+    }
+
+    [Theory]
+    [InlineData(AccountRole.Admin, true, ProjectStatus.Active)]
+    [InlineData(AccountRole.Moderator, false, ProjectStatus.Rejected)]
+    public async Task StaffCanDecidePendingHubProjectOnce(AccountRole role, bool approve, ProjectStatus expected)
+    {
+        await using var f = await Fixture.Create();
+        var staff = new Account { Email = "staff@hub.test", Role = role,
+            Profile = new() { FullName = "Staff", Nickname = "staff" } };
+        f.Db.Accounts.Add(staff);
+        await f.Db.SaveChangesAsync();
+        var project = await f.Service.CreateAsync(f.Owner.Id, new() { Title = "New project", Description = "Test" }, default);
+        var moderation = new ProjectModerationService(new HubModerationStub(), f.Db, new ConfigurationBuilder().Build());
+        const ProjectModerationPurpose purpose = ProjectModerationPurpose.ProjectHubSubmission;
+        Task<ProjectModerationResponse> Decide() => approve
+            ? moderation.ApproveProjectAsync(project.Id, staff.Id, new(), default, purpose)
+            : moderation.RejectProjectAsync(project.Id, staff.Id, new("Banned content"), default, purpose);
+        await Decide();
+        f.Db.ChangeTracker.Clear();
+        Assert.Equal((short)expected, (await f.Service.GetAsync(project.Id, f.Owner.Id, default)).Status);
+        Assert.Empty((await moderation.GetPendingProjectsAsync(1, 10, default, purpose)).Projects);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProjectException>(Decide)).Status);
+    }
+
     [Theory]
     [InlineData(false, false, ProjectMemberStatus.Left)]
     [InlineData(false, true, ProjectMemberStatus.Kicked)]
@@ -111,7 +157,7 @@ public sealed class ProjectHubTests
     public async Task NewProjectTimelineUsesCreationDayAndEditableEndDate()
     {
         await using var f = await Fixture.Create();
-        var p = await f.Service.CreateAsync(f.Owner.Id, new() { Title = "Timeline", Description = "Dates" }, default);
+        var p = await f.CreateActive(new() { Title = "Timeline", Description = "Dates" });
         var start = DateOnly.FromDateTime(p.CreatedAt.ToOffset(TimeSpan.FromHours(7)).DateTime);
         Assert.Equal(start, p.Details.StartDate); Assert.True(p.Details.StartDateIsCreationDate);
         Assert.Null(p.Details.ActualEndDate);
@@ -218,15 +264,15 @@ public sealed class ProjectHubTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
-    public async Task CreationAlwaysStartsActiveRegardlessOfRequestedStatus(short requestedStatus)
+    public async Task CreationWaitsForReviewRegardlessOfRequestedStatus(short requestedStatus)
     {
         await using var f = await Fixture.Create();
         var result = await f.Service.CreateAsync(f.Owner.Id,
             new() { Title = "New project", Description = "Initial status", Status = requestedStatus }, default);
-        Assert.Equal((short)ProjectStatus.Active, result.Status);
+        Assert.Equal((short)ProjectStatus.Pending, result.Status);
         Assert.Null(result.Details.CompletedAt);
         var stored = await f.Db.Projects.SingleAsync();
-        Assert.Equal(ProjectStatus.Active, stored.Status);
+        Assert.Equal(ProjectStatus.Pending, stored.Status);
         Assert.Null(stored.CompletedAt);
     }
 
@@ -260,7 +306,7 @@ public sealed class ProjectHubTests
     public async Task CompletingExistingProjectPreservesFriendInvitation(bool patch)
     {
         await using var f = await Fixture.Create();
-        var p = await f.Service.CreateAsync(f.Owner.Id, new() { Title = "Existing", Description = "External" }, default);
+        var p = await f.CreateActive(new() { Title = "Existing", Description = "External" });
         await f.Befriend(f.Other);
         var invite = await f.Service.RequestAsync(p.Id, f.Owner.Id,
             new() { RequestType = 1, InvitedUserId = f.Other.Profile!.Id, Role = "Designer" }, default);
@@ -271,15 +317,15 @@ public sealed class ProjectHubTests
     }
 
     [Fact]
-    public async Task NewProjectsStartActiveWithOwnerAndWithoutRecruitment()
+    public async Task NewProjectsStartPendingWithOwnerAndWithoutRecruitment()
     {
         await using var f = await Fixture.Create();
         var result = await f.Service.CreateAsync(f.Owner.Id, new() { Title = "Game 2D", Description = "A real personal game", Technologies = ["Unity", "C#"] }, default);
-        Assert.Equal(1, result.Status);
+        Assert.Equal(0, result.Status);
         Assert.Null(result.Recruitment);
         Assert.Equal("Leader", Assert.Single(result.Members).Role);
         Assert.Null(result.ChatRoomId);
-        Assert.Empty(await f.Db.ProjectModerations.ToListAsync());
+        Assert.Equal(ProjectModerationStatus.ReviewRequired, (await f.Db.ProjectModerations.SingleAsync()).Status);
         Assert.Empty(await f.Db.ProjectVerifications.ToListAsync());
         Assert.Empty(await f.Db.ContributionCycles.ToListAsync());
         Assert.Equal(["Unity", "C#"], result.Technologies);
@@ -589,14 +635,23 @@ public sealed class ProjectHubTests
         public Account Owner => owner;
         public Account Other => other;
         public Account Third => third;
-        public ProjectHubService Service { get; } = new(db);
+        public ProjectHubService Service { get; } = new(db, new HubModerationStub(), new ConfigurationBuilder().Build());
         public async Task Befriend(Account other)
         {
             db.Friendships.Add(new() { RequesterAccountId = owner.Id, ReceiverAccountId = other.Id, Status = FriendshipStatus.Accepted });
             await db.SaveChangesAsync();
         }
-        public Task<HubProject> Internal() => Service.CreateAsync(owner.Id,
-            new() { Title = "Personal", Description = "My project", Status = 1 }, default);
+        public Task<HubProject> Internal() => CreateActive(new() { Title = "Personal", Description = "My project" });
+
+        public async Task<HubProject> CreateActive(CreateHubProjectRequest request)
+        {
+            var draft = await Service.CreateAsync(owner.Id, request, default);
+            var project = await db.Projects.SingleAsync(p => p.Id == draft.Id);
+            project.Status = ProjectStatus.Active;
+            project.Moderations.Single().Status = ProjectModerationStatus.Approved;
+            await db.SaveChangesAsync();
+            return await Service.GetAsync(draft.Id, owner.Id, default);
+        }
         public static async Task<Fixture> Create()
         {
             var connection = new SqliteConnection("Data Source=:memory:");

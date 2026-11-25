@@ -127,7 +127,7 @@ public sealed class MessagingTests
         }
         else group = await f.Chat.CreateGroup(f.A.Id, new("Project group", null, [f.B.Id], project.Id), default);
 
-        var hub = new ProjectHubService(f.Db);
+        var hub = new ProjectHubService(f.Db, new HubModerationStub(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
         await hub.RecruitmentAsync(project.Id, f.A.Id, new() { Status = 1,
             Positions = [new() { Id = "developer", Name = "Developer", Quantity = 5 }] }, default);
         var application = await hub.RequestAsync(project.Id, f.D.Id, new() { PositionId = "developer" }, default);
