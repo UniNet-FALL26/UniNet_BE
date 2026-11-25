@@ -24,6 +24,16 @@ public record ProfileResponse(Guid Id, string FullName, string Nickname, string?
     public AssessorProfileDetails? AssessorJson { get; init; }
     public PartnerIntroductionDetails? Introduction { get; init; }
 }
+public sealed record PublicRoleProfileResponse(Guid Id, AccountRole Role, string FullName, string Nickname, string? OrganizationName,
+    string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, PartnerType? PartnerType,
+    string? Industry, bool IsVerified, DateTimeOffset CreatedAt)
+{
+    public IReadOnlyList<string> Websites { get; init; } = Array.Empty<string>();
+    public string? ContactEmail { get; init; }
+    public string? Phone { get; init; }
+    public string? Address { get; init; }
+    public PartnerIntroductionDetails? Introduction { get; init; }
+}
 public record AccountResponse(Guid Id, string Email, AccountRole Role, AccountStatus Status, bool EmailVerified, ProfileResponse? Profile, bool ProfileComplete)
 {
     public DateTimeOffset CreatedAt { get; init; }

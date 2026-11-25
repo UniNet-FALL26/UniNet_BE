@@ -12,6 +12,8 @@ public sealed class ProfileController(ProfileService profiles, AuthService auth,
     private Guid AccountId => Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? throw new AuthException("UNAUTHORIZED", "Phiên đăng nhập không hợp lệ.", 401));
     [HttpGet("me")]
     public Task<AccountResponse> Me(CancellationToken ct) => auth.Me(AccountId, ct);
+    [HttpGet("public/{profileId:guid}")]
+    public Task<PublicRoleProfileResponse> Public(Guid profileId, CancellationToken ct) => profiles.Public(profileId, ct);
     [HttpGet("portfolio/me")]
     public Task<PortfolioResponse> PortfolioMe(CancellationToken ct) => portfolio.Me(AccountId, ct);
     [Authorize(Roles = "Student"), HttpGet("portfolio/me/eligible-projects")]
