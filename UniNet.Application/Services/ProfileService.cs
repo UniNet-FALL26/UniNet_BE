@@ -7,6 +7,34 @@ namespace UniNet.Application.Services;
 
 public sealed partial class ProfileService(UniNetDbContext db)
 {
+    public async Task<PublicRoleProfileResponse> Public(Guid profileId, CancellationToken ct)
+    {
+        var profile = await db.UserProfiles.AsNoTracking()
+            .Where(x => x.Id == profileId && x.Account.Status == AccountStatus.Active)
+            .Select(x => new { Profile = x, x.Account.Role })
+            .SingleOrDefaultAsync(ct)
+            ?? throw new AuthException("PROFILE_NOT_FOUND", "Không tìm thấy hồ sơ.", 404);
+        var p = profile.Profile;
+        var role = profile.Role;
+        return new PublicRoleProfileResponse(p.Id, role, p.FullName, p.Nickname,
+            role == AccountRole.Partner ? p.OrganizationName : null,
+            p.AvatarUrl, p.CoverUrl, p.Bio,
+            role == AccountRole.Student ? p.UniversityName : null,
+            role == AccountRole.Student ? p.Major : null,
+            role == AccountRole.Partner ? p.PartnerType : null,
+            role == AccountRole.Partner ? p.Industry : null,
+            p.IsVerified, p.CreatedAt)
+        {
+            Websites = role == AccountRole.Partner ? PartnerWebsiteLinks.ParseStored(p.Website) : Array.Empty<string>(),
+            ContactEmail = role == AccountRole.Partner ? p.ContactEmail : null,
+            Phone = role == AccountRole.Partner ? p.Phone : null,
+            Address = role == AccountRole.Partner ? p.Address : null,
+            Introduction = role == AccountRole.Partner && p.PartnerJson is { } partner
+                ? new(partner.IntroductionImageUrl, partner.FoundedOn, partner.EmployeeRange,
+                    (partner.Branches ?? []).ToArray(), (partner.GalleryUrls ?? []).ToArray())
+                : null,
+        };
+    }
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static void ValidateName(string value)
     {
