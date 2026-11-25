@@ -107,10 +107,16 @@ namespace UniNet.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("AutoApproveAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<byte[]>("ContractOriginalPdf")
+                        .HasColumnType("bytea");
+
                     b.Property<string>("ContractSha256")
                         .HasColumnType("text");
 
                     b.Property<string>("ContractStorageKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ContractText")
                         .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("ContractTokenExpiresAt")

@@ -18,11 +18,18 @@ public sealed class AssessorContractService(
     public async Task<object> Inspect(string session, CancellationToken ct)
     {
         var row = await ByContractToken(session, ct);
-        using var document = PdfDocument.Open(await files.Read(row.ContractStorageKey!, row.ContractSha256!, ct));
-        var pages = document.GetPages().Select(ExtractContractPage).ToArray();
+        var pages = await ReadPages(row, files, ct);
         await MarkViewed(row, ct);
         return new { row.FullName, row.TemplateVersion, row.ContractSha256, row.SignatureStatement,
             row.SignedAt, row.SignedName, row.ContractTokenExpiresAt, pages };
+    }
+
+    internal static async Task<string[]> ReadPages(AssessorOnboarding row, IAssessorContractFiles files, CancellationToken ct)
+    {
+        if (row.ContractText is { } text) return [text];
+
+        using var document = PdfDocument.Open(await files.Read(row.ContractStorageKey!, row.ContractSha256!, ct));
+        return document.GetPages().Select(ExtractContractPage).ToArray();
     }
 
     internal static string ExtractContractPage(UglyToad.PdfPig.Content.Page page)
@@ -127,6 +134,8 @@ public sealed class AssessorContractService(
         var document = await files.Generate(row, profile, ct);
         row.ContractStorageKey = document.Key;
         row.ContractSha256 = document.Sha256;
+        row.ContractText = document.Text;
+        row.ContractOriginalPdf = document.OriginalPdf;
         row.TemplateVersion = settings.TemplateVersion;
         row.SignatureStatement = settings.SignatureStatement;
         row.GenerationErrorCode = null;

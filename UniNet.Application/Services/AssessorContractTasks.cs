@@ -30,7 +30,7 @@ public sealed class AssessorContractTasks(
             await AssessorContractService.PrepareDocument(row, profile, files, options.Value, ct);
             row.Revision = Guid.NewGuid();
             contracts.QueueContractLink(row);
-            // State and email are committed atomically. A losing generator leaves only a private, content-addressed file.
+            // Contract content, onboarding state and notification are saved in one transaction.
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); }
         }

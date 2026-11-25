@@ -55,20 +55,7 @@ public sealed class AssessorContractFiles(IOptions<AssessorContractOptions> opti
         var bytes = Render(text, await File.ReadAllBytesAsync(settings.FontPath, ct));
         var sha = Convert.ToHexString(SHA256.HashData(bytes));
         var key = $"{row.Id:N}/{sha}.pdf";
-        var target = Resolve(key);
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            await File.WriteAllBytesAsync(temporary, bytes, ct);
-            try { File.Move(temporary, target, false); }
-            catch (IOException) when (File.Exists(target)) {
-                var existing = await File.ReadAllBytesAsync(target, ct);
-                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(existing), SHA256.HashData(bytes))) throw;
-            }
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-        return new(key, sha);
+        return new(key, sha, text.Normalize(NormalizationForm.FormC), bytes);
     }
 
     public async Task<byte[]> Read(string key, string sha256, CancellationToken ct)
@@ -83,14 +70,20 @@ public sealed class AssessorContractFiles(IOptions<AssessorContractOptions> opti
             throw new AuthException("CONTRACT_FILE_MISSING",
                 "Máy chủ này không có tệp hợp đồng gốc. Vui lòng kiểm tra nơi hợp đồng được tạo và kho lưu trữ.", 404);
         }
+        VerifyHash(bytes, sha256);
+        return bytes;
+    }
+
+    internal static void VerifyHash(byte[] bytes, string sha256)
+    {
         if (!string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), sha256, StringComparison.Ordinal))
             throw new InvalidOperationException("Contract integrity check failed.");
-        return bytes;
     }
 
     public async Task<byte[]> Export(AssessorOnboarding row, CancellationToken ct)
     {
-        var bytes = await Read(row.ContractStorageKey!, row.ContractSha256!, ct);
+        var bytes = row.ContractOriginalPdf ?? await Read(row.ContractStorageKey!, row.ContractSha256!, ct);
+        VerifyHash(bytes, row.ContractSha256!);
         if (row.SignedAt is not { } signedAt) return bytes;
 
         byte[] fontBytes;

@@ -24,11 +24,39 @@ public sealed class AssessorActivationService(
 
     public async Task<byte[]> ReviewPdf(Guid actor, Guid id, IAssessorContractFiles files, CancellationToken ct)
     {
+        return await files.Export(await GetContractForAdmin(actor, id, ct), ct);
+    }
+
+    private async Task<AssessorOnboarding> GetContractForAdmin(Guid actor, Guid id, CancellationToken ct)
+    {
         await RequireAdmin(actor, ct);
         var row = await db.AssessorOnboardings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
         if (row?.ContractStorageKey is null || row.ContractSha256 is null)
             throw new AuthException("CONTRACT_UNAVAILABLE", "Hồ sơ chưa có hợp đồng.", 404);
-        return await files.Export(row, ct);
+        return row;
+    }
+
+    public async Task<object> ReviewContract(Guid actor, Guid id, IAssessorContractFiles files, CancellationToken ct)
+    {
+        var row = await GetContractForAdmin(actor, id, ct);
+        var pages = await AssessorContractService.ReadPages(row, files, ct);
+        return new { pages, row.TemplateVersion, row.ContractSha256, row.SignedAt, row.SignedName, row.SignatureStatement };
+    }
+
+    public async Task ImportLegacyContract(Guid actor, Guid id, IAssessorContractFiles files, CancellationToken ct)
+    {
+        var row = await GetContractForAdmin(actor, id, ct);
+        if (row.ContractText is not null) return;
+
+        var bytes = await files.Read(row.ContractStorageKey!, row.ContractSha256!, ct);
+        using var document = UglyToad.PdfPig.PdfDocument.Open(bytes);
+        var text = string.Join("\n\n", document.GetPages().Select(AssessorContractService.ExtractContractPage));
+        await db.AssessorOnboardings
+            .Where(x => x.Id == id && x.ContractSha256 == row.ContractSha256 && x.ContractText == null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(x => x.ContractText, text)
+                .SetProperty(x => x.ContractOriginalPdf, bytes)
+                .SetProperty(x => x.Revision, Guid.NewGuid()), ct);
     }
 
     public async Task<object> Review(Guid actor, Guid id, CancellationToken ct)
