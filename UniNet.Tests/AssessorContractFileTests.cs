@@ -36,7 +36,17 @@ public sealed class AssessorContractFileTests
             {
                 FullName = "Nguyễn Thị Ánh", EmailNormalized = "test@example.test"
             }, new("000000000000", "Ngân hàng thử nghiệm", "000123456789", "NGUYEN THI ANH"), default);
-            var bytes = await files.Read(stored.Key, stored.Sha256, default);
+            var bytes = Assert.IsType<byte[]>(stored.OriginalPdf);
+            var legacyPath = Path.Combine(root, "private", stored.Key);
+            Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+            await File.WriteAllBytesAsync(legacyPath, bytes);
+            Assert.Equal(bytes, await files.Read(stored.Key, stored.Sha256, default));
+            File.Delete(legacyPath);
+            var pages = await AssessorContractService.ReadPages(new AssessorOnboarding
+            {
+                ContractText = stored.Text, ContractStorageKey = stored.Key, ContractSha256 = stored.Sha256
+            }, files, default);
+            Assert.Contains("Nguyễn Thị Ánh", Assert.Single(pages));
             using var pdf = PdfDocument.Open(bytes);
             Assert.True(pdf.NumberOfPages >= 2);
             var onlineText = AssessorContractService.ExtractContractPage(pdf.GetPage(1));
@@ -54,7 +64,7 @@ public sealed class AssessorContractFileTests
                 });
             var signedBytes = await files.Export(new AssessorOnboarding
             {
-                ContractStorageKey = stored.Key, ContractSha256 = stored.Sha256,
+                ContractStorageKey = stored.Key, ContractSha256 = stored.Sha256, ContractOriginalPdf = bytes,
                 SignedName = "Nguyễn Thị Anh", SignedAt = DateTimeOffset.UtcNow,
                 EmailNormalized = "test@example.test", TemplateVersion = "TEST-V1",
                 SignatureStatement = "Tôi đồng ý với hợp đồng."

@@ -31,6 +31,17 @@ public sealed class AdminAssessorOnboardingController(
         return File(await activation.ReviewPdf(Actor, id, files, ct), "application/pdf");
     }
 
+    [HttpGet("{id:guid}/contract/online")]
+    public async Task<IActionResult> ReviewOnlineContract(Guid id, CancellationToken ct)
+        => Ok(await activation.ReviewContract(Actor, id, files, ct));
+
+    [HttpPost("{id:guid}/contract/import-legacy")]
+    public async Task<IActionResult> ImportLegacyContract(Guid id, CancellationToken ct)
+    {
+        await activation.ImportLegacyContract(Actor, id, files, ct);
+        return NoContent();
+    }
+
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
     {

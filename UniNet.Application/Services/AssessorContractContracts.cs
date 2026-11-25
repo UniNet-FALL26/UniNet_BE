@@ -33,7 +33,7 @@ public sealed record SignAssessorContract(
     [Required, StringLength(64, MinimumLength = 64)] string ContractSha256,
     bool Accepted);
 public sealed record ContractProfile(string CitizenId, string BankName, string BankAccountNumber, string BankAccountHolder);
-public sealed record StoredAssessorContract(string Key, string Sha256);
+public sealed record StoredAssessorContract(string Key, string Sha256, string? Text = null, byte[]? OriginalPdf = null);
 public sealed record AssessorEmailPayload(string Recipient, string Subject, string Body);
 
 public interface IAssessorContractFiles

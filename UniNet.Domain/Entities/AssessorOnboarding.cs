@@ -44,6 +44,8 @@ public sealed class AssessorOnboarding
     public string? TemplateVersion { get; set; }
     public string? ContractStorageKey { get; set; }
     public string? ContractSha256 { get; set; }
+    public string? ContractText { get; set; }
+    public byte[]? ContractOriginalPdf { get; set; }
     public string? SignedName { get; set; }
     public string? SignatureStatement { get; set; }
     public DateTimeOffset? SignedAt { get; set; }
