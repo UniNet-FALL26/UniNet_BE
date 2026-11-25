@@ -34,7 +34,7 @@ public sealed class ProjectTimelinePostgresTests
             db.Accounts.Add(owner); db.Projects.Add(project); await db.SaveChangesAsync();
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"ProjectDetails\" (\"ProjectId\", \"UpdatedAt\") VALUES ({project.Id}, {DateTimeOffset.UtcNow})");
             await migrator.MigrateAsync(); db.ChangeTracker.Clear();
-            var service = new ProjectHubService(db);
+            var service = new ProjectHubService(db, new HubModerationStub(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
             var existing = await service.GetAsync(project.Id, owner.Id, default);
             Assert.Null(existing.Details.StartDate);
             Assert.Null(existing.Details.ActualEndDate); Assert.False(existing.Details.StartDateIsCreationDate);

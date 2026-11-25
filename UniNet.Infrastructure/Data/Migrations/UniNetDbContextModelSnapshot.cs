@@ -4177,9 +4177,9 @@ namespace UniNet.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProjectModerations_LinkResult", "\"LinkResult\" BETWEEN 0 AND 3");
 
-                            t.HasCheckConstraint("CK_ProjectModerations_Purpose", "\"Purpose\" = 0");
+                            t.HasCheckConstraint("CK_ProjectModerations_Purpose", "\"Purpose\" IN (0, 2)");
 
-                            t.HasCheckConstraint("CK_ProjectModerations_Status", "(\"Purpose\" = 0 AND \"Status\" BETWEEN 0 AND 5) OR (\"Purpose\" = 1 AND \"Status\" IN (0,1,4,5,6,7))");
+                            t.HasCheckConstraint("CK_ProjectModerations_Status", "(\"Purpose\" IN (0, 2) AND \"Status\" BETWEEN 0 AND 5) OR (\"Purpose\" = 1 AND \"Status\" IN (0,1,4,5,6,7))");
                         });
                 });
 

@@ -653,7 +653,7 @@ public sealed partial class UniNetDbContext(DbContextOptions<UniNetDbContext> op
             {
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_Status",
-                    "(\"Purpose\" = 0 AND \"Status\" BETWEEN 0 AND 5) OR (\"Purpose\" = 1 AND \"Status\" IN (0,1,4,5,6,7))");
+                    "(\"Purpose\" IN (0, 2) AND \"Status\" BETWEEN 0 AND 5) OR (\"Purpose\" = 1 AND \"Status\" IN (0,1,4,5,6,7))");
 
                 t.HasCheckConstraint(
                     "CK_ProjectModerations_ContentResult",

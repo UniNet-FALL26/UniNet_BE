@@ -505,6 +505,8 @@ public sealed class UtcSqliteModelCustomizer(ModelCustomizerDependencies depende
     public override void Customize(ModelBuilder modelBuilder, DbContext context)
     {
         base.Customize(modelBuilder, context);
+        modelBuilder.Entity<UniNet.Domain.Entities.ProjectModeration>().Property(m => m.Confidence)
+            .HasConversion<double>().HasColumnType("REAL");
         var converter = new ValueConverter<DateTimeOffset, long>(v => v.UtcTicks, v => new DateTimeOffset(v, TimeSpan.Zero));
         foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(e => e.GetProperties()))
             if (property.ClrType == typeof(DateTimeOffset) || property.ClrType == typeof(DateTimeOffset?))

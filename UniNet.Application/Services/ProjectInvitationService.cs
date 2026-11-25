@@ -25,7 +25,9 @@ public sealed class ProjectInvitationService(UniNetDbContext db) : IProjectInvit
             ?? throw new ProjectInvitationException("INVITEE_NOT_FOUND", "Invitee profile not found.", 404);
         RequireActiveStudent(invitee);
         Require(invitee.Id != project.CreatorId, "CANNOT_INVITE_SELF", "You cannot invite yourself to your own project.", 409);
-        Require(ProjectHubService.AllowsFriendInvitations(project),
+        Require(ProjectHubService.AllowsFriendInvitations(project) &&
+            (project.Status != ProjectStatus.Pending || !await db.ProjectModerations.AnyAsync(m =>
+                m.ProjectId == projectId && m.Purpose == ProjectModerationPurpose.ProjectHubSubmission, ct)),
             "INVALID_PROJECT_STATE", "Project cannot receive friend invitations.", 409);
         Require(await db.Friendships.AnyAsync(f => f.Status == FriendshipStatus.Accepted &&
             ((f.RequesterAccountId == accountId && f.ReceiverAccountId == invitee.AccountId) ||

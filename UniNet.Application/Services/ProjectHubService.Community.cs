@@ -41,6 +41,7 @@ public sealed partial class ProjectHubService
             "INVALID_RECRUITMENT_DEADLINE", "Hạn tuyển thành viên phải ở tương lai.");
         await Transaction(async () => {
             var p = await Locked(id, ct); Own(p, actor);
+            if (request.Status == 1) await RequireApprovedSubmission(p, ct);
             Require(request.Status != 1 || p.Status is ProjectStatus.Pending or ProjectStatus.Active,
                 "PROJECT_COMPLETED", "Chỉ dự án chưa bắt đầu hoặc đang thực hiện mới được mở tuyển.", 409);
             var stableIds = positions.Select(x => x.Id).ToArray();
@@ -119,6 +120,7 @@ public sealed partial class ProjectHubService
         var message = Text(request.Message, 4000);
         return await Transaction(async () => {
             var p = await Locked(id, ct);
+            await RequireApprovedSubmission(p, ct);
             HubPosition? position = null;
             string role;
             var recipient = actor;
@@ -224,6 +226,7 @@ public sealed partial class ProjectHubService
                     "PROJECT_COMPLETED", "Dự án hiện không nhận thêm thành viên.", 409);
                 Require(r.User.Account.Status == AccountStatus.Active && r.User.Account.Role == AccountRole.Student,
                     "USER_INACTIVE", "Người nhận không còn tài khoản sinh viên đang hoạt động.", 409);
+                await RequireApprovedSubmission(p, ct);
                 HubPosition? position = null;
                 if (r.RequestType == ProjectRequestType.Apply)
                 {
