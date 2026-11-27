@@ -13,7 +13,7 @@ namespace UniNet.Application.Services;
 public sealed class PortfolioService(UniNetDbContext db)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private sealed record Basic(string? Location, string? Availability, string? ContactEmail, string? CvUrl, PortfolioArticle[]? Articles, double? YearsOfExperience = null, string? Gpa = null);
+    private sealed record Basic(string? Location, string? Availability, string? ContactEmail, string? CvUrl, PortfolioArticle[]? Articles, double? YearsOfExperience = null, string? Gpa = null, string[]? Interests = null);
     private static T? Decode<T>(string? value)
     {
         if (value is null) return default;
@@ -44,6 +44,13 @@ public sealed class PortfolioService(UniNetDbContext db)
     }
     public static void Validate(PortfolioContent p)
     {
+        Items(p.Interests ?? [], PortfolioInterestCatalog.Names.Count, name => {
+            Text(name, 100, true);
+            if (!PortfolioInterestCatalog.Names.Contains(name, StringComparer.Ordinal))
+                throw new AuthException("INVALID_PORTFOLIO_INTERESTS", "Vui lòng chọn sở thích từ danh sách gợi ý.");
+        });
+        if (p.Interests is not null && p.Interests.Distinct(StringComparer.Ordinal).Count() != p.Interests.Length)
+            throw new AuthException("INVALID_PORTFOLIO_INTERESTS", "Danh sách sở thích không được trùng lặp.");
         if (p.YearsOfExperience is < 0 or > 80 || (p.YearsOfExperience.HasValue && !double.IsFinite(p.YearsOfExperience.Value))) throw new AuthException("INVALID_EXPERIENCE", "Số năm kinh nghiệm phải từ 0 đến 80.");
         Text(p.Gpa, 20);
         Text(p.Headline, 255); Text(p.CareerObjective); Text(p.Location, 255); Text(p.Availability, 100); Url(p.CvUrl);
@@ -67,7 +74,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         {
             Headline = c?.Headline, CareerObjective = c?.CareerObjective, Appearance = NormalizeAppearance(Decode<ProfileAppearance>(c?.AppearanceJson) ?? new()), YearsOfExperience = b?.YearsOfExperience, Gpa = b?.Gpa,
             Activities = Decode<PortfolioActivity[]>(c?.ActivitiesJson) ?? [], Languages = Decode<PortfolioLanguage[]>(c?.LanguagesJson) ?? [], Location = b?.Location, Availability = b?.Availability,
-            ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl,
+            ContactEmail = b?.ContactEmail, CvUrl = b?.CvUrl, Interests = b?.Interests ?? [],
             Skills = ResolveSkills(c?.SkillsJson, catalog), Projects = await ResolveProjects(p, ct),
             Experience = Decode<PortfolioMilestone[]>(c?.ExperienceJson) ?? [], Education = Decode<PortfolioMilestone[]>(c?.EducationJson) ?? [],
             Certificates = Decode<PortfolioCertificate[]>(c?.CertificatesJson) ?? [], Articles = b?.Articles ?? [],
@@ -101,6 +108,7 @@ public sealed class PortfolioService(UniNetDbContext db)
             Certificates = hidden.Contains("certificates") ? [] : content.Certificates,
             Activities = hidden.Contains("activities") ? [] : content.Activities,
             Languages = hidden.Contains("languages") ? [] : content.Languages,
+            Interests = hidden.Contains("interests") ? [] : content.Interests,
             Articles = hidden.Contains("articles") ? [] : content.Articles,
             YearsOfExperience = hidden.Contains("stats") || hidden.Contains("journey") ? null : content.YearsOfExperience,
             Gpa = hidden.Contains("stats") || hidden.Contains("journey") ? null : content.Gpa
@@ -150,7 +158,8 @@ public sealed class PortfolioService(UniNetDbContext db)
         c.Headline = request.Headline?.Trim(); c.CareerObjective = request.CareerObjective?.Trim();
         // Preserve unrelated existing basic metadata and extracurricular activities.
         var basic = Decode<JsonObject>(c.BasicInfoJson) ?? new JsonObject();
-        var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles, request.YearsOfExperience, request.Gpa), Json)!.AsObject();
+        var interests = request.Interests ?? Decode<Basic>(c.BasicInfoJson)?.Interests ?? [];
+        var changes = JsonSerializer.SerializeToNode(new Basic(request.Location, request.Availability, request.ContactEmail, request.CvUrl, request.Articles, request.YearsOfExperience, request.Gpa, interests), Json)!.AsObject();
         foreach (var property in changes) basic[property.Key] = property.Value?.DeepClone();
         c.BasicInfoJson = basic.ToJsonString(Json);
         c.SkillsJson = JsonSerializer.Serialize(skills, Json); c.ProjectsJson = JsonSerializer.Serialize(request.Projects.Select(x => x.ProjectId.HasValue ? new PortfolioProject { ProjectId = x.ProjectId, PersonalContribution = x.PersonalContribution, Featured = x.Featured } : x with { Verification = null, Role = null, CompletedAt = null }), Json);
@@ -305,6 +314,7 @@ public sealed class PortfolioService(UniNetDbContext db)
         if (hidden.Contains("certificates")) content = content with { Certificates = [] };
         if (hidden.Contains("activities")) content = content with { Activities = [] };
         if (hidden.Contains("languages")) content = content with { Languages = [] };
+        if (hidden.Contains("interests")) content = content with { Interests = [] };
         if (hidden.Contains("articles")) content = content with { Articles = [] };
         if (hidden.Contains("stats") || hidden.Contains("journey")) content = content with { YearsOfExperience = null, Gpa = null };
         return response with { Profile = identity, Portfolio = content, SkillCatalog = null };

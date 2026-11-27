@@ -26,6 +26,29 @@ namespace UniNet.Tests;
 // Real HTTP controllers, JWT authorization and persistent SQLite; never uses a real account/database.
 public sealed class PortfolioHttpTests
 {
+    [Fact]
+    public async Task InterestsSaveThroughOwnerEditorAndRejectUnauthorizedOrInvalidWrites()
+    {
+        await using var server = await TestApi.Start();
+        using var owner = server.Client(server.OwnerId, "Student");
+        using var anonymous = server.Client();
+        using var company = server.Client(server.CompanyId, "Partner");
+        using var stranger = server.Client(Guid.NewGuid(), "Student");
+        var original = (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!;
+        string[] interests = ["Du lịch", "Nhiếp ảnh", "Cờ vua"];
+        var payload = new PortfolioEditorRequest(new("HTTP Owner", "Owner", null, null, null), original.Portfolio with { Interests = interests });
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PutAsJsonAsync("api/profile/portfolio/editor/me", payload)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await company.PutAsJsonAsync("api/profile/portfolio/editor/me", payload)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.PutAsJsonAsync("api/profile/portfolio/editor/me", payload)).StatusCode);
+        (await owner.PutAsJsonAsync("api/profile/portfolio/editor/me", payload)).EnsureSuccessStatusCode();
+        Assert.Equal(interests, (await anonymous.GetFromJsonAsync<PortfolioResponse>($"api/profile/portfolio/{server.ProfileId}"))!.Portfolio.Interests);
+        var invalid = payload with { Profile = payload.Profile with { FullName = "Must not save" }, Portfolio = payload.Portfolio with { Interests = ["Not in catalog"] } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync("api/profile/portfolio/editor/me", invalid)).StatusCode);
+        var saved = (await owner.GetFromJsonAsync<PortfolioResponse>("api/profile/portfolio/me"))!;
+        Assert.Equal(interests, saved.Portfolio.Interests);
+        Assert.Equal("HTTP Owner", saved.Profile.FullName);
+    }
+
     private sealed class BusyPortraitProcessor : IPortraitProcessor
     {
         public Task<byte[]> Process(byte[] source, CancellationToken ct)

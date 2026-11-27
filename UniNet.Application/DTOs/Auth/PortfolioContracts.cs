@@ -57,6 +57,7 @@ public sealed record PortfolioSocial
 }
 public sealed record PortfolioContent
 {
+    public string[]? Interests { get; init; }
     public double? YearsOfExperience { get; init; }
     public string? Gpa { get; init; }
     public string? Headline { get; init; }
@@ -97,7 +98,7 @@ public sealed record ProfileAppearanceSettings
     public string Template { get; init; } = "developer-modern";
     public string Theme { get; init; } = "blue";
     public string Font { get; init; } = "Inter";
-    public string[] SectionOrder { get; init; } = ["featured-projects", "stats", "skills", "journey", "other-projects", "certificates", "activities", "languages", "articles"];
+    public string[] SectionOrder { get; init; } = ["featured-projects", "stats", "skills", "journey", "other-projects", "certificates", "activities", "languages", "interests", "articles"];
     public string[] HiddenSections { get; init; } = [];
 }
 
