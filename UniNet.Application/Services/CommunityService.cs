@@ -26,7 +26,12 @@ public partial class CommunityService : ICommunityService
         _imageStorage = imageStorage;
     }
 
-    public async Task<List<PostResponse>> GetFeedAsync(Guid currentUserId, int page, int pageSize, Guid? authorUserId = null)
+    public async Task<List<PostResponse>> GetFeedAsync(
+        Guid currentUserId,
+        int page,
+        int pageSize,
+        Guid? authorUserId = null,
+        string? seed = null)
     {
         // 1. Ánh xạ từ AccountId (currentUserId) sang UserProfile.Id (actualUserId)
         Guid actualUserId = Guid.Empty;
@@ -42,16 +47,73 @@ public partial class CommunityService : ICommunityService
             }
         }
 
-        var postsQuery = _context.CommunityPosts
+        var baseQuery = _context.CommunityPosts
+            .Where(p => !p.IsDeleted && p.Status == (short)CommunityContentStatus.Published &&
+                (authorUserId == null || p.AuthorUserId == authorUserId));
+
+        // 2. Xáo trộn ngẫu nhiên theo seed khi xem bảng tin chung (không lọc theo tác giả)
+        if (authorUserId == null && !string.IsNullOrWhiteSpace(seed))
+        {
+            var allIds = await baseQuery
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            var pageIds = allIds
+                .OrderBy(id => ComputeDeterministicHash(seed, id))
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            if (pageIds.Count == 0)
+                return new List<PostResponse>();
+
+            var pageQuery = _context.CommunityPosts
+                .Include(p => p.AuthorUser)
+                .Include(p => p.Media)
+                .Where(p => pageIds.Contains(p.Id));
+
+            var items = await PostResponses(pageQuery, actualUserId).ToListAsync();
+
+            // Giữ đúng thứ tự đã xáo trộn vì câu lệnh SQL `WHERE Id IN (...)` không bảo toàn thứ tự
+            var orderMap = pageIds
+                .Select((id, index) => new { id, index })
+                .ToDictionary(x => x.id, x => x.index);
+
+            return items
+                .OrderBy(x => orderMap.GetValueOrDefault(x.Id, int.MaxValue))
+                .ToList();
+        }
+
+        // 3. Fallback: Sắp xếp mới nhất trước nếu xem trang cá nhân hoặc không truyền seed
+        var postsQuery = baseQuery
             .Include(p => p.AuthorUser)
             .Include(p => p.Media)
-            .Where(p => !p.IsDeleted && p.Status == (short)CommunityContentStatus.Published &&
-                (authorUserId == null || p.AuthorUserId == authorUserId))
             .OrderByDescending(p => p.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize);
 
         return await PostResponses(postsQuery, actualUserId).ToListAsync();
+    }
+
+    // Dùng FNV-1a hash thay cho string.GetHashCode() vì GetHashCode() thay đổi mỗi lần restart server
+    private static uint ComputeDeterministicHash(string seed, Guid postId)
+    {
+        const uint fnvPrime = 16777619;
+        uint hash = 2166136261;
+
+        foreach (char c in seed)
+        {
+            hash ^= c;
+            hash *= fnvPrime;
+        }
+
+        foreach (byte b in postId.ToByteArray())
+        {
+            hash ^= b;
+            hash *= fnvPrime;
+        }
+
+        return hash;
     }
 
     public async Task<List<PostResponse>> GetOwnPostsAsync(Guid currentUserId, int page, int pageSize, CancellationToken ct = default)
