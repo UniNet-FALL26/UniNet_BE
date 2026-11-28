@@ -23,11 +23,11 @@ public class CommunityController : ControllerBase
     }
 
     [HttpGet("posts")]
-    public async Task<IActionResult> GetFeed([FromQuery] int page = 1, [FromQuery] int pageSize = 10, [FromQuery] Guid? authorUserId = null)
+    public async Task<IActionResult> GetFeed([FromQuery] int page = 1, [FromQuery] int pageSize = 10, [FromQuery] Guid? authorUserId = null, [FromQuery] string? seed = null)
     {
         try
         {
-            var posts = await _communityService.GetFeedAsync(GetCurrentUserId(), page, pageSize, authorUserId);
+            var posts = await _communityService.GetFeedAsync(GetCurrentUserId(), page, pageSize, authorUserId, seed);
             return Ok(posts);
         }
         catch (Exception ex)
