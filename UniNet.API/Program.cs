@@ -57,6 +57,7 @@ var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationExceptio
 if (Encoding.UTF8.GetByteCount(key) < 32) throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
 builder.Services.AddDbContext<UniNetDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddSingleton<IGoogleTokenVerifier, GoogleTokenVerifier>();
 builder.Services.AddScoped<MessagingService>();
 builder.Services.AddHttpClient("ChatPush", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<IChatPushSender, UniNet.API.Services.FcmChatPushSender>();

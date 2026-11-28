@@ -11,6 +11,23 @@ namespace UniNet.Tests;
 
 public sealed class AuthTests
 {
+    [Theory]
+    [InlineData(AccountRole.Partner)]
+    [InlineData(AccountRole.Assessor)]
+    [InlineData(AccountRole.Admin)]
+    public async Task GoogleRejectsNonStudentRoleBeforeTokenVerification(AccountRole role)
+    {
+        var (connection, db, auth, _) = await Setup();
+        await using (connection) await using (db)
+        {
+            var error = await Assert.ThrowsAsync<AuthException>(() => auth.Google(new("not-a-token", role), default));
+            Assert.Equal("GOOGLE_STUDENT_ONLY", error.Code);
+            Assert.Equal(403, error.Status);
+            Assert.Empty(await db.Accounts.ToListAsync());
+            Assert.Empty(await db.RefreshTokens.ToListAsync());
+        }
+    }
+
     [Fact]
     public async Task LogoutRevokesOnlyThatDevicesPushAndLogoutAllRevokesTheRest()
     {

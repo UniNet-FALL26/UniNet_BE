@@ -8,7 +8,7 @@ public record RegisterPartnerRequest(string OrganizationName, string Email, stri
 public record RegisterAdminRequest(string FullName, string Email, string Password, string ConfirmPassword, string? Nickname = null);
 public record CreateStaffAccountRequest(string FullName, string Email, string Password, string ConfirmPassword, AccountRole Role, string? Nickname = null);
 public record LoginRequest(string Email, string Password, bool RememberMe = false, string? DeviceId = null, string? DeviceName = null);
-public record GoogleLoginRequest(string IdToken, AccountRole Role = AccountRole.Student, PartnerType? PartnerType = null);
+public record GoogleLoginRequest(string IdToken, AccountRole Role = AccountRole.Student, PartnerType? PartnerType = null, string? DeviceId = null, string? DeviceName = null);
 public record RefreshRequest(string RefreshToken);
 public record StudentProfileRequest(string FullName, string? AvatarUrl, string? CoverUrl, string? Bio, string? UniversityName, string? Major, string? StudentCode, string? Nickname = null);
 public sealed record PartnerIntroductionDetails(string? ImageUrl, string? FoundedOn, string? EmployeeRange, string[]? Branches, string[]? GalleryUrls);

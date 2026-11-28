@@ -15,7 +15,7 @@ using UniNet.Domain;
 
 namespace UniNet.Application.Services;
 
-public sealed class AuthService(UniNetDbContext db, IConfiguration configuration)
+public sealed class AuthService(UniNetDbContext db, IConfiguration configuration, IGoogleTokenVerifier? googleTokenVerifier = null)
 {
     private readonly PasswordHasher<Account> hasher = new();
     private static string Email(string value) => value.Trim().ToLowerInvariant();
@@ -143,32 +143,42 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
     }
     public async Task<AuthResponse> Google(GoogleLoginRequest request, CancellationToken ct)
     {
+        RequireGoogleStudent(request.Role);
         var clientIds = configuration.GetSection("Google:ClientIds").Get<string[]>() ?? [];
+        clientIds = clientIds.Where(id => !string.IsNullOrWhiteSpace(id)).ToArray();
         if (clientIds.Length == 0) throw new AuthException("GOOGLE_NOT_CONFIGURED", "Google Sign-In is not configured.", 503);
+        if (string.IsNullOrWhiteSpace(request.IdToken) || request.IdToken.Length > 16384)
+            throw new AuthException("INVALID_GOOGLE_TOKEN", "Google token is invalid.", 401);
         GoogleJsonWebSignature.Payload payload;
-        try { payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, new GoogleJsonWebSignature.ValidationSettings { Audience = clientIds }); }
+        try { payload = await (googleTokenVerifier ?? new GoogleTokenVerifier()).Verify(request.IdToken, clientIds).WaitAsync(ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { throw new AuthException("INVALID_GOOGLE_TOKEN", "Google token is invalid.", 401); }
-        Require(payload.EmailVerified && ValidEmail(payload.Email), "INVALID_GOOGLE_TOKEN", "Google token is invalid.");
+        Require(payload.EmailVerified && !string.IsNullOrWhiteSpace(payload.Email) && ValidEmail(payload.Email)
+            && !string.IsNullOrWhiteSpace(payload.Subject), "INVALID_GOOGLE_TOKEN", "Google token is invalid.");
         var email = Email(payload.Email);
         var displayName = Optional(payload.Name) ?? email;
         if (displayName.Length > 255) displayName = displayName[..255];
         var account = await db.Accounts.Include(x => x.Profile).SingleOrDefaultAsync(x => x.GoogleId == payload.Subject, ct);
+        if (account is not null) RequireGoogleStudent(account.Role);
         if (account is null)
         {
             account = await db.Accounts.Include(x => x.Profile).SingleOrDefaultAsync(x => x.Email == email, ct);
             if (account is null)
             {
-                Require(request.Role is AccountRole.Student or AccountRole.Partner, "FORBIDDEN_ROLE", "Invalid role.");
-                Require(request.Role != AccountRole.Partner || request.PartnerType is null || Enum.IsDefined(request.PartnerType.Value), "INVALID_PARTNER_TYPE", "Invalid partner type.");
-                account = new Account { Email = email, GoogleId = payload.Subject, GoogleEmail = email, EmailVerified = true, Role = request.Role };
-                await SaveRegistration(account, new UserProfile { FullName = displayName, Nickname = Nickname(null, displayName), AvatarUrl = Optional(payload.Picture), PartnerType = request.Role == AccountRole.Partner ? request.PartnerType : null }, ct);
+                account = new Account { Email = email, GoogleId = payload.Subject, GoogleEmail = email, EmailVerified = true, Role = AccountRole.Student };
+                await SaveRegistration(account, new UserProfile { FullName = displayName, Nickname = Nickname(null, displayName), AvatarUrl = Optional(payload.Picture) }, ct);
             }
             else
             {
+                RequireGoogleStudent(account.Role);
                 if (account.GoogleId is not null && account.GoogleId != payload.Subject) throw new AuthException("INVALID_GOOGLE_TOKEN", "Google token is invalid.", 401);
                 CheckStatus(account);
                 account.GoogleId = payload.Subject; account.GoogleEmail = email; account.EmailVerified = true;
-                if (account.Profile is null) account.Profile = new UserProfile { FullName = displayName, Nickname = Nickname(null, displayName) };
+                if (account.Profile is null)
+                {
+                    account.Profile = new UserProfile { FullName = displayName, Nickname = Nickname(null, displayName) };
+                    db.UserProfiles.Add(account.Profile);
+                }
                 try { await db.SaveChangesAsync(ct); }
                 catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
                 { throw new AuthException("EMAIL_ALREADY_EXISTS", "Email is already in use.", 409); }
@@ -176,7 +186,12 @@ public sealed class AuthService(UniNetDbContext db, IConfiguration configuration
         }
         CheckStatus(account);
         account.LastLoginAt = DateTimeOffset.UtcNow;
-        return await Issue(account, null, null, ct);
+        return await Issue(account, request.DeviceId, request.DeviceName, ct);
+    }
+    private static void RequireGoogleStudent(AccountRole role)
+    {
+        if (role != AccountRole.Student)
+            throw new AuthException("GOOGLE_STUDENT_ONLY", "Google sign-in is only available to students.", 403);
     }
     public async Task<AuthResponse> Refresh(RefreshRequest request, CancellationToken ct)
     {
